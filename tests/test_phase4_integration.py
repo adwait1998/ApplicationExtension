@@ -283,6 +283,63 @@ def test_dispatch_drift_archives_and_falls_through_to_record(job, isolated_skill
     assert status == "applied"
 
 
+def test_dispatch_skill_flow_crash_falls_back_to_llm(job, isolated_skills_dir):
+    """2026-05-15 regression: a recorded (non-replay-grade MCP) skill made
+    run_skill_flow crash with failed:skill_flow_AttributeError at 0s, 0
+    submits — and the dispatcher returned that hard failure instead of
+    falling back to the LLM that had worked before. Now ANY pre-submission
+    skill-flow failure must archive the broken skill AND fall back to
+    run_job (the proven path)."""
+    save_skill(_make_skill("figma"), isolated_skills_dir / "figma.yaml")
+    run_job = _RunJobSpy(status="applied")
+    skill_flow = _SkillFlowSpy(status="failed:skill_flow_AttributeError",
+                                duration_ms=0, prefill=None)
+
+    status, dur, prefill = dispatch_apply(
+        job=job, port=9222, worker_id=0,
+        model="haiku", dry_run=False, verify_threshold=0.75,
+        run_job_fn=run_job,
+        run_job_kwargs={"model": "haiku", "dry_run": False, "retry_count": 0,
+                        "profile": {"personal": {"first_name": "Nida"}}},
+        skill_flow_fn=skill_flow,
+        flag_fn=lambda: True,
+    )
+    assert len(skill_flow.calls) == 1
+    assert len(run_job.calls) == 1, "must fall back to LLM, not hard-fail"
+    assert run_job.calls[0].get("recorder") is not None
+    # The crashing skill must be archived so it stops re-crashing future applies
+    assert not (isolated_skills_dir / "figma.yaml").exists()
+    assert len(list((isolated_skills_dir / "_archive").glob("figma.*.yaml"))) == 1
+    # Final result is the LLM's success, not the skill crash
+    assert status == "applied"
+
+
+def test_dispatch_skill_flow_submitted_unverified_is_terminal(job, isolated_skills_dir):
+    """Inverse guard: if the skill flow ACTUALLY submitted but the verifier
+    couldn't confirm (needs_review:unverified_submission), the dispatcher
+    must NOT fall back to the LLM — re-running would double-submit. The
+    skill flow owns this outcome."""
+    save_skill(_make_skill("figma"), isolated_skills_dir / "figma.yaml")
+    run_job = _RunJobSpy(status="applied")
+    skill_flow = _SkillFlowSpy(status="needs_review:unverified_submission",
+                                duration_ms=300, prefill={"x": 1})
+
+    status, dur, prefill = dispatch_apply(
+        job=job, port=9222, worker_id=0,
+        model="haiku", dry_run=False, verify_threshold=0.75,
+        run_job_fn=run_job,
+        run_job_kwargs={"model": "haiku", "dry_run": False, "retry_count": 0,
+                        "profile": {"personal": {"first_name": "Nida"}}},
+        skill_flow_fn=skill_flow,
+        flag_fn=lambda: True,
+    )
+    assert len(skill_flow.calls) == 1
+    assert len(run_job.calls) == 0, "must NOT re-run LLM after a real submit"
+    assert status == "needs_review:unverified_submission"
+    # Skill file NOT archived — it submitted fine, verifier was just unsure
+    assert (isolated_skills_dir / "figma.yaml").exists()
+
+
 def test_dispatch_records_skill_on_success(job, isolated_skills_dir, monkeypatch):
     """Flag ON + no skill + run_job returns 'applied': new YAML appears on disk."""
     monkeypatch.setattr(config, "load_profile", lambda: {"personal": {"first_name": "Nida"}})

@@ -354,11 +354,30 @@ def dispatch_apply(
             skill=skill, job=job, port=port, worker_id=worker_id,
             model=model, dry_run=dry_run, verify_threshold=verify_threshold,
         )
-        if status != DRIFT_FALL_THROUGH:
+        # The skill flow only OWNS the outcome if it cleanly applied OR it
+        # actually submitted the form (then the verifier ran). Those are the
+        # only states where re-running the LLM would be wrong (double-submit
+        # / discard a real success).
+        #
+        # Every other outcome — exceptions (failed:skill_flow_*), replay
+        # engine failure (failed:skill_replay_*), submit failure
+        # (failed:skill_submit_*), a failed Tier-2 patch, or live-DOM drift —
+        # means NO application was submitted. MCP-recorded skills are not
+        # replay-grade (documented v1 limitation), so a broken skill MUST
+        # NOT hard-fail the job: archive it (so we stop re-crashing on it
+        # for every future apply to this company) and fall back to the
+        # proven LLM apply below. This was the dominant yield-killer in the
+        # 2026-05-15 batch — recording a skill made subsequent same-company
+        # applies crash at 0s with skill_flow_attributeerror.
+        SKILL_OWNS_RESULT = {"applied", "needs_review:unverified_submission"}
+        if status in SKILL_OWNS_RESULT:
             if isinstance(prefill, dict):
                 prefill.setdefault("skill_used", skill_path(skill.company).name)
             return status, duration_ms, prefill
-        # Live-DOM drift: archive and fall through to record mode.
+        log.info(
+            "skill flow non-terminal (%s) for %s — archiving skill and "
+            "falling back to LLM apply", status, company,
+        )
         archive_stale_skill(company)
 
     # No skill (or just archived). Attach a recorder so the next apply is Tier 1.
