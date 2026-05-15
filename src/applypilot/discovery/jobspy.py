@@ -407,20 +407,35 @@ def _full_crawl(
     total_errors = 0
     completed = 0
 
-    for s in searches:
-        result = _run_one_search(
-            s, sites, results_per_site, hours_old,
-            proxy_config, defaults, max_retries,
-            accept_locs, reject_locs, glassdoor_map,
-        )
-        completed += 1
-        total_new += result["new"]
-        total_existing += result["existing"]
-        total_errors += result["errors"]
+    # Parallelize the (query x location) loop. Each call is HTTP-bound
+    # against multiple job boards; running 4 in parallel cuts total wall
+    # time by ~4x with negligible DB write contention.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        if completed % 5 == 0 or completed == len(searches):
-            log.info("Progress: %d/%d queries done (%d new, %d dupes, %d errors)",
-                     completed, len(searches), total_new, total_existing, total_errors)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {
+            pool.submit(
+                _run_one_search,
+                s, sites, results_per_site, hours_old,
+                proxy_config, defaults, max_retries,
+                accept_locs, reject_locs, glassdoor_map,
+            ): s
+            for s in searches
+        }
+        for fut in as_completed(futures):
+            try:
+                result = fut.result()
+            except Exception as e:
+                log.error("Search failed: %s", e)
+                result = {"new": 0, "existing": 0, "errors": 1}
+            completed += 1
+            total_new += result.get("new", 0)
+            total_existing += result.get("existing", 0)
+            total_errors += result.get("errors", 0)
+
+            if completed % 5 == 0 or completed == len(searches):
+                log.info("Progress: %d/%d queries done (%d new, %d dupes, %d errors)",
+                         completed, len(searches), total_new, total_existing, total_errors)
 
     # Final stats
     conn = get_connection()

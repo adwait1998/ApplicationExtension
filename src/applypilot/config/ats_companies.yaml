@@ -1,0 +1,56 @@
+# Direct ATS company registry for ApplyPilot
+# Used by discovery/ats_boards.py to hit public JSON APIs of Greenhouse,
+# Lever, and Ashby job boards. Add companies whose career pages you'd
+# actually apply to.
+#
+# To find a company's token:
+#   - Greenhouse: visit boards.greenhouse.io/<token>
+#   - Lever:      visit jobs.lever.co/<token>
+#   - Ashby:      visit jobs.ashbyhq.com/<token>
+#
+# Title pre-filter: only postings whose title contains one of these
+# substrings (case-insensitive) are stored. Tune to your target role.
+
+title_keywords:
+  - designer
+  - design
+  - "ux"
+  - "ui"
+  - user experience
+  - user research
+  - researcher
+  - product
+
+greenhouse:
+  - figma
+  - notion
+  - stripe
+  - airbnb
+  - gitlab
+  - cloudflare
+  - mongodb
+  - reddit
+  - pinterest
+  - square
+  - discord
+  - asana
+  - dropbox
+  - coinbase
+  - robinhood
+  - duolingo
+  - chime
+  - instacart
+  - affirm
+
+lever:
+  - plaid
+
+ashby:
+  - vercel
+  - linear
+  - replit
+  - mistral
+  - character
+  - posthog
+  - openai
+  - cursor

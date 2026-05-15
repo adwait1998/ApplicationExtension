@@ -13,6 +13,7 @@ Usage (via CLI):
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -59,42 +60,79 @@ _UPSTREAM: dict[str, str | None] = {
 # Individual stage runners
 # ---------------------------------------------------------------------------
 
-def _run_discover(workers: int = 1) -> dict:
-    """Stage: Job discovery — JobSpy, Workday, and smart-extract scrapers."""
-    stats: dict = {"jobspy": None, "workday": None, "smartextract": None}
+VALID_SOURCES = ("jobspy", "workday", "ats_boards", "smartextract")
+
+
+def _run_discover(workers: int = 1, sources: list[str] | None = None) -> dict:
+    """Stage: Job discovery — JobSpy, Workday, ATS boards, smart-extract.
+
+    Args:
+        workers: Concurrency for sub-stages that support it.
+        sources: Which sub-stages to run. None = all enabled by default.
+                 Valid: "jobspy", "workday", "ats_boards", "smartextract".
+    """
+    enabled = set(sources) if sources else {"jobspy", "workday", "ats_boards"}
+    if "smartextract" not in enabled and os.environ.get("APPLYPILOT_SMART_EXTRACT") == "1":
+        enabled.add("smartextract")
+
+    stats: dict = {}
 
     # JobSpy
-    console.print("  [cyan]JobSpy full crawl...[/cyan]")
-    try:
-        from applypilot.discovery.jobspy import run_discovery
-        run_discovery()
-        stats["jobspy"] = "ok"
-    except Exception as e:
-        log.error("JobSpy crawl failed: %s", e)
-        console.print(f"  [red]JobSpy error:[/red] {e}")
-        stats["jobspy"] = f"error: {e}"
+    if "jobspy" in enabled:
+        console.print("  [cyan]JobSpy full crawl...[/cyan]")
+        try:
+            from applypilot.discovery.jobspy import run_discovery
+            run_discovery()
+            stats["jobspy"] = "ok"
+        except Exception as e:
+            log.error("JobSpy crawl failed: %s", e)
+            console.print(f"  [red]JobSpy error:[/red] {e}")
+            stats["jobspy"] = f"error: {e}"
+    else:
+        stats["jobspy"] = "skipped"
 
     # Workday corporate scraper
-    console.print("  [cyan]Workday corporate scraper...[/cyan]")
-    try:
-        from applypilot.discovery.workday import run_workday_discovery
-        run_workday_discovery(workers=workers)
-        stats["workday"] = "ok"
-    except Exception as e:
-        log.error("Workday scraper failed: %s", e)
-        console.print(f"  [red]Workday error:[/red] {e}")
-        stats["workday"] = f"error: {e}"
+    if "workday" in enabled:
+        console.print("  [cyan]Workday corporate scraper...[/cyan]")
+        try:
+            from applypilot.discovery.workday import run_workday_discovery
+            run_workday_discovery(workers=workers)
+            stats["workday"] = "ok"
+        except Exception as e:
+            log.error("Workday scraper failed: %s", e)
+            console.print(f"  [red]Workday error:[/red] {e}")
+            stats["workday"] = f"error: {e}"
+    else:
+        stats["workday"] = "skipped"
 
-    # Smart extract
-    console.print("  [cyan]Smart extract (AI-powered scraping)...[/cyan]")
-    try:
-        from applypilot.discovery.smartextract import run_smart_extract
-        run_smart_extract(workers=workers)
-        stats["smartextract"] = "ok"
-    except Exception as e:
-        log.error("Smart extract failed: %s", e)
-        console.print(f"  [red]Smart extract error:[/red] {e}")
-        stats["smartextract"] = f"error: {e}"
+    # Greenhouse/Lever/Ashby company boards (direct JSON APIs)
+    if "ats_boards" in enabled:
+        console.print("  [cyan]ATS boards (Greenhouse/Lever/Ashby)...[/cyan]")
+        try:
+            from applypilot.discovery.ats_boards import run_ats_boards_discovery
+            run_ats_boards_discovery(workers=workers)
+            stats["ats_boards"] = "ok"
+        except Exception as e:
+            log.error("ATS boards crawl failed: %s", e)
+            console.print(f"  [red]ATS boards error:[/red] {e}")
+            stats["ats_boards"] = f"error: {e}"
+    else:
+        stats["ats_boards"] = "skipped"
+
+    # Smart extract — opt-in only; replaced by ats_boards which hits JSON
+    # APIs directly (~50x faster, no LLM cost).
+    if "smartextract" in enabled:
+        console.print("  [cyan]Smart extract (AI-powered scraping)...[/cyan]")
+        try:
+            from applypilot.discovery.smartextract import run_smart_extract
+            run_smart_extract(workers=workers)
+            stats["smartextract"] = "ok"
+        except Exception as e:
+            log.error("Smart extract failed: %s", e)
+            console.print(f"  [red]Smart extract error:[/red] {e}")
+            stats["smartextract"] = f"error: {e}"
+    else:
+        stats["smartextract"] = "skipped"
 
     return stats
 
@@ -221,7 +259,6 @@ class _StageTracker:
 
 # SQL to count pending work for each stage
 _PENDING_SQL: dict[str, str] = {
-    "enrich": "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL",
     "score":  "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL",
     "tailor": (
         "SELECT COUNT(*) FROM jobs WHERE fit_score >= ? "
@@ -231,12 +268,10 @@ _PENDING_SQL: dict[str, str] = {
     ),
     "cover": (
         "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL "
+        "AND fit_score >= ? "
+        "AND full_description IS NOT NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
         "AND COALESCE(cover_attempts, 0) < 5"
-    ),
-    "pdf": (
-        "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL "
-        "AND tailored_resume_path LIKE '%.txt'"
     ),
 }
 
@@ -246,6 +281,33 @@ _STREAM_POLL_INTERVAL = 10
 
 def _count_pending(stage: str, min_score: int = 7) -> int:
     """Count pending work items for a stage."""
+    if stage == "enrich":
+        from applypilot.enrichment.detail import SKIP_DETAIL_SITES
+
+        conn = get_connection()
+        if not SKIP_DETAIL_SITES:
+            return conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL"
+            ).fetchone()[0]
+
+        placeholders = ",".join("?" for _ in SKIP_DETAIL_SITES)
+        return conn.execute(
+            f"SELECT COUNT(*) FROM jobs "
+            f"WHERE detail_scraped_at IS NULL AND site NOT IN ({placeholders})",
+            tuple(SKIP_DETAIL_SITES),
+        ).fetchone()[0]
+
+    if stage == "pdf":
+        from applypilot.config import TAILORED_DIR
+
+        if not TAILORED_DIR.exists():
+            return 0
+        return sum(
+            1
+            for path in TAILORED_DIR.glob("*.txt")
+            if not path.name.endswith("_JOB.txt") and not path.with_suffix(".pdf").exists()
+        )
+
     sql = _PENDING_SQL.get(stage)
     if sql is None:
         return 0
@@ -262,6 +324,7 @@ def _run_stage_streaming(
     min_score: int = 7,
     workers: int = 1,
     validation_mode: str = "normal",
+    sources: list[str] | None = None,
 ) -> None:
     """Run a single stage in streaming mode: loop until upstream done + no work.
 
@@ -276,6 +339,8 @@ def _run_stage_streaming(
         kwargs["validation_mode"] = validation_mode
     if stage in ("discover", "enrich"):
         kwargs["workers"] = workers
+    if stage == "discover" and sources is not None:
+        kwargs["sources"] = sources
 
     upstream = _UPSTREAM[stage]
 
@@ -324,7 +389,8 @@ def _run_stage_streaming(
 # ---------------------------------------------------------------------------
 
 def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
-                    validation_mode: str = "normal") -> dict:
+                    validation_mode: str = "normal",
+                    sources: list[str] | None = None) -> dict:
     """Execute stages one at a time (original behavior)."""
     results: list[dict] = []
     errors: dict[str, str] = {}
@@ -347,6 +413,8 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
                 kwargs["validation_mode"] = validation_mode
             if name in ("discover", "enrich"):
                 kwargs["workers"] = workers
+            if name == "discover" and sources is not None:
+                kwargs["sources"] = sources
             result = runner(**kwargs)
             elapsed = time.time() - t0
 
@@ -378,7 +446,8 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
 
 
 def _run_streaming(ordered: list[str], min_score: int, workers: int = 1,
-                   validation_mode: str = "normal") -> dict:
+                   validation_mode: str = "normal",
+                   sources: list[str] | None = None) -> dict:
     """Execute stages concurrently with DB as conveyor belt."""
     tracker = _StageTracker()
     stop_event = threading.Event()
@@ -400,7 +469,7 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1,
         start_times[name] = time.time()
         t = threading.Thread(
             target=_run_stage_streaming,
-            args=(name, tracker, stop_event, min_score, workers, validation_mode),
+            args=(name, tracker, stop_event, min_score, workers, validation_mode, sources),
             name=f"stage-{name}",
             daemon=True,
         )
@@ -448,6 +517,7 @@ def run_pipeline(
     stream: bool = False,
     workers: int = 1,
     validation_mode: str = "normal",
+    sources: list[str] | None = None,
 ) -> dict:
     """Run pipeline stages.
 
@@ -498,10 +568,12 @@ def run_pipeline(
     # Execute
     if stream:
         result = _run_streaming(ordered, min_score, workers=workers,
-                                validation_mode=validation_mode)
+                                validation_mode=validation_mode,
+                                sources=sources)
     else:
         result = _run_sequential(ordered, min_score, workers=workers,
-                                 validation_mode=validation_mode)
+                                 validation_mode=validation_mode,
+                                 sources=sources)
 
     # Summary table
     console.print(f"\n{'=' * 70}")

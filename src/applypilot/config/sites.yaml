@@ -4,10 +4,22 @@
 # Use {query_encoded} placeholder for search terms (URL-encoded).
 
 # ── Manual-Only ATS Domains ──────────────────────────────────────────────
-# These ATS platforms have unsolvable CAPTCHAs. Jobs routing through them
-# are flagged as "manual" during apply — bot skips, user applies by hand.
+# These ATS platforms have unsolvable CAPTCHAs OR are aggregator Easy-Apply
+# flows we deliberately skip — the user wants meaningful applications via
+# the company's own ATS, not aggregator quick-apply. Jobs routing through
+# these are flagged as "manual" during apply — bot skips, user can apply
+# by hand if they want, otherwise it just stays out of the queue.
 manual_ats:
-  - "ibegin.tcsapps.com"       # TCS iBegin — unsolvable CAPTCHA every time
+  - "ibegin.tcsapps.com"           # TCS iBegin — unsolvable CAPTCHA every time
+  # Aggregator Easy-Apply / Quick-Apply flows (skip; bot only applies on company portal)
+  - "linkedin.com/jobs/view"       # LinkedIn Easy Apply iframe
+  - "linkedin.com/jobs/collections"
+  - "indeed.com/viewjob"            # Indeed Quick Apply
+  - "indeed.com/apply"
+  - "glassdoor.com/job-listing"     # Glassdoor in-page apply
+  - "glassdoor.com/Job/"
+  - "ziprecruiter.com/jobs/"        # ZipRecruiter 1-Click Apply
+  - "ziprecruiter.com/c/"
 
 # ── Blocked sites — too problematic for automation ───────────────────────
 blocked:

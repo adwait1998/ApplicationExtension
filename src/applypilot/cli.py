@@ -97,13 +97,34 @@ def run(
             "lenient: banned words ignored, LLM judge skipped (fastest, fewest API calls)."
         ),
     ),
+    source: Optional[str] = typer.Option(
+        None, "--source",
+        help=(
+            "Comma-separated discovery sub-sources to run within the discover stage. "
+            "Valid: jobspy, workday, ats_boards, smartextract. "
+            "Default: jobspy + workday + ats_boards (smartextract opt-in). "
+            "Example: --source ats_boards   (only Greenhouse/Lever/Ashby)"
+        ),
+    ),
 ) -> None:
     """Run pipeline stages: discover, enrich, score, tailor, cover, pdf."""
     _bootstrap()
 
-    from applypilot.pipeline import run_pipeline
+    from applypilot.pipeline import run_pipeline, VALID_SOURCES
 
     stage_list = stages if stages else ["all"]
+
+    # Parse --source filter
+    sources: Optional[list[str]] = None
+    if source:
+        sources = [s.strip() for s in source.split(",") if s.strip()]
+        for s in sources:
+            if s not in VALID_SOURCES:
+                console.print(
+                    f"[red]Unknown source:[/red] '{s}'. "
+                    f"Valid sources: {', '.join(VALID_SOURCES)}"
+                )
+                raise typer.Exit(code=1)
 
     # Validate stage names
     for s in stage_list:
@@ -136,6 +157,7 @@ def run(
         stream=stream,
         workers=workers,
         validation_mode=validation,
+        sources=sources,
     )
 
     if result.get("errors"):
@@ -145,12 +167,23 @@ def run(
 @app.command()
 def apply(
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Max applications to submit."),
-    workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel browser workers."),
-    min_score: int = typer.Option(7, "--min-score", help="Minimum fit score for job selection."),
-    model: str = typer.Option("haiku", "--model", "-m", help="Claude model name."),
+    workers: str = typer.Option("1", "--workers", "-w", help="Number of parallel browser workers, or 'auto'."),
+    min_score: int = typer.Option(8, "--min-score", help="Minimum fit score for job selection (apply only to strong matches; raise to 9 for near-perfect only)."),
+    model: str = typer.Option("sonnet", "--model", "-m", help="Claude model name."),
     continuous: bool = typer.Option(False, "--continuous", "-c", help="Run forever, polling for new jobs."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
     headless: bool = typer.Option(False, "--headless", help="Run browsers in headless mode."),
+    no_live: bool = typer.Option(False, "--no-live", "--quiet", help="Disable the live terminal dashboard."),
+    job_timeout: int = typer.Option(480, "--job-timeout", help="Max seconds per application before needs_review."),
+    verify_threshold: float = typer.Option(0.75, "--verify-threshold", help="Minimum confidence to auto-verify submission."),
+    max_transient_retries: int = typer.Option(2, "--max-transient-retries", help="Max retry attempts for transient apply failures."),
+    navigation_timeout: int = typer.Option(45, "--navigation-timeout", help="Navigation timeout budget in seconds."),
+    interaction_timeout: int = typer.Option(20, "--interaction-timeout", help="Interaction timeout budget in seconds."),
+    assert_timeout: int = typer.Option(15, "--assert-timeout", help="Assertion timeout budget in seconds."),
+    escalation_mode: str = typer.Option("pause", "--escalation-mode", help="Blocker handling mode: pause or skip."),
+    legacy_result_fallback: bool = typer.Option(True, "--legacy-result-fallback/--no-legacy-result-fallback", help="Allow legacy RESULT:* fallback if structured JSON is missing."),
+    startup_stagger: float = typer.Option(4.0, "--startup-stagger", help="Seconds to stagger each additional worker startup."),
+    max_age_hours: int = typer.Option(48, "--max-age-hours", help="Only apply to jobs discovered within this many hours (freshness gate; 0 = no limit, drain everything)."),
     url: Optional[str] = typer.Option(None, "--url", help="Apply to a specific job URL."),
     gen: bool = typer.Option(False, "--gen", help="Generate prompt file for manual debugging instead of running."),
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
@@ -197,16 +230,20 @@ def apply(
         )
         raise typer.Exit(code=1)
 
-    # Check 3: Tailored resumes exist (skip for --gen with --url)
+    # Check 3: At least one scored job that hasn't been applied to (uses
+    # tailored resume if available, master resume.pdf as fallback)
     if not (gen and url):
         conn = get_connection()
         ready = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND applied_at IS NULL"
+            "SELECT COUNT(*) FROM jobs "
+            "WHERE fit_score >= ? AND applied_at IS NULL "
+            "AND (apply_status IS NULL OR apply_status = 'failed')",
+            (min_score,),
         ).fetchone()[0]
         if ready == 0:
             console.print(
-                "[red]No tailored resumes ready.[/red]\n"
-                "Run [bold]applypilot run score tailor[/bold] first to prepare applications."
+                f"[red]No scored jobs (score >= {min_score}) ready to apply.[/red]\n"
+                "Run [bold]applypilot run score[/bold] first to score discovered jobs."
             )
             raise typer.Exit(code=1)
 
@@ -233,13 +270,47 @@ def apply(
     from applypilot.apply.launcher import main as apply_main
 
     effective_limit = limit if limit is not None else (0 if continuous else 1)
+    if workers.lower() == "auto":
+        effective_workers = 2 if headless else 1
+    else:
+        try:
+            effective_workers = int(workers)
+        except ValueError:
+            console.print("[red]--workers must be a positive integer or 'auto'.[/red]")
+            raise typer.Exit(code=1)
+    if effective_workers < 1:
+        console.print("[red]--workers must be at least 1.[/red]")
+        raise typer.Exit(code=1)
+    if job_timeout < 30:
+        console.print("[red]--job-timeout must be at least 30 seconds.[/red]")
+        raise typer.Exit(code=1)
+    if not (0.0 <= verify_threshold <= 1.0):
+        console.print("[red]--verify-threshold must be between 0 and 1.[/red]")
+        raise typer.Exit(code=1)
+    if max_transient_retries < 0:
+        console.print("[red]--max-transient-retries cannot be negative.[/red]")
+        raise typer.Exit(code=1)
+    if min(navigation_timeout, interaction_timeout, assert_timeout) < 5:
+        console.print("[red]--navigation-timeout, --interaction-timeout, and --assert-timeout must be at least 5 seconds.[/red]")
+        raise typer.Exit(code=1)
+    if escalation_mode not in {"pause", "skip"}:
+        console.print("[red]--escalation-mode must be one of: pause, skip.[/red]")
+        raise typer.Exit(code=1)
+    if startup_stagger < 0:
+        console.print("[red]--startup-stagger cannot be negative.[/red]")
+        raise typer.Exit(code=1)
 
     console.print("\n[bold blue]Launching Auto-Apply[/bold blue]")
     console.print(f"  Limit:    {'unlimited' if continuous else effective_limit}")
-    console.print(f"  Workers:  {workers}")
+    console.print(f"  Workers:  {effective_workers}{' (auto)' if workers.lower() == 'auto' else ''}")
     console.print(f"  Model:    {model}")
     console.print(f"  Headless: {headless}")
     console.print(f"  Dry run:  {dry_run}")
+    console.print(f"  Live UI:  {not no_live}")
+    console.print(f"  Timeout:  {job_timeout}s")
+    console.print(f"  Verify:   {verify_threshold:.2f}")
+    console.print(f"  Retries:  {max_transient_retries}")
+    console.print(f"  Escalate: {escalation_mode}")
     if url:
         console.print(f"  Target:   {url}")
     console.print()
@@ -252,7 +323,18 @@ def apply(
         model=model,
         dry_run=dry_run,
         continuous=continuous,
-        workers=workers,
+        workers=effective_workers,
+        no_live=no_live,
+        job_timeout=job_timeout,
+        verify_threshold=verify_threshold,
+        max_transient_retries=max_transient_retries,
+        navigation_timeout=navigation_timeout,
+        interaction_timeout=interaction_timeout,
+        assert_timeout=assert_timeout,
+        escalation_mode=escalation_mode,
+        legacy_result_fallback=legacy_result_fallback,
+        startup_stagger=startup_stagger,
+        max_age_hours=(max_age_hours if max_age_hours and max_age_hours > 0 else None),
     )
 
 
@@ -396,8 +478,9 @@ def doctor() -> None:
                         "Set GEMINI_API_KEY in ~/.applypilot/.env (run 'applypilot init')"))
 
     # --- Tier 3 checks ---
-    # Claude Code CLI
-    claude_bin = shutil.which("claude")
+    # Claude Code CLI (also checks fallback install locations on Windows)
+    from applypilot.config import find_claude_binary
+    claude_bin = find_claude_binary()
     if claude_bin:
         results.append(("Claude Code CLI", ok_mark, claude_bin))
     else:

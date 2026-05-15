@@ -129,13 +129,25 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             last_attempted_at     TEXT,
             apply_duration_ms     INTEGER,
             apply_task_id         TEXT,
-            verification_confidence TEXT
+            verification_confidence REAL,
+            apply_result_json     TEXT,
+            verification_evidence_json TEXT,
+            idempotency_key       TEXT,
+            submit_attempt_count  INTEGER DEFAULT 0,
+            checkpoint_json       TEXT,
+            last_failure_class    TEXT,
+
+            -- Skill Playbook v1 (Phase 4)
+            skill_used            TEXT,
+            replay_duration_ms    INTEGER,
+            patch_duration_ms     INTEGER
         )
     """)
     conn.commit()
 
     # Run migrations for any columns added after initial schema
     ensure_columns(conn)
+    ensure_indexes(conn)
 
     return conn
 
@@ -179,7 +191,17 @@ _ALL_COLUMNS: dict[str, str] = {
     "last_attempted_at": "TEXT",
     "apply_duration_ms": "INTEGER",
     "apply_task_id": "TEXT",
-    "verification_confidence": "TEXT",
+    "verification_confidence": "REAL",
+    "apply_result_json": "TEXT",
+    "verification_evidence_json": "TEXT",
+    "idempotency_key": "TEXT",
+    "submit_attempt_count": "INTEGER DEFAULT 0",
+    "checkpoint_json": "TEXT",
+    "last_failure_class": "TEXT",
+    # Skill Playbook v1 (Phase 4) — additive, NULL when legacy run_job path was used.
+    "skill_used": "TEXT",
+    "replay_duration_ms": "INTEGER",
+    "patch_duration_ms": "INTEGER",
 }
 
 
@@ -217,6 +239,22 @@ def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:
         conn.commit()
 
     return added
+
+
+def ensure_indexes(conn: sqlite3.Connection | None = None) -> None:
+    """Create apply-path indexes used by the robust launcher flow."""
+    if conn is None:
+        conn = get_connection()
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_apply_queue "
+        "ON jobs(apply_status, fit_score, apply_attempts)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_idempotency_key "
+        "ON jobs(idempotency_key)"
+    )
+    conn.commit()
 
 
 def get_stats(conn: sqlite3.Connection | None = None) -> dict:
@@ -318,9 +356,10 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     stats["ready_to_apply"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
-        "WHERE tailored_resume_path IS NOT NULL "
+        "WHERE fit_score >= 7 "
         "AND applied_at IS NULL "
-        "AND application_url IS NOT NULL"
+        "AND application_url IS NOT NULL "
+        "AND (apply_status IS NULL OR apply_status = 'failed')"
     ).fetchone()[0]
 
     return stats
@@ -392,8 +431,9 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         ),
         "tailored": "tailored_resume_path IS NOT NULL",
         "pending_apply": (
-            "tailored_resume_path IS NOT NULL AND applied_at IS NULL "
-            "AND application_url IS NOT NULL"
+            "fit_score >= ? AND applied_at IS NULL "
+            "AND application_url IS NOT NULL "
+            "AND (apply_status IS NULL OR apply_status = 'failed')"
         ),
         "applied": "applied_at IS NOT NULL",
     }

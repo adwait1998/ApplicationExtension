@@ -162,12 +162,22 @@ def load_base_urls() -> dict[str, str | None]:
 # ---------------------------------------------------------------------------
 
 DEFAULTS = {
-    "min_score": 7,
+    # Apply only to strong matches. Raised 7→8 (iter 13): score-7 was a
+    # noisy tier (Content Designer, adjacent roles) even after the scorer
+    # prefilter tightening. 8+ = genuinely strong Product/UX Designer fits.
+    "min_score": 8,
     "max_apply_attempts": 3,
     "max_tailor_attempts": 5,
     "poll_interval": 60,
-    "apply_timeout": 300,
+    "apply_timeout": 480,
     "viewport": "1280x900",
+    "verify_threshold": 0.75,
+    "max_transient_retries": 2,
+    "navigation_timeout": 45,
+    "interaction_timeout": 20,
+    "assert_timeout": 15,
+    "escalation_mode": "pause",
+    "allow_legacy_result_fallback": True,
 }
 
 
@@ -197,6 +207,45 @@ TIER_COMMANDS: dict[int, list[str]] = {
 }
 
 
+def find_claude_binary() -> str | None:
+    """Locate the Claude Code CLI binary.
+
+    Resolution order:
+    1. CLAUDE_BIN env var (explicit override, no filesystem check — trust user)
+    2. PATH lookup
+    3. Glob common Windows install roots for any version subdirectory
+    """
+    override = os.environ.get("CLAUDE_BIN", "").strip()
+    if override:
+        return override
+    found = shutil.which("claude") or shutil.which("claude.exe")
+    if found:
+        return found
+
+    # Glob common install roots: pick newest version dir that has claude.exe
+    roots = [
+        Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code",
+        Path.home() / "AppData" / "Roaming" / "Claude" / "claude-code",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Claude" / "claude-code",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Claude" / "claude-code",
+    ]
+    candidates: list[Path] = []
+    for root in roots:
+        try:
+            if not root.exists():
+                continue
+            for child in root.iterdir():
+                exe = child / "claude.exe"
+                if exe.exists():
+                    candidates.append(exe)
+        except (OSError, PermissionError):
+            continue
+    if candidates:
+        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return str(candidates[0])
+    return None
+
+
 def get_tier() -> int:
     """Detect the current tier based on available dependencies.
 
@@ -210,7 +259,7 @@ def get_tier() -> int:
     if not has_llm:
         return 1
 
-    has_claude = shutil.which("claude") is not None
+    has_claude = find_claude_binary() is not None
     try:
         get_chrome_path()
         has_chrome = True
@@ -241,7 +290,7 @@ def check_tier(required: int, feature: str) -> None:
     if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")):
         missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
-        if not shutil.which("claude"):
+        if not find_claude_binary():
             missing.append("Claude Code CLI — install from [bold]https://claude.ai/code[/bold]")
         try:
             get_chrome_path()

@@ -267,9 +267,10 @@ def cleanup_worker(worker_id: int, process: subprocess.Popen | None) -> None:
 
 
 def kill_all_chrome() -> None:
-    """Kill all Chrome instances and any port zombies.
+    """Kill Chrome instances launched and tracked by this process.
 
-    Called during graceful shutdown to ensure no orphan Chrome processes.
+    This deliberately avoids sweeping broad port ranges so unrelated user
+    Chrome/Claude sessions survive an ApplyPilot shutdown.
     """
     with _chrome_lock:
         procs = dict(_chrome_procs)
@@ -279,9 +280,6 @@ def kill_all_chrome() -> None:
         if proc.poll() is None:
             _kill_process_tree(proc.pid)
         _kill_on_port(BASE_CDP_PORT + wid)
-
-    # Sweep base port in case of zombies
-    _kill_on_port(BASE_CDP_PORT)
 
 
 def reset_worker_dir(worker_id: int) -> Path:
@@ -304,7 +302,7 @@ def reset_worker_dir(worker_id: int) -> Path:
 
 
 def cleanup_on_exit() -> None:
-    """Atexit handler: kill all Chrome processes and sweep CDP ports.
+    """Atexit handler: kill Chrome processes launched by this process.
 
     Register this with atexit.register() at application startup.
     """
@@ -316,6 +314,3 @@ def cleanup_on_exit() -> None:
         if proc.poll() is None:
             _kill_process_tree(proc.pid)
         _kill_on_port(BASE_CDP_PORT + wid)
-
-    # Sweep base port for any orphan
-    _kill_on_port(BASE_CDP_PORT)

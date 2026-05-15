@@ -193,11 +193,20 @@ class LLMClient:
     ) -> str:
         """Send a chat completion request and return the assistant message text."""
         # Qwen3 optimization: prepend /no_think to skip chain-of-thought
-        # reasoning, saving tokens on structured extraction tasks.
+        # reasoning, saving tokens on structured extraction tasks. Inject
+        # into the first user message (system messages are common, so
+        # checking only messages[0] missed system+user pairs).
         if "qwen" in self.model.lower() and messages:
-            first = messages[0]
-            if first.get("role") == "user" and not first["content"].startswith("/no_think"):
-                messages = [{"role": first["role"], "content": f"/no_think\n{first['content']}"}] + messages[1:]
+            patched = False
+            new_messages = []
+            for msg in messages:
+                if not patched and msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if not content.startswith("/no_think"):
+                        msg = {**msg, "content": f"/no_think\n{content}"}
+                    patched = True
+                new_messages.append(msg)
+            messages = new_messages
 
         for attempt in range(_MAX_RETRIES):
             try:

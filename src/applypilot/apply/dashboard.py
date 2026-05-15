@@ -7,7 +7,7 @@ in a terminal dashboard using the Rich library.
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -42,7 +42,13 @@ class WorkerState:
 _worker_states: dict[int, WorkerState] = {}
 _events: list[str] = []
 _lock = threading.Lock()
+_dirty = threading.Event()
 MAX_EVENTS = 8
+
+
+def _mark_dirty() -> None:
+    """Signal that the live dashboard should redraw."""
+    _dirty.set()
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +59,7 @@ def init_worker(worker_id: int = 0) -> None:
     """Register the worker in the dashboard state."""
     with _lock:
         _worker_states[worker_id] = WorkerState(worker_id=worker_id)
+    _mark_dirty()
 
 
 def update_state(worker_id: int = 0, **kwargs) -> None:
@@ -67,6 +74,7 @@ def update_state(worker_id: int = 0, **kwargs) -> None:
         if state is not None:
             for key, value in kwargs.items():
                 setattr(state, key, value)
+    _mark_dirty()
 
 
 def get_state(worker_id: int = 0) -> WorkerState | None:
@@ -86,6 +94,14 @@ def add_event(msg: str) -> None:
         _events.append(f"[dim]{ts}[/dim] {msg}")
         if len(_events) > MAX_EVENTS:
             _events.pop(0)
+    _mark_dirty()
+
+
+def wait_for_change(timeout: float = 1.0) -> bool:
+    """Wait until dashboard state changes or a heartbeat timeout elapses."""
+    changed = _dirty.wait(timeout=timeout)
+    _dirty.clear()
+    return changed
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +115,7 @@ _STATUS_STYLES: dict[str, str] = {
     "applying": "yellow",
     "applied": "bold green",
     "failed": "red",
+    "needs_review": "bold yellow",
     "expired": "dim red",
     "captcha": "magenta",
     "login_issue": "red",
