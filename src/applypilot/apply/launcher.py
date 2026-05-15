@@ -1052,16 +1052,23 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                           AND fit_score >= ?
                           {age_clause}
                           AND site NOT IN (SELECT site FROM jobs WHERE apply_status = 'in_progress')
-                          -- Durable de-dup: if the SAME role (site + title)
-                          -- was already applied/submitted or is in progress
-                          -- under ANY url, exclude every other variant so we
-                          -- never double-apply to a reposted listing.
+                          -- Durable de-dup: one application per (company,
+                          -- title). If ANY OTHER listing (different url) of
+                          -- the same (site, normalized title) has already
+                          -- been ATTEMPTED in any way — applied, in_progress,
+                          -- needs_review, failed, manual — exclude this twin.
+                          -- Two "Staff Product Designer @ brex" reqs is a
+                          -- repost; applying to both looks spammy to the
+                          -- recruiter regardless of outcome. The d.url !=
+                          -- jobs.url guard means a job never excludes itself,
+                          -- so a genuine single-listing retry still works.
                           AND NOT EXISTS (
                               SELECT 1 FROM jobs d
                               WHERE d.site = jobs.site
+                                AND d.url != jobs.url
                                 AND LOWER(TRIM(d.title)) = LOWER(TRIM(jobs.title))
                                 AND (d.applied_at IS NOT NULL
-                                     OR d.apply_status IN ('applied', 'in_progress'))
+                                     OR d.apply_status IS NOT NULL)
                           )
                           {site_clause}
                           {url_clauses}

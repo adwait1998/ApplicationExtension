@@ -151,3 +151,53 @@ def test_dedup_collapses_same_site_title_prefers_canonical(monkeypatch):
     # not an indeed aggregator link.
     alexa = [j for j in acquired if j["title"] == "Senior UX Designer, Alexa"][0]
     assert "greenhouse.io" in alexa["application_url"], alexa["application_url"]
+
+
+def test_dedup_durable_even_when_first_twin_failed(monkeypatch):
+    """The exact 2026-05-15 bug: brex/harvey same (company,title) attempted
+    twice because the first ended needs_review/failed (not applied), so the
+    durable guard didn't fire. Now ANY prior attempt of a same-(site,title)
+    twin must exclude the others — one application per role, win or lose."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE jobs (
+            url TEXT PRIMARY KEY, title TEXT, site TEXT, application_url TEXT,
+            tailored_resume_path TEXT, fit_score INTEGER, location TEXT,
+            full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
+            apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
+            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT
+        )
+    """)
+    disc = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    # Twin A already attempted and ended needs_review. Twin B (different url,
+    # same site+title) is still untried. Plus a distinct role as a control.
+    conn.execute("INSERT INTO jobs VALUES "
+        "('https://www.brex.com/careers/1?gh_jid=1','Staff Product Designer','brex (greenhouse)',"
+        "'https://www.brex.com/careers/1?gh_jid=1',NULL,8,'Remote','d',NULL,'needs_review',1,NULL,?,NULL,?)",
+        (None, disc))
+    conn.execute("INSERT INTO jobs VALUES "
+        "('https://www.brex.com/careers/2?gh_jid=2','Staff Product Designer','brex (greenhouse)',"
+        "'https://www.brex.com/careers/2?gh_jid=2',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?)",
+        (None, disc))
+    conn.execute("INSERT INTO jobs VALUES "
+        "('https://boards.greenhouse.io/brex/jobs/9','Senior Designer, Brand','brex (greenhouse)',"
+        "'https://boards.greenhouse.io/brex/jobs/9',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?)",
+        (None, disc))
+    conn.commit()
+    monkeypatch.setattr(launcher, "get_connection", lambda: conn)
+
+    acquired = []
+    for _ in range(5):
+        j = launcher.acquire_job(min_score=8, worker_id=0, max_age_hours=None)
+        if not j:
+            break
+        acquired.append(j["title"])
+        conn.execute("UPDATE jobs SET apply_status='applied' WHERE url=?", (j["url"],))
+        conn.commit()
+        with launcher._run_seen_lock:
+            launcher._run_seen_urls.clear()
+
+    # Twin B must NOT be acquired (its sibling already hit needs_review).
+    # Only the distinct "Senior Designer, Brand" role is applyable.
+    assert acquired == ["Senior Designer, Brand"], acquired
