@@ -1180,6 +1180,27 @@ def write_review_log(job: dict, status: str, model: str, duration_ms: int,
         "idempotency_key": idempotency_key,
         "checkpoint_stage": checkpoint_stage,
     }
+
+    # Reliability-v2 Phase A: structured cost/telemetry so $/apply, cache
+    # hit-rate, and the (A)-removable vs (B)-irreducible failure split are
+    # measurable from data instead of anecdote. Token/cost from run_job's
+    # Claude Code result (job._run_meta.telemetry); tier_used from the
+    # skill-playbook dispatcher (rides on prefill_status, like skill_used).
+    telem = (job.get("_run_meta") or {}).get("telemetry") or {}
+    row["input_tokens"] = telem.get("input_tokens")
+    row["output_tokens"] = telem.get("output_tokens")
+    row["cache_read"] = telem.get("cache_read")
+    row["cache_create"] = telem.get("cache_create")
+    row["cost_usd"] = telem.get("cost_usd")
+    row["turns"] = telem.get("turns")
+    if prefill_status:
+        row["tier_used"] = prefill_status.get("tier_used")
+        row["skill_used"] = prefill_status.get("skill_used")
+        row["replay_duration_ms"] = prefill_status.get("replay_duration_ms")
+        row["patch_duration_ms"] = prefill_status.get("patch_duration_ms")
+    else:
+        row["tier_used"] = None
+
     try:
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -1650,6 +1671,13 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                             "cost_usd": msg.get("total_cost_usd", 0),
                             "turns": msg.get("num_turns", 0),
                         }
+                        # Reliability-v2 Phase A: persist token/cost telemetry
+                        # on the job_meta side-channel so write_review_log can
+                        # record it regardless of which return path run_job
+                        # takes. Previously these were computed then discarded
+                        # (only the live dashboard saw them) — making cost /
+                        # cache-hit-rate / $-per-apply unmeasurable historically.
+                        job_meta["telemetry"] = dict(stats)
                         text_parts.append(msg.get("result", ""))
                 except json.JSONDecodeError:
                     text_parts.append(line)

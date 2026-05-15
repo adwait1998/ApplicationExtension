@@ -334,7 +334,12 @@ def dispatch_apply(
     flag = (flag_fn or is_skill_flow_enabled)()
     if not flag:
         # OFF path: byte-for-byte the same call as before Phase 4.
-        return run_job_fn(job=job, port=port, worker_id=worker_id, **run_job_kwargs)
+        status, duration_ms, prefill = run_job_fn(
+            job=job, port=port, worker_id=worker_id, **run_job_kwargs
+        )
+        if isinstance(prefill, dict):
+            prefill.setdefault("tier_used", "legacy_llm")
+        return status, duration_ms, prefill
 
     company = normalize_company_key(job.get("site"))
     resolver = resolve_skill_fn or resolve_skill
@@ -373,6 +378,14 @@ def dispatch_apply(
         if status in SKILL_OWNS_RESULT:
             if isinstance(prefill, dict):
                 prefill.setdefault("skill_used", skill_path(skill.company).name)
+                # Phase A telemetry: distinguish a pure Tier-1 replay from
+                # one that needed a Tier-2 LLM patch (prefill carries
+                # patch_duration_ms when the patcher ran).
+                prefill.setdefault(
+                    "tier_used",
+                    "skill_patch" if prefill.get("patch_duration_ms")
+                    else "skill_replay",
+                )
             return status, duration_ms, prefill
         log.info(
             "skill flow non-terminal (%s) for %s — archiving skill and "
@@ -394,6 +407,9 @@ def dispatch_apply(
     status, duration_ms, prefill = run_job_fn(
         job=job, port=port, worker_id=worker_id, **kwargs_with_recorder,
     )
+    if isinstance(prefill, dict):
+        # Record mode: LLM-driven apply with a SkillRecorder observing.
+        prefill.setdefault("tier_used", "skill_record")
 
     if status == "applied" and company:
         try:

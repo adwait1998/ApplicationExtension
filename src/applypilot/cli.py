@@ -339,6 +339,24 @@ def apply(
 
 
 @app.command()
+def report() -> None:
+    """Reliability/cost report from logs/review.jsonl: $/apply, cache
+    hit-rate, pass-rate by ATS/tier, and the (A) removable vs
+    (B) irreducible failure split."""
+    _bootstrap()
+    from applypilot import config
+    from applypilot.reporting import (
+        load_review_rows, summarize_review, format_report,
+    )
+
+    rows = load_review_rows(config.LOG_DIR / "review.jsonl")
+    if not rows:
+        typer.echo("No review.jsonl rows yet — run some applies first.")
+        raise typer.Exit()
+    typer.echo(format_report(summarize_review(rows)))
+
+
+@app.command()
 def status() -> None:
     """Show pipeline statistics from the database."""
     _bootstrap()
