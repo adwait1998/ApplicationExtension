@@ -41,9 +41,30 @@ greenhouse:
   - chime
   - instacart
   - affirm
+  # Added 2026-05-15 — token + design-role presence verified live against
+  # boards-api.greenhouse.io before adding (count = design-ish titles found):
+  - brex          # 60
+  - databricks    # 58
+  - roblox        # 50
+  - datadog       # 39
+  - sofi          # 36
+  - anthropic     # 30
+  - gusto         # 22
+  - faire         # 13
+  - twilio        # 11
+  - flexport      # 10
+  - webflow       # 8
+  - calendly      # 7
+  - betterment    # 6
+  - airtable      # 5
+  - amplitude     # 4
+  - lattice       # 2
 
 lever:
   - plaid
+  # Added 2026-05-15 — verified against api.lever.co
+  - spotify       # 28
+  - palantir      # 22
 
 ashby:
   - vercel
@@ -54,3 +75,14 @@ ashby:
   - posthog
   - openai
   - cursor
+  # Added 2026-05-15 — verified against api.ashbyhq.com posting-api
+  - harvey        # 62
+  - sierra        # 27
+  - ramp          # 15
+  - watershed     # 11
+  - perplexity    # 7
+  - mercor        # 7
+  - baseten       # 5
+  - browserbase   # 3
+  - modal         # 3
+  - runway        # 1
