@@ -2056,10 +2056,21 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 or _is_permanent_failure(result)
             )
 
+            # iter-13 money-saver: a timeout means the form did NOT finish
+            # within the FULL job_timeout budget. Retrying with the same
+            # budget on the same (deterministically heavy) form near-always
+            # times out again — observed live: sofi ran 1444s = 2x720s, both
+            # timed out, ~12min + cost wasted for a guaranteed-failed retry.
+            # Treat timeout as non-retryable: take the one full attempt, mark
+            # needs_review, move on. (A genuinely transient slow-network
+            # timeout is rare vs. "form too heavy"; not worth 2x the budget.)
+            NON_RETRYABLE_TRANSIENT = {"transient_timeout"}
+
             should_retry = (
                 not dry_run
                 and not is_terminal_result
                 and failure_class.startswith(TRANSIENT_FAILURE_PREFIXES)
+                and failure_class not in NON_RETRYABLE_TRANSIENT
                 and not result.startswith("needs_review:possible_duplicate_guard")
                 and attempt < max_transient_retries
             )

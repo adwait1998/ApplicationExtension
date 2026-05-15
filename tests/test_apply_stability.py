@@ -347,14 +347,16 @@ def test_permanent_failure_does_not_trigger_retry(monkeypatch):
 
 
 def test_transient_failure_does_retry(monkeypatch):
-    """The retry mechanism still works for genuine transient failures."""
+    """The retry mechanism still works for genuine transient failures
+    (no_result_line is transient + retryable; timeout is NOT — see
+    test_timeout_is_not_retried)."""
     conn = _make_jobs_conn()
     _lock_job(conn)
 
     run_job_calls = []
-    # First call timeout, second call applied
+    # First call a retryable transient (no_result_line), second call applied
     responses = [
-        ("needs_review:timeout", 100, {"ats": "greenhouse", "fields_filled": [], "duration_ms": 1, "error": None}),
+        ("needs_review:no_result_line", 100, {"ats": "greenhouse", "fields_filled": [], "duration_ms": 1, "error": None}),
         ("applied", 100, {"ats": "greenhouse", "fields_filled": [], "duration_ms": 1, "error": None}),
     ]
 
@@ -382,7 +384,47 @@ def test_transient_failure_does_retry(monkeypatch):
     finally:
         launcher._stop_event.clear()
 
-    assert len(run_job_calls) == 2, "transient failure should trigger one retry"
+    assert len(run_job_calls) == 2, "retryable transient should trigger one retry"
+
+
+def test_timeout_is_not_retried(monkeypatch):
+    """iter-13 money-saver: transient_timeout must NOT retry. Retrying with
+    the same full job_timeout on the same heavy form near-always times out
+    again (observed live: sofi 2x720s = ~24min wasted). One attempt, then
+    needs_review, move on."""
+    conn = _make_jobs_conn()
+    _lock_job(conn)
+
+    run_job_calls = []
+
+    def run_job_timeout(*args, **kwargs):
+        run_job_calls.append(kwargs)
+        return ("needs_review:timeout", 720000,
+                {"ats": "greenhouse", "fields_filled": [], "duration_ms": 1, "error": None})
+
+    monkeypatch.setattr(launcher, "get_connection", lambda: conn)
+    monkeypatch.setattr(launcher, "acquire_job", lambda **kwargs: _worker_job())
+    monkeypatch.setattr(launcher, "_wait_for_resources", lambda worker_id: None)
+    monkeypatch.setattr(launcher, "launch_chrome", lambda *args, **kwargs: object())
+    monkeypatch.setattr(launcher, "cleanup_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "run_job", run_job_timeout)
+    monkeypatch.setattr(launcher, "mark_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "write_review_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "add_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "update_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "_write_job_runtime_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher._stop_event, "wait", lambda timeout=None: False)
+    launcher._stop_event.clear()
+
+    try:
+        launcher.worker_loop(worker_id=0, limit=1, dry_run=False, max_transient_retries=2)
+    finally:
+        launcher._stop_event.clear()
+
+    assert len(run_job_calls) == 1, (
+        f"timeout retried {len(run_job_calls)}x — must be exactly 1 "
+        "(retrying a timeout just burns another full budget)"
+    )
 
 
 def test_verifier_persistent_confirmation_page_verified():
