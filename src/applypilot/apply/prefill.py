@@ -55,6 +55,7 @@ def _canonicalize_greenhouse_url(url: str) -> str:
     careers.airbnb.com/positions/X?gh_jid=Y     -> boards.greenhouse.io/airbnb/jobs/Y
     careers.duolingo.com/jobs/X?gh_jid=Y        -> boards.greenhouse.io/duolingo/jobs/Y
     instacart.careers/job/?gh_jid=Y             -> boards.greenhouse.io/instacart/jobs/Y
+    www.brex.com/careers/X?gh_jid=Y             -> boards.greenhouse.io/brex/jobs/Y
 
     Vanity hosts often lazy-load the form behind iframes or "Apply" gates,
     causing _find_form_root to timeout. Canonical URLs render the form
@@ -78,6 +79,22 @@ def _canonicalize_greenhouse_url(url: str) -> str:
         company = host.rsplit(".", 1)[0]
     elif host.startswith("jobs."):
         company = host.split(".")[1]
+    else:
+        # Fallback: www.<co>.<tld>/careers|positions|jobs?gh_jid= (brex,
+        # and other companies that host the Greenhouse form on their main
+        # marketing domain). The gh_jid param already proved this is a
+        # Greenhouse job; derive the board slug from the registered domain
+        # label (www.brex.com -> "brex"), gated on a careers-ish path so we
+        # don't rewrite unrelated www links that merely carry a gh_jid.
+        path = urlparse(url).path.lower()
+        if any(seg in path for seg in ("/careers", "/positions", "/jobs", "/job")):
+            labels = [p for p in host.split(".") if p and p != "www"]
+            # labels like ["brex","com"] -> "brex"; skip if it looks like a
+            # known ATS host we don't want to slugify.
+            if len(labels) >= 2 and labels[0] not in (
+                "greenhouse", "lever", "ashbyhq", "myworkdayjobs", "icims",
+            ):
+                company = labels[0]
     if not company:
         return url
     return f"https://boards.greenhouse.io/{company}/jobs/{gh_jid}"
