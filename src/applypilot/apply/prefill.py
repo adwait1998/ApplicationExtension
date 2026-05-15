@@ -477,6 +477,102 @@ def _combobox_committed(root, label_needles: tuple[str, ...], preferred: tuple[s
         return False
 
 
+def _norm_opt(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip().lower()
+
+
+def _match_real_option(preferred: tuple[str, ...], options: list[str]) -> str | None:
+    """Map our intended values to the closest REAL dropdown option.
+
+    Pure + unit-testable. Priority: exact (normalized) → preferred is a
+    substring of an option (our "Yes" inside "Yes, authorized…") → option
+    is a substring of preferred → strong token overlap (≥60% of the
+    shorter side's words). Returns the REAL option text, or None if
+    nothing reasonably matches (caller fails fast instead of blind-typing).
+    """
+    opts = [o for o in (options or []) if o and o.strip()]
+    if not opts:
+        return None
+    npref = [(_norm_opt(p), p) for p in preferred if p]
+    nopts = [(_norm_opt(o), o) for o in opts]
+    # 1. exact normalized
+    for np, _ in npref:
+        for no, orig in nopts:
+            if np and np == no:
+                return orig
+    # 2. preferred ⊆ option  (most common: "yes" ⊂ "yes, i am authorized…")
+    for np, _ in npref:
+        if len(np) < 2:
+            continue
+        for no, orig in nopts:
+            if np in no:
+                return orig
+    # 3. option ⊆ preferred
+    for np, _ in npref:
+        for no, orig in nopts:
+            if len(no) >= 2 and no in np:
+                return orig
+    # 4. token overlap ≥60% of the shorter token set
+    for np, _ in npref:
+        pw = set(re.findall(r"[a-z0-9]+", np))
+        if not pw:
+            continue
+        for no, orig in nopts:
+            ow = set(re.findall(r"[a-z0-9]+", no))
+            if not ow:
+                continue
+            inter = len(pw & ow)
+            if inter and inter / min(len(pw), len(ow)) >= 0.6:
+                return orig
+    return None
+
+
+def _visible_combobox_options(root) -> list[str]:
+    """Read the currently-rendered react-select / listbox option texts."""
+    try:
+        return list(root.evaluate(
+            """() => {
+              const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+              const sel = '[class*="select__option"]:not([class*="noresults"]),'
+                        + '[role="option"], li[role="option"], .Select-option';
+              const seen = new Set(); const out = [];
+              for (const el of document.querySelectorAll(sel)) {
+                const t = norm(el.textContent);
+                if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+              }
+              return out;
+            }"""
+        )) or []
+    except Exception:
+        return []
+
+
+def _click_option_by_text(root, text: str) -> bool:
+    """Click a rendered option element whose text matches `text`."""
+    try:
+        return bool(root.evaluate(
+            """(want) => {
+              const norm = s => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+              const w = norm(want);
+              const sel = '[class*="select__option"], [role="option"], .Select-option';
+              for (const el of document.querySelectorAll(sel)) {
+                const t = norm(el.textContent);
+                if (t && (t === w || t.includes(w) || w.includes(t))) {
+                  el.scrollIntoView({block:'center'});
+                  el.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+                  el.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+                  el.click();
+                  return true;
+                }
+              }
+              return false;
+            }""",
+            text,
+        ))
+    except Exception:
+        return False
+
+
 def _commit_combobox_keyboard(root, label_needles: tuple[str, ...], preferred: tuple[str, ...]) -> bool:
     """Keyboard-driven react-select commit — the reliable path.
 
@@ -524,28 +620,55 @@ def _commit_combobox_keyboard(root, label_needles: tuple[str, ...], preferred: t
         loc = root.locator(f"[{MARK}='1']").first
         if loc.count() <= 0:
             return False
-        for value in preferred:
-            if not value:
-                continue
+
+        # OPTION-AWARE selection. The old code blindly typed our intended
+        # value (e.g. "Yes"); if no real option matched (employers phrase
+        # options company-specifically, e.g. "Yes, authorized to work in
+        # the US"), react-select filtered to EMPTY and we spun through
+        # every `preferred` ~3.5s each before defaulting to the LLM.
+        # Now: open the dropdown, read the ACTUAL options, map our intent
+        # to the closest REAL option, and only ever type a string that
+        # exists. If nothing reasonably matches → fail FAST (let the LLM
+        # patch decide, with the real option list as context) instead of
+        # typing non-existent values and spinning.
+        try:
+            loc.scroll_into_view_if_needed(timeout=1000)
+            loc.click(timeout=1500)
+            time.sleep(0.35)  # let react-select render its option portal
+        except Exception as e:
+            logger.debug("prefill: combobox open failed: %s", e)
+            return False
+
+        options = _visible_combobox_options(root)
+        target = _match_real_option(preferred, options)
+        if target is None:
+            logger.debug(
+                "prefill: no preferred %r matches real options %r — failing "
+                "fast (no blind-typing / spin); LLM patch will resolve",
+                preferred, options[:12],
+            )
+            return False
+        try:
             try:
-                loc.scroll_into_view_if_needed(timeout=1000)
-                loc.click(timeout=1500)
-                # Clear any prior text, then type the query so react-select
-                # filters its options down.
-                try:
-                    loc.fill("", timeout=800)
-                except Exception:
-                    pass
-                loc.type(value, delay=25, timeout=2500)
-                time.sleep(0.35)  # let react-select filter/render
-                loc.press("ArrowDown", timeout=800)
-                loc.press("Enter", timeout=800)
-                time.sleep(0.3)
-                if _combobox_committed(root, label_needles, (value,)):
+                loc.fill("", timeout=800)
+            except Exception:
+                pass
+            # Type a distinctive slice of the REAL option so react-select
+            # filters down to it (guaranteed non-empty), then commit.
+            loc.type(target[:40], delay=20, timeout=2500)
+            time.sleep(0.3)
+            loc.press("ArrowDown", timeout=800)
+            loc.press("Enter", timeout=800)
+            time.sleep(0.3)
+            if _combobox_committed(root, label_needles, (target,)):
+                return True
+            # Last resort: click the option element directly by its text.
+            if _click_option_by_text(root, target):
+                time.sleep(0.2)
+                if _combobox_committed(root, label_needles, (target,)):
                     return True
-            except Exception as e:
-                logger.debug("prefill: keyboard combobox attempt failed (%r): %s", value, e)
-                continue
+        except Exception as e:
+            logger.debug("prefill: option-aware combobox commit failed (%r): %s", target, e)
         return False
     except Exception as e:
         logger.debug("prefill: _commit_combobox_keyboard failed: %s", e)
