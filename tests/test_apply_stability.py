@@ -34,7 +34,8 @@ def _make_jobs_conn():
             idempotency_key TEXT,
             submit_attempt_count INTEGER DEFAULT 0,
             checkpoint_json TEXT,
-            last_failure_class TEXT
+            last_failure_class TEXT,
+            discovered_at TEXT
         )
     """)
     conn.execute("""

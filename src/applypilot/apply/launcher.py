@@ -1017,6 +1017,13 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
             # same Greenhouse tenant in parallel (which triggers fraud-detection
             # email verification). Worker-N is locked out of every site whose
             # apply_status = 'in_progress' until that worker finishes.
+            # Non-destructive de-dup: companies repost the same role under
+            # multiple req IDs / locations (Amazon via indeed ~8x, PayPal
+            # Workday, brex/databricks double-listings). Collapse to ONE row
+            # per (site, normalized title), preferring a canonical-ATS
+            # application_url (greenhouse/lever/ashby/workday) over aggregator
+            # links, then the freshest. No DB rows are deleted — this is a
+            # selection-time filter, same pattern as the freshness gate.
             rows = conn.execute(f"""
                 SELECT url, title, site, application_url, tailored_resume_path,
                        fit_score, location, full_description, cover_letter_path
@@ -1026,14 +1033,40 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                            ROW_NUMBER() OVER (
                                PARTITION BY site ORDER BY RANDOM()
                            ) AS site_idx
-                    FROM jobs
-                    WHERE (apply_status IS NULL OR apply_status = 'failed')
-                      AND (apply_attempts IS NULL OR apply_attempts < ?)
-                      AND fit_score >= ?
-                      {age_clause}
-                      AND site NOT IN (SELECT site FROM jobs WHERE apply_status = 'in_progress')
-                      {site_clause}
-                      {url_clauses}
+                    FROM (
+                        SELECT url, title, site, application_url, tailored_resume_path,
+                               fit_score, location, full_description, cover_letter_path,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY site, LOWER(TRIM(title))
+                                   ORDER BY
+                                     CASE WHEN application_url LIKE '%greenhouse%'
+                                            OR application_url LIKE '%lever.co%'
+                                            OR application_url LIKE '%ashby%'
+                                            OR application_url LIKE '%myworkdayjobs%'
+                                          THEN 0 ELSE 1 END,
+                                     discovered_at DESC
+                               ) AS dup_rn
+                        FROM jobs
+                        WHERE (apply_status IS NULL OR apply_status = 'failed')
+                          AND (apply_attempts IS NULL OR apply_attempts < ?)
+                          AND fit_score >= ?
+                          {age_clause}
+                          AND site NOT IN (SELECT site FROM jobs WHERE apply_status = 'in_progress')
+                          -- Durable de-dup: if the SAME role (site + title)
+                          -- was already applied/submitted or is in progress
+                          -- under ANY url, exclude every other variant so we
+                          -- never double-apply to a reposted listing.
+                          AND NOT EXISTS (
+                              SELECT 1 FROM jobs d
+                              WHERE d.site = jobs.site
+                                AND LOWER(TRIM(d.title)) = LOWER(TRIM(jobs.title))
+                                AND (d.applied_at IS NOT NULL
+                                     OR d.apply_status IN ('applied', 'in_progress'))
+                          )
+                          {site_clause}
+                          {url_clauses}
+                    )
+                    WHERE dup_rn = 1
                 )
                 ORDER BY fit_score DESC, site_idx ASC, RANDOM()
                 LIMIT 50
