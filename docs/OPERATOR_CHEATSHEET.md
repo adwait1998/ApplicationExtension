@@ -1,0 +1,228 @@
+# ApplyPilot — Operator Cheatsheet
+
+Practical commands to drive the pipeline. PowerShell (your default shell).
+Everything here is copy-paste ready.
+
+---
+
+## 0. Set up once per terminal
+
+```powershell
+cd E:\auto-apply-pipeline
+$env:APPLYPILOT_USE_SKILLS = "1"          # enables the skill-playbook dispatcher
+$PY = "C:\Users\adwai\AppData\Local\Programs\Python\Python312\python.exe"
+```
+
+Run anything below as `& $PY -m applypilot <command>`.
+
+Key paths:
+- Code: `E:\auto-apply-pipeline`
+- Data: `E:\applypilot-data` → `applypilot.db`, `logs\`, `skills\`, `profile.json`, `resume.pdf`, `searches.yaml`
+
+---
+
+## 1. TL;DR daily flow
+
+```powershell
+& $PY -m applypilot doctor                 # 1. is the setup healthy?
+& $PY -m applypilot run discover enrich score --source ats_boards   # 2. pull + score FRESH Greenhouse/Lever/Ashby jobs
+& $PY -m applypilot status                 # 3. what's in the queue?
+& $PY -m applypilot apply --limit 10 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720 --max-transient-retries 1   # 4. apply (LIVE — real submissions)
+& $PY -m applypilot report                 # 5. how did it go? cost / pass-rate / failure split
+```
+
+Defaults already set so you don't pass them: `--min-score 8`, `--max-age-hours 48`, dedupe on, timeouts not retried.
+
+---
+
+## 2. Health / setup
+
+```powershell
+& $PY -m applypilot doctor                 # checks Chrome, claude CLI, profile, resume, deps
+& $PY -m applypilot --version
+```
+
+---
+
+## 3. Inspect the queue (read-only, $0, instant)
+
+```powershell
+& $PY -m applypilot status                 # counts by pipeline stage
+& $PY -m applypilot report                 # reliability + cost: $/apply, cache hit-rate, A-vs-B failures, pass-rate by ATS/tier
+```
+
+**What's eligible to apply right now** (score≥8, fresh≤48h, has app URL, not applied):
+```powershell
+& $PY -c @"
+from applypilot.database import get_connection, init_db
+from datetime import datetime, timezone, timedelta
+init_db(); c=get_connection()
+cut=(datetime.now(timezone.utc)-timedelta(hours=48)).isoformat()
+q='''SELECT title,site,fit_score FROM jobs WHERE fit_score>=8 AND applied_at IS NULL
+ AND application_url IS NOT NULL AND (apply_status IS NULL OR apply_status=\"failed\")
+ AND discovered_at>=? ORDER BY fit_score DESC, site'''
+rows=c.execute(q,(cut,)).fetchall()
+print(f'APPLY QUEUE: {len(rows)} jobs')
+for r in rows[:40]: print(f'  [{r[\"fit_score\"]}] {r[\"title\"][:55]:55s} {r[\"site\"]}')
+"@
+```
+
+**Queue by company / score band:**
+```powershell
+& $PY -c @"
+from applypilot.database import get_connection, init_db
+init_db(); c=get_connection()
+for r in c.execute('SELECT fit_score,COUNT(*) n FROM jobs WHERE applied_at IS NULL AND fit_score>=6 GROUP BY fit_score ORDER BY fit_score DESC').fetchall():
+    print(f'  score {r[\"fit_score\"]}: {r[\"n\"]}')
+"@
+```
+
+**What's already been applied to:**
+```powershell
+& $PY -c @"
+from applypilot.database import get_connection, init_db
+init_db(); c=get_connection()
+for r in c.execute('SELECT site,title,applied_at FROM jobs WHERE applied_at IS NOT NULL ORDER BY applied_at DESC LIMIT 30').fetchall():
+    print(f'  {r[\"applied_at\"][:16]}  {r[\"site\"][:20]:20s} {r[\"title\"][:45]}')
+"@
+```
+
+---
+
+## 4. Get FRESH jobs (discover → enrich → score)
+
+```powershell
+# Greenhouse/Lever/Ashby ONLY (cleanest, applyable forms, no LinkedIn/Workday noise):
+& $PY -m applypilot run discover enrich score --source ats_boards
+
+# Everything (also jobspy LinkedIn/Indeed + Workday):
+& $PY -m applypilot run discover enrich score
+
+# Full pipeline incl. resume tailoring + cover letters:
+& $PY -m applypilot run
+```
+
+- `--source` values: `ats_boards` (Greenhouse/Lever/Ashby), `jobspy` (LinkedIn/Indeed), `workday`, `smartextract`.
+- Freshness window is `hours_old` in `E:\applypilot-data\searches.yaml` (currently 48).
+- Companies discovered = the list in `src\applypilot\config\ats_companies.yaml` (56 design-heavy companies). Add a company by its ATS board token under the right ATS.
+- Re-running discover is safe — it dedupes by URL.
+
+---
+
+## 5. APPLY (live — real submissions under Nida's name)
+
+Main command + the flags that matter:
+
+```powershell
+& $PY -m applypilot apply --workers 2 --limit 20 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720 --max-transient-retries 1
+```
+
+| Flag | Meaning / recommended |
+|---|---|
+| `--limit N` | Max jobs this run. Start small (10) to validate, then scale. |
+| `--workers N` | Parallel browsers. 1 = safe/diagnosable; 2 = ~2× faster (per-site lock makes it safe). |
+| `--model` | `claude-haiku-4-5-20251001` (~⅓ cost, has the Greenhouse playbook) or `sonnet` (more robust, exhausts limits fast). |
+| `--job-timeout 720` | Seconds/job. 720 needed for email-verification forms (480 default times out). |
+| `--max-transient-retries 1` | Retries on transient fails. Timeouts are never retried (waste). |
+| `--headless` | Hidden Chrome. Drop it to watch the browser. |
+| `--no-live` | One-line progress per tool call. Drop it for the Rich dashboard. |
+| `--dry-run` | Fill everything, **never click Submit**. Zero real submissions — rehearsal. |
+| `--continuous` | Keep polling for new jobs forever (instead of `--limit`). |
+| `--url "<job url>"` | Apply to ONE specific job. |
+| `--min-score 9` | Override the default 8 (near-perfect only). |
+| `--max-age-hours 0` | Disable the 48h freshness gate (drain everything, incl. stale). |
+
+**Rehearse with no submissions first:**
+```powershell
+& $PY -m applypilot apply --limit 5 --model claude-haiku-4-5-20251001 --headless --no-live --dry-run --job-timeout 720
+```
+
+**One specific job:**
+```powershell
+& $PY -m applypilot apply --url "https://boards.greenhouse.io/figma/jobs/123" --limit 1 --model sonnet --headless --no-live --job-timeout 720
+```
+
+---
+
+## 6. Watch a run in progress (second terminal)
+
+```powershell
+Get-Content E:\applypilot-data\logs\review.jsonl -Tail 5 -Wait     # one line per finished apply
+Get-Content E:\applypilot-data\logs\worker-0.log -Tail 20 -Wait    # live agent reasoning + tool calls
+```
+
+Stop a run: `Ctrl+C` once = skip current job, twice = stop. Safe — no DB corruption; discovery/applies commit incrementally.
+
+---
+
+## 7. After a run — triage
+
+```powershell
+& $PY -m applypilot report                 # cost, pass-rate, (A) removable vs (B) irreducible failures
+```
+
+**See the latest attempts + why they failed:**
+```powershell
+& $PY -c @"
+from applypilot.database import get_connection, init_db
+from datetime import datetime, timezone, timedelta
+init_db(); c=get_connection()
+cut=(datetime.now(timezone.utc)-timedelta(hours=6)).isoformat()
+for r in c.execute('SELECT site,title,apply_status,last_failure_class,verification_confidence FROM jobs WHERE last_attempted_at>=? ORDER BY last_attempted_at DESC',(cut,)).fetchall():
+    print(f'  [{(r[\"apply_status\"] or \"?\"):14s}] {(r[\"last_failure_class\"] or \"\"):30s} conf={r[\"verification_confidence\"] or \"-\"} {r[\"site\"][:18]:18s} {r[\"title\"][:35]}')
+"@
+```
+
+Full agent transcript for a failed job: newest `E:\applypilot-data\logs\claude_*.txt`.
+Verifier evidence for an unverified one: `E:\applypilot-data\logs\verify_*.json`.
+
+---
+
+## 8. Skills (the deterministic replay layer)
+
+```powershell
+dir E:\applypilot-data\skills              # one <company>.yaml per recorded company
+dir E:\applypilot-data\skills\_archive     # drifted/broken skills auto-moved here
+```
+A bad/drifted skill auto-archives and falls back to the LLM — you don't manage these by hand. Delete a `<company>.yaml` to force a fresh record next apply.
+
+---
+
+## 9. Common fixes
+
+```powershell
+# Re-try previously failed jobs (clears the failed lock):
+& $PY -m applypilot apply --reset-failed
+
+# Manually mark a job applied / failed (DB only, no browser):
+& $PY -m applypilot apply --url "<url>" --mark-applied
+& $PY -m applypilot apply --url "<url>" --mark-failed --fail-reason "manual"
+
+# Generate the prompt for one job WITHOUT applying (debug):
+& $PY -m applypilot apply --url "<url>" --gen
+
+# Stale 'in_progress' locks after a hard kill — released automatically on next run,
+# or inspect:
+& $PY -c @"
+from applypilot.database import get_connection, init_db
+init_db(); c=get_connection()
+for r in c.execute(\"SELECT site,title FROM jobs WHERE apply_status='in_progress'\").fetchall(): print(r['site'], r['title'][:40])
+"@
+```
+
+---
+
+## 10. Mental model
+
+```
+discover → enrich → score → (tailor → cover) → APPLY → verify
+   |          |        |                          |        |
+ats_boards  full    fit 1-10                  skill replay  success-page
+(56 cos)    desc   (prefilter kills          OR LLM agent   check → applied
+                    PM/PgM/etc for $0)       (Haiku/Sonnet)  / needs_review
+```
+- Only **score ≥ 8** and **discovered ≤ 48h** jobs are applied to. Dupes (same company+title) collapse to one.
+- Apply path: deterministic `prefill` fills ~14 fields + EEO/screening dropdowns (option-aware) → LLM handles custom free-text + verification + submit → verifier confirms.
+- `report` tells you the truth; `status` tells you volume.
+```
+```
