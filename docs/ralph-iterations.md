@@ -951,3 +951,34 @@ Autonomous $0 iteration (user away; no live runs). Closed the 3
   class + drops $/apply toward ~$0. Double-submit-safe + fail-open.
 3 new $0 tests; suite 196→199 green. Live re-validation of acceptance #6
 deferred to a user-authorized batch (loop guardrail; user away).
+
+## Iteration 10 — adapter-path acceptance slice — 2026-05-16
+
+Added `adapter_slice` to reporting: acceptance #6 ($/apply, (A)-fails,
+pass-rate) judged ONLY on greenhouse_adapter* rows, excluding the
+Workday/indeed pollution that made the Phase-F average meaningless.
+Dropped Tier-2-patcher answer-cache wiring as out-of-scope gold-plating
+(iter-9 already realized Phase D on the primary path). Suite 199→200.
+
+### Loop status — PAUSED at the live-validation gate
+
+All genuinely-valuable $0 engineering is complete. Reliability v2 code:
+A (telemetry+report incl. adapter slice), B (self-healing locators),
+C (Greenhouse adapter: frame-aware, answer-cache, deterministic submit;
+live-proven on gusto), D (answer-cache, wired into C), E (automatability
+gate, false-positive fixed + live-verified). 200 tests green, ~13 commits.
+
+`RALPH-DONE: RELIABILITY V2 SHIPPED` is NOT emitted and MUST NOT be until
+a user-authorized live batch shows the **adapter_slice** clearing
+acceptance #6 (zero (A)-fails, $/apply materially < iter-13 ~$1.35,
+pass-rate ≥ iter-13). Continuing to manufacture $0 iterations past this
+point would be undisciplined churn — the remaining work is inherently
+live + user-gated. Loop correctly idles here.
+
+### Handoff (when the user returns) — exact validation command
+  cd E:\auto-apply-pipeline
+  $env:APPLYPILOT_USE_SKILLS = "1"
+  bash E:\applypilot-data\.gh_validation.sh        # 10 GH-only adapter-driven jobs
+  & $PY -m applypilot report                        # read the "Adapter-path (v2 acc#6)" line
+Emit RALPH-DONE iff that line shows (A)-fails=0 AND $/apply < ~1.35 AND
+pass-rate ≥ ~60%. Else iterate on whatever the slice says is failing.
