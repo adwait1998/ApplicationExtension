@@ -1008,3 +1008,47 @@ Loop still correctly idles on RALPH-DONE: the iter-11/12 prefilter fixes
 are scoring-quality, not the acceptance-#6 live gate. The b86314n32
 adapter slice = 5/7 (71%), (A)-fails=2, $/apply=$1.289 — pass-rate and
 $/apply clear, but **(A)-fails ≠ 0**, so v2 is NOT shipped yet.
+
+## Iteration 13 — Root-cause: the 2 (A)-fails were ONE hanging job
+
+Systematic-debugging pass on batch b86314n32's `(A)-fails=2`.
+
+**Finding:** the "2" is not 2 problems — review.jsonl rows 1 & 3 are the
+SAME job (gusto 7640344 "Principal Product Designer, CoreX AI"), same
+idempotency_key, attempted twice, each killed at the 720s job-timeout,
+both stuck at checkpoint_stage=resume_uploaded, cost_usd=null. The other
+5 distinct adapter jobs all reached verification_complete (applied).
+
+**Root cause:** adapter `_standard_plan` covered gender/race/veteran/
+disability but NOT gusto's extra *voluntary self-ID* react-select
+dropdowns (sexual orientation / gender identity / first-generation
+professional). Unresolved → `submit='auto'` bailed to the LLM → LLM
+looped on react-select id-misalignment ("id=606 is actually the
+transgender dropdown's input") with no fail-fast → consumed the full
+720s. Pure removable (A)-class waste.
+
+**Fix:** 3 new combobox specs (decline-default), ordered before the
+generic "gender" spec. Deterministic resolve → zero LLM → no hang →
+also -1 LLM call ($/apply ↓). TDD regression
+`test_adapter_resolves_voluntary_selfid_dropdowns` (red→green). Full
+suite 229 passed. Committed f6c2a48.
+
+**Documented follow-up (not done):** LLM fallback lacks a circuit-breaker
+on a non-committing combobox. RC1 removes the observed failure; RC2 is
+defense-in-depth for any *future* unresolved-combobox hang — next
+root-cause cycle if one surfaces.
+
+**RALPH-DONE still NOT emitted.** Acceptance #6 requires zero (A)-fails
+on a *user-authorized live* adapter slice. The fix is verified $0
+(synthetic DOM) but the live re-validation is user-gated — prior
+authorizations do NOT carry over. Loop idles at the live gate.
+
+### Handoff — re-validation command (USER must authorize each run)
+  cd E:\auto-apply-pipeline
+  $env:APPLYPILOT_USE_SKILLS = "1"
+  $PY = "C:\Users\adwai\AppData\Local\Programs\Python\Python312\python.exe"
+  bash E:\applypilot-data\.gh_validation.sh    # regenerate URLs if any now applied
+  & $PY -m applypilot report                   # read "Adapter-path (v2 acc#6)"
+Emit RALPH-DONE iff that line shows (A)-fails=0 AND $/apply < ~1.35 AND
+pass-rate ≥ ~60%. gusto 7640344 specifically should now resolve all
+self-ID dropdowns deterministically and submit with zero LLM.
