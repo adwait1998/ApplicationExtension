@@ -46,13 +46,38 @@ def page():
 
 
 def test_scan_detects_visible_captcha(page):
+    # A real, RENDERED hCaptcha challenge widget (sized + visible).
     page.set_content("""
       <html><body>
         <form><input id="first_name"><input type="file"></form>
-        <div class="h-captcha" data-sitekey="x"></div>
-        <iframe src="https://hcaptcha.com/captcha/v1"></iframe>
+        <div class="h-captcha" data-sitekey="x"
+             style="width:300px;height:78px;display:block"></div>
+        <iframe src="https://hcaptcha.com/captcha/v1"
+             style="width:300px;height:78px"></iframe>
       </body></html>""")
     assert scan_page_for_blocker(page) == "captcha"
+
+
+def test_invisible_recaptcha_is_NOT_a_blocker(page):
+    """Regression for the gusto 2026-05-16 false positive: Greenhouse
+    forms carry recaptcha/api2/anchor + the v3 badge on EVERY page even
+    when reCAPTCHA is invisible (no wall). The gate must NOT defer these
+    — doing so would queue every Greenhouse job to a human."""
+    page.set_content("""
+      <html><body>
+        <form>
+          <label>First name</label><input id="first_name" name="first_name">
+          <input type="file" name="resume">
+          <button>Submit application</button>
+        </form>
+        <!-- invisible reCAPTCHA: anchor iframe + badge, NO challenge -->
+        <iframe src="https://www.google.com/recaptcha/api2/anchor?k=x"
+                style="width:0;height:0;display:none"></iframe>
+        <div class="grecaptcha-badge" style="width:256px;height:60px"></div>
+        <div class="g-recaptcha" data-sitekey="x"
+             style="width:0;height:0;display:none"></div>
+      </body></html>""")
+    assert scan_page_for_blocker(page) is None  # automatable, proceed
 
 
 def test_scan_detects_email_verification(page):

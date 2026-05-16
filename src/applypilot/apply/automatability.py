@@ -69,13 +69,30 @@ _SIGNAL_JS = r"""
   const lower = (document.body ? document.body.innerText : '')
     .replace(/\s+/g, ' ').trim().toLowerCase();
   const has = sel => !!document.querySelector(sel);
-  // CAPTCHA: only count if a widget is actually present (invisible
-  // recaptcha v3 with no challenge is fine — the agent/submit handles it).
-  const recaptchaV2 = !!document.querySelector(
-    'iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], .g-recaptcha[data-sitekey]');
-  const hcaptcha = has('iframe[src*="hcaptcha.com"], .h-captcha');
-  const turnstile = has('iframe[src*="challenges.cloudflare.com"], .cf-turnstile');
+  const visible = el => {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width < 20 || r.height < 20) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
+  };
+  const anyVisible = sel =>
+    Array.from(document.querySelectorAll(sel)).some(visible);
+  // CAPTCHA is a hard blocker ONLY when an actual CHALLENGE is presented.
+  // Greenhouse renders recaptcha/api2/anchor + the v3 badge on EVERY form
+  // even for INVISIBLE reCAPTCHA (no wall — the submit flow handles it).
+  // Pre-gating on the anchor iframe / badge / bare .g-recaptcha would
+  // defer every Greenhouse job to a human (observed: gusto false-positive
+  // 2026-05-16). Require: a VISIBLE recaptcha CHALLENGE (bframe popup) or
+  // a VISIBLE v2 checkbox, or hCaptcha / Turnstile widgets, or explicit
+  // challenge text. The invisible v3 badge is explicitly NOT a blocker.
+  const recaptchaChallenge =
+    anyVisible('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"]')
+    || anyVisible('.g-recaptcha .rc-anchor, .recaptcha-checkbox');
+  const hcaptcha = anyVisible('iframe[src*="hcaptcha.com"], .h-captcha');
+  const turnstile = anyVisible('iframe[src*="challenges.cloudflare.com"], .cf-turnstile');
   const captchaChallengeText = /(select all (images|squares)|i'?m not a robot|verify you are human)/i.test(lower);
+  const recaptchaV2 = recaptchaChallenge;
   // login wall = a password field AND no file/resume input (i.e. not the
   // application form itself, which often has neither).
   const hasPassword = has('input[type="password"]');
