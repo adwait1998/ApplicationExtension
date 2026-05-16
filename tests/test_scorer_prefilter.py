@@ -44,6 +44,20 @@ TARGET = "Product Designer"
     "GTM Strategy Manager",
     "Operations Manager, Studio",
     "Principal Consultant",
+    # iter-11: people-management / over-leveled DESIGN roles — the
+    # candidate is a 5-yr IC, not a manager. These waste applies.
+    "Product Design Manager",
+    "Design Manager",
+    "Manager, Product Design",
+    "Senior Product Design Manager, Payroll",
+    "Director of Design",
+    "Design Director",
+    "Head of Design",
+    "VP, Design",
+    "VP of Product Design",
+    "Creative Director",
+    "Sr. Manager, UX Design, Prime Video",
+    "Director, Experience Design",
 ])
 def test_prefilter_rejects_off_track_roles(title):
     r = _prefilter_score(TARGET, title)
@@ -55,14 +69,12 @@ def test_prefilter_rejects_off_track_roles(title):
     "Senior Product Designer",
     "Product Designer, AI Models",
     "Staff Interaction Designer",
-    "Product Design Manager",          # managing designers = in-field
-    "Design Manager",
-    "Manager, Product Design",
-    "Director of Design",
-    "UX Researcher",                   # research within UX is in-field
-    "User Researcher, Design Systems",  # "researcher" excluded, but "user research" match guards it
+    "Principal Product Designer",       # Principal = senior IC, not mgmt
+    "UX Researcher",                    # research within UX is in-field
+    "User Researcher, Design Systems",  # "researcher" excluded, "user research" guards it
     "Senior UX Designer",
-    "Design Lead, Growth",             # "product lead" excluded, "design lead" match guards it
+    "Design Lead, Growth",             # "lead" = senior IC track, NOT manager
+    "Lead Product Designer",
 ])
 def test_prefilter_preserves_design_roles(title):
     # None == not prefiltered → goes to the LLM for merit scoring

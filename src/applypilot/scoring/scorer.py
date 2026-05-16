@@ -29,6 +29,7 @@ CRITICAL — these are SEPARATE career fields, do NOT conflate them just because
 - Product Manager, Program Manager, Product Owner, Engineering Manager = a DIFFERENT field (product strategy/delivery, not design execution). Score 1-2 even though the title contains "Product".
 - Researcher / Research Scientist / Data Scientist / ML Engineer = a DIFFERENT field. Score 1-2.
 - Content Designer / UX Writer / Content Strategist = adjacent writing field, NOT visual/product design. Score at most 4 unless the JD is explicitly a hybrid product-design role.
+- People-MANAGEMENT design roles (Design Manager, Product Design Manager, Director of Design, Head of Design, VP Design, Creative Director) = a DIFFERENT (management) job. The candidate is a 5-year individual contributor, NOT a manager. Score 1-2 even though the title contains "Design".
 - "Design" in non-UX contexts (chip design, protein design, instructional design) = different field. Score 1-2.
 
 Examples (Product Design candidate):
@@ -42,7 +43,9 @@ Examples (Product Design candidate):
 - "Senior Product Designer" → 9
 - "Staff Interaction Designer" → 9
 - "UX Researcher" → 7   (research within UX is in-field)
-- "Product Design Manager" → 8   (managing designers IS the design field)
+- "Product Design Manager" → 2   (people-management, NOT an IC designer role)
+- "Director of Design" → 1   (management/exec, not IC)
+- "Design Lead" → 7   (senior IC track — fit; "lead" is not "manager")
 
 Output format (3 lines, NO other text):
 SCORE: <number 1-10>
@@ -111,8 +114,12 @@ _FIELD_KEYWORDS = {
             "user experience", "user research", "user researcher",
             "interaction design", "product design", "visual design",
             "graphic design", "service design", "design lead",
-            "design manager", "design director", "design system",
-            "creative director",
+            "design system",
+            # NOTE: "design manager"/"design director"/"creative director"
+            # were REMOVED from match (iter-11 — they auto-preserved
+            # management titles). The candidate is a 5-yr IC designer, not
+            # a people-manager; those are handled by the management
+            # override below, not preserved here.
         ),
         "exclude_titles": (
             "engineer", "scientist", "developer", "physician", "nurse",
@@ -165,6 +172,18 @@ _FIELD_KEYWORDS = {
 }
 
 
+# People-management / over-leveled markers. The candidate is a 5-year IC
+# Product/UX Designer — a Design Manager / Director of Design / Head of
+# Design / VP Design / Creative Director is a DIFFERENT (management) job,
+# not a fit, and applying wastes attempts + mismatches the recruiter.
+# These override the design match (a title can be both "Product Design"
+# AND "Manager"; for an IC target, management wins → reject).
+_DESIGN_MGMT_MARKERS = (
+    "manager", "director", "head of", "vice president", " vp ", "vp,",
+    "vp of", "chief ", "people lead",
+)
+
+
 def _prefilter_score(target_role: str, title: str) -> dict | None:
     """Return a forced score=1 result if the title clearly mismatches target_role.
 
@@ -177,12 +196,25 @@ def _prefilter_score(target_role: str, title: str) -> dict | None:
 
     # Find which field bucket applies based on target_role
     bucket = None
+    bucket_key = None
     for key, cfg in _FIELD_KEYWORDS.items():
         if any(m in role_lower for m in cfg["match"]):
             bucket = cfg
+            bucket_key = key
             break
     if not bucket:
         return None
+
+    # Management-level override (IC designer target only): reject people-
+    # management / exec design titles even when "design" is present.
+    if bucket_key == "designer" and any(
+            mk in title_lower for mk in _DESIGN_MGMT_MARKERS):
+        return {
+            "score": 1,
+            "keywords": "",
+            "reasoning": (f"Pre-filter: '{title}' is a people-management / "
+                          f"over-leveled role; candidate is an IC designer."),
+        }
 
     # If title contains an excluded keyword AND no matching keyword, auto-fail
     has_exclusion = any(x in title_lower for x in bucket["exclude_titles"])
