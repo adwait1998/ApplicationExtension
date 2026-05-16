@@ -308,25 +308,35 @@ _SCORE_JS = r"""
     if (ratio > bestScore) { bestScore = ratio; best = el; bestIdx = idx; }
   });
   if (best && bestScore >= 0.6) {
-    best.setAttribute('data-applypilot-heal', '1');
+    // UNIQUE per-call token. A shared "1" marker collided when several
+    // fields healed via fingerprint in one pass (a churned form): every
+    // call tagged "1", so `[data-applypilot-heal="1"]`.first returned the
+    // FIRST stale-tagged element, mis-filling later fields. Tag with the
+    // caller's token so locators never cross-collide.
+    best.setAttribute('data-applypilot-heal', args.token);
     return {idx: bestIdx, score: bestScore, tag: tag};
   }
   return {idx: -1, score: bestScore};
 }
 """
 
+_heal_token_counter = 0
+
 
 def _scored_rediscover(page: "Page", spec: ElementSpec):
     """Scan same-tag candidates, score each against the fingerprint, tag the
-    winner with a data attribute and return a locator to it."""
+    winner with a UNIQUE token and return a locator to exactly that element."""
+    global _heal_token_counter
+    _heal_token_counter += 1
+    token = f"h{_heal_token_counter}"
     try:
-        res = page.evaluate(_SCORE_JS, {"fp": spec.fingerprint or {}})
+        res = page.evaluate(_SCORE_JS, {"fp": spec.fingerprint or {}, "token": token})
     except Exception:
         return None
     if not res or res.get("idx", -1) < 0:
         return None
     try:
-        loc = page.locator('[data-applypilot-heal="1"]').first
+        loc = page.locator(f'[data-applypilot-heal="{token}"]').first
         if loc.count() > 0:
             return loc
     except Exception:
