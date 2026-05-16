@@ -784,3 +784,155 @@ The auto-recorded `chime.yaml` / `robinhood.yaml` use Playwright MCP's `element`
 | `docs/ralph-iterations.md` | This iteration |
 
 `RALPH-DONE: SKILL PLAYBOOK V1 SHIPPED` **not** emitted. Phases 1-5 are done + unit-tested; the react-select fix removes the dominant live-apply blocker and is validated 2/2 on real employers. But spec acceptance criteria #2/#3 (Tier 1 replay + Tier 2 patch of a recorded skill) remain genuinely unmet because MCP-sourced recordings aren't replay-grade — which the spec itself scopes to a v1.1 Playwright-CLI migration. Emitting the completion sentinel would overclaim. The skill *machinery* is shipped and the apply *reliability* is materially improved; full Skill-Playbook v1 acceptance awaits the deferred transport migration.
+
+---
+
+## Iteration 1 — Reliability v2 Phase A (telemetry) — 2026-05-15
+
+Spec: docs/superpowers/specs/2026-05-15-reliability-v2-self-healing.md
+
+**Shipped:** per-apply token/cost/cache + tier_used persisted to review.jsonl
+(was computed in run_job then discarded). `applypilot report` + pure
+`reporting.summarize_review` classifying every failure (A) removable vs
+(B) irreducible. 4 $0 synthetic tests; full suite 149->153 green.
+
+**First data signal (162 historical live attempts):** pass rate 32%;
+**80% of failures are (A) removable** (88 vs 22 irreducible) — empirical
+validation of the whole v2 direction. Cost/cache n/a until a
+post-instrumentation run populates the new fields (plumbing in + unit
+tested). by-ATS: greenhouse 28%, ashby 28%, workday 36%.
+
+**Done-when (spec accept #1):** met — report shows pass-rate, A-vs-B
+split, by-ATS/tier; $/apply + cache-hit fields populate on next live run.
+
+Phase A complete. Next: Phase B — self-healing locator core (healing.py),
+zero-LLM, synthetic-DOM tested.
+
+---
+
+## Iteration 2 — Reliability v2 Phase B (self-healing locator core) — 2026-05-15
+
+**Shipped:** `src/applypilot/apply/healing.py` — 10-tier role/ARIA priority
+locator hierarchy + multi-signal fingerprint + scored re-discovery, zero LLM.
+Label resolved structurally (nearest preceding <label> in DOM), not the
+for=/id link that churns. Scored fallback ignores signals the fingerprint
+never captured (no dilution penalty).
+
+**Done-when (spec accept #2):** met — 9 synthetic-DOM tests; worst case
+(id+class+data-testid+name all churned → fingerprint heal) passes; ≥95%
+mutation battery (30 scenarios, all <1s). Suite 153→162 green.
+
+Phase B complete. Next: Phase C — generalize prefill into a per-ATS
+Greenhouse adapter built on healing locators.
+
+### Iteration 3 (interleaved) — user-reported blind-type combobox bug
+
+User observed live: Playwright types dropdown values that don't exist as
+options, spins, then defaults to LLM. Root cause: iter-13 keyboard combobox
+blind-typed the intended value; no real-option match → react-select empties →
+loop every preferred ~3.5s → LLM fallback. Fixed: option-aware selection
+(_match_real_option pure matcher: exact → preferred⊆option → option⊆preferred
+→ ≥60% token overlap), fail-fast when nothing matches (no spin; Tier-2 LLM
+patch gets the real option list). 8 $0 matcher tests; suite 162→170. This is
+(A)-removable error class — directly feeds Phase C adapter robustness.
+
+### Iteration 4 (interleaved) — 2026-05-16 batch-failure fixes (2 (A)-removable levers)
+
+Parallel-agent analysis of the "5 applied / 7 failed" 2026-05-16 batch found
+the 7 "failures" were really: 2 correct not_eligible skips (B), 2 roblox
+SUCCESSES mis-flagged (verifier blind to embedded iframe), 2 slow-typing
+timeouts (sofi/PayPal), 1 infra flake. Net real applied ≈ 7/12 not 5/12.
+browser-use evaluated in parallel → SKIP (per-step-LLM, no replay; validates
+building Reliability-v2 ourselves; mine workflow-use only as design ref).
+
+Fixed both (A)-removable levers, $0 synthetic tests:
+- **Verifier v3**: `_scan_frames_for_success` aggregates the success scan
+  across ALL `page.frames` (Playwright reaches cross-origin embeds) — fixes
+  roblox-style embedded-iframe submissions logged as needs_review. 4 tests.
+- **Anti-keystroke**: prompt now forbids `browser_type` for text-field
+  values (caused 720s timeouts); browser_fill_form one-shot only;
+  browser_type reserved for react-select search. 120s tripwire. 2 tests.
+
+Suite 170 → 176 green. No new regressions; both are the known (A)-removable
+class. Loop continues to Phase C (per-ATS Greenhouse adapter).
+
+## Iteration 5 — Reliability v2 Phase C (Greenhouse adapter) — 2026-05-16
+
+**Shipped:** `src/applypilot/apply/adapters/greenhouse.py` — one deterministic
+adapter for the Greenhouse *platform* (not per-company). Standard fields
+declared semantically, resolved through the Phase-B self-healing locator
+core; option-aware react-select commit (reuses tested matchers, resolves the
+inner input); unmapped required fields → `unresolved` for Tier-2 (never
+guesses). `used_llm` always False.
+
+**Also fixed (found via Phase C):** healing.py scored-rediscovery used a
+shared `data-applypilot-heal="1"` marker → multiple fingerprint heals in one
+pass (churned form) collided, `.first` returned a stale element, mis-filling
+later fields. Now a unique per-call token.
+
+**Done-when (spec accept #3):** synthetic half MET — 3 tests: pristine
+100% standard fields filled + submit zero-LLM; self-heals after id/class
+churn; never guesses the custom question. Suite 176→179 green. The "one
+live Greenhouse apply reaches applied" half is GATED on explicit user
+authorization (loop guardrail) — NOT run autonomously. Loop pauses here
+for that decision; Phase D (semantic answer-cache) is the next $0 phase
+and can proceed without live access.
+
+## Iteration 6 — Reliability v2 Phase D (semantic answer-cache) — 2026-05-16
+
+**Shipped:** `src/applypilot/apply/answer_cache.py` — embed (offline
+deterministic hashed BoW, synonym-canonicalized) + NN over a
+profile-seeded + learned Q&A bank. Seed/cache hit → 0 LLM; novel → 1
+injected-LLM call → atomic-persisted → subsequent asks are hits. Added an
+intent-key channel (canonical markers: workauth/whyinterested/sponsorship/
+yearsexp/...) so paraphrased formulaic Qs collapse to one entry while
+genuinely different Qs still miss. Embedder + on-miss LLM are seams.
+
+**Done-when (spec accept #4):** MET — 7 $0 tests incl. "2nd occurrence →
+0 LLM calls" and cross-instance persistence. Suite 179→186 green.
+
+Phase D complete. Next $0 phase: E (automatability gate + human queue).
+Phase C live validation + Phase F still gated on explicit user auth.
+
+## Iteration 7 — Reliability v2 Phase E (automatability gate) — 2026-05-16
+
+**Shipped:** `src/applypilot/apply/automatability.py` — pre-LLM scan of the
+loaded page (all frames) for hard blockers (visible CAPTCHA widget/challenge,
+email-verification wall, SSO host, anti-bot interstitial, bare login wall).
+classify_blocker is pure. On a hit → queue_for_human (logs/human_queue.jsonl)
+and run_job short-circuits to needs_review:needs_human_<reason> BEFORE the
+Claude spawn (no LLM, no rate-limit burn). Fail-OPEN on any error.
+reporting.py gained needs_human tally + per-ATS automatability metric in
+`applypilot report`.
+
+**Done-when (spec accept #5):** MET — synthetic captcha page → scan returns
+"captcha" + queued, run_job returns needs_human before build_prompt/Popen
+(gate placed pre-spawn); report shows per-ATS automatability. 8 $0 tests;
+suite 186→194 green.
+
+Phase E complete. All $0 phases (A–E) DONE. Remaining: Phase C live
+validation + Phase F live batch — BOTH gated on explicit user authorization
+(real submissions/cost). Loop should pause for that; do not emit
+RALPH-DONE until Phase F validates acceptance criteria live.
+
+### Iteration 7b — Phase C integration (adapter wired into live path)
+
+Found the gap before spending a live submission: fill_greenhouse was a
+tested module but unwired. Now run_job invokes it (flag-gated, additive,
+best-effort, fail-open; LLM still submits). Fail-open test; suite 194→195.
+Live validation can now actually exercise the adapter.
+
+## Iteration 8 — Reliability v2 Phase C LIVE validation — 2026-05-16
+
+First gusto run: stale MCP gusto.yaml drift → auto-archived → fell back to
+LLM (skill-flow fallback ✓); then automatability gate FIRED on
+recaptcha/api2/anchor — a FALSE POSITIVE (Greenhouse renders that anchor
+iframe + v3 badge on every form even when reCAPTCHA is invisible). Caught
+before Phase F. Fixed gate to require a VISIBLE challenge; verified against
+the live gusto page (now None=automatable). Suite 195→196.
+
+Re-run: **APPLIED, verification_confidence 0.9, $1.294**, fresh gusto.yaml
+recorded. Gate correctly passed; adapter+LLM completed incl. email
+verification + submit; verifier v3 clean. **Phase C done-when MET**
+(synthetic zero-LLM fill + one live Greenhouse apply → applied).
+Next: Phase F live batch (user-authorized).
