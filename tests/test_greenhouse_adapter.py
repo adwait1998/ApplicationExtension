@@ -254,3 +254,82 @@ def test_auto_submit_only_when_fully_resolved(page, resume):
     assert r2.unresolved == []
     assert r2.submitted is True
     assert page.locator("#done").is_visible()
+
+
+# Regression: gusto 7640344 "Principal Product Designer, CoreX AI" timed
+# out twice at the 720s job-timeout (2 (A)-class fails in batch b86314n32).
+# Root cause: the adapter covered gender/race/veteran/disability but NOT
+# gusto's extra *voluntary self-ID* react-select dropdowns (sexual
+# orientation / gender identity / first-generation professional). They
+# went unresolved → submit='auto' bailed to the LLM, which then looped
+# forever fighting react-select id-misalignment until the hard kill.
+# These always have a safe canonical answer (decline) → the adapter must
+# resolve them deterministically, zero LLM.
+_SELFID_FORM = """
+<!doctype html><html><body><form id="application-form">
+  <label for="so-i">Sexual Orientation</label>
+  <div class="select__control" id="so-c" tabindex="0">
+    <span class="select__single-value" id="so-v">Select...</span>
+    <input class="select__input" id="so-i" autocomplete="off"></div>
+  <div class="select__menu" id="so-m" style="display:none">
+    <div class="select__option">Heterosexual</div>
+    <div class="select__option">I don't wish to answer</div></div>
+
+  <label for="gi-i">Do you identify as transgender?</label>
+  <div class="select__control" id="gi-c" tabindex="0">
+    <span class="select__single-value" id="gi-v">Select...</span>
+    <input class="select__input" id="gi-i" autocomplete="off"></div>
+  <div class="select__menu" id="gi-m" style="display:none">
+    <div class="select__option">Yes</div><div class="select__option">No</div>
+    <div class="select__option">Decline To Self Identify</div></div>
+
+  <label for="fg-i">Are you a first-generation professional?</label>
+  <div class="select__control" id="fg-c" tabindex="0">
+    <span class="select__single-value" id="fg-v">Select...</span>
+    <input class="select__input" id="fg-i" autocomplete="off"></div>
+  <div class="select__menu" id="fg-m" style="display:none">
+    <div class="select__option">Yes</div><div class="select__option">No</div>
+    <div class="select__option">Prefer not to answer</div></div>
+<script>
+  function wire(cId,iId,mId,vId){
+    const c=document.getElementById(cId),i=document.getElementById(iId),
+          m=document.getElementById(mId),v=document.getElementById(vId);
+    let hi=null; const open=()=>{m.style.display='block';};
+    c.addEventListener('mousedown',open); c.addEventListener('click',open);
+    i.addEventListener('focus',open);
+    i.addEventListener('input',()=>{const q=i.value.toLowerCase();
+      const o=[...m.querySelectorAll('.select__option')];
+      hi=o.find(x=>q&&x.textContent.toLowerCase().includes(q))||null; open();});
+    i.addEventListener('keydown',e=>{
+      if(e.key==='ArrowDown'){e.preventDefault();
+        if(!hi)hi=m.querySelector('.select__option');}
+      else if(e.key==='Enter'){e.preventDefault();
+        if(hi){v.textContent=hi.textContent;i.value=hi.textContent;
+          m.style.display='none';}}});}
+  wire('so-c','so-i','so-m','so-v');
+  wire('gi-c','gi-i','gi-m','gi-v');
+  wire('fg-c','fg-i','fg-m','fg-v');
+</script></form></body></html>
+"""
+
+
+def test_adapter_resolves_voluntary_selfid_dropdowns(page, resume):
+    """gusto-style sexual-orientation / gender-identity / first-gen
+    react-selects must be filled deterministically (decline), NOT left
+    unresolved — otherwise the LLM fallback hangs to the job-timeout."""
+    page.set_content(_SELFID_FORM)
+    res = fill_greenhouse(page, _PROFILE, resume, submit=False)
+    assert res.used_llm is False
+    for key in ("sexual_orientation", "gender_identity", "first_generation"):
+        assert key in res.fields_filled, (
+            f"{key} not filled (got {res.fields_filled}); "
+            f"unresolved={res.unresolved}")
+    # None of the three may leak to the Tier-2 LLM queue.
+    leaked = [u for u in res.unresolved
+              if any(t in u["label"].lower()
+                     for t in ("orientation", "transgender", "first-gen",
+                               "first generation"))]
+    assert leaked == [], f"voluntary self-ID leaked to LLM: {leaked}"
+    assert page.locator("#so-v").inner_text() != "Select..."
+    assert page.locator("#gi-v").inner_text() != "Select..."
+    assert page.locator("#fg-v").inner_text() != "Select..."

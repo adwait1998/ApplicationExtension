@@ -93,6 +93,26 @@ def _standard_plan(profile: dict, resume_pdf_path: str) -> list[dict]:
          "labels": ["sponsorship", "require sponsorship", "need sponsorship", "visa"],
          "kind": "combobox",
          "preferred": (_yn(wa.get("require_sponsorship", "")),)},
+        # Voluntary self-ID dropdowns (gusto et al. add these beyond the
+        # standard EEO set). They ALWAYS have a safe canonical answer
+        # (decline) — resolve deterministically so submit='auto' fires and
+        # the LLM is never invoked. Specific labels come BEFORE the generic
+        # "gender" spec so "...transgender..." isn't hijacked by it.
+        {"key": "sexual_orientation", "labels": ["sexual orientation"],
+         "kind": "combobox",
+         "preferred": (eeo.get("sexual_orientation", ""),) + _DECLINE},
+        {"key": "gender_identity",
+         "labels": ["gender identity", "do you identify as transgender",
+                    "identify as transgender", "transgender"],
+         "kind": "combobox",
+         "preferred": (eeo.get("gender_identity", ""),) + _DECLINE},
+        {"key": "first_generation",
+         "labels": ["first-generation professional",
+                    "first generation professional",
+                    "first-generation college", "first generation college",
+                    "first-generation", "first generation"],
+         "kind": "combobox",
+         "preferred": (eeo.get("first_generation", ""),) + _DECLINE},
         {"key": "gender", "labels": ["gender"], "kind": "combobox",
          "preferred": (eeo.get("gender", ""),) + _DECLINE},
         {"key": "race", "labels": ["race", "ethnicity", "race/ethnicity"],
