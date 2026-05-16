@@ -116,6 +116,25 @@ def summarize_review(rows: list[dict]) -> dict[str, Any]:
         if _is_success(r):
             d["applied"] += 1
 
+    # Adapter-path slice: the FAIR measure for Reliability-v2 acceptance #6
+    # ($/apply + (A)-failures) — judged ONLY on jobs the Greenhouse adapter
+    # actually drove, excluding Workday/indeed/Ashby the adapter never
+    # targets (those polluted the mixed Phase-F average).
+    adp = [r for r in live
+           if str(r.get("tier_used") or "").startswith("greenhouse_adapter")]
+    adp_applied = sum(1 for r in adp if _is_success(r))
+    adp_a = sum(1 for r in adp if classify_failure_bucket(r) == "A")
+    adp_cost_rows = [r for r in adp if r.get("cost_usd") is not None]
+    adp_cost = sum(float(r.get("cost_usd") or 0) for r in adp)
+    adapter_slice = {
+        "n": len(adp),
+        "applied": adp_applied,
+        "pass_rate": round(adp_applied / len(adp), 3) if adp else 0.0,
+        "fail_A_removable": adp_a,
+        "cost_per_apply_usd": (round(adp_cost / adp_applied, 3)
+                               if adp_applied else None),
+    }
+
     return {
         "live_attempts": n,
         "applied": applied,
@@ -127,6 +146,7 @@ def summarize_review(rows: list[dict]) -> dict[str, Any]:
         "cost_per_apply_usd": round(cost / len(cost_rows), 3) if cost_rows else None,
         "cost_rows": len(cost_rows),
         "cache_hit_rate": round(cr / cache_denom, 3) if cache_denom else None,
+        "adapter_slice": adapter_slice,
         "needs_human": needs_human,
         # automatability = of the jobs that WERE automatable (not env-blocked
         # / deferred to a human), how often did we actually apply.
@@ -160,6 +180,16 @@ def load_review_rows(path: str | Path) -> list[dict]:
     return out
 
 
+def _fmt_adapter_slice(a: dict | None) -> str:
+    a = a or {"applied": 0, "n": 0, "pass_rate": 0.0,
+              "fail_A_removable": 0, "cost_per_apply_usd": None}
+    cpa = a.get("cost_per_apply_usd")
+    cpa_s = "n/a" if cpa is None else f"${cpa:.3f}"
+    return (f"  Adapter-path (v2 acc#6) : {a['applied']}/{a['n']} "
+            f"({a['pass_rate']:.0%}), (A)-fails={a['fail_A_removable']}, "
+            f"$/apply={cpa_s}")
+
+
 def format_report(summary: dict[str, Any]) -> str:
     s = summary
     lines = [
@@ -171,6 +201,7 @@ def format_report(summary: dict[str, Any]) -> str:
         f"  Failures (A) removable  : {s['fail_A_removable']}  <- engineer these away",
         f"  Failures (B) irreducible: {s['fail_B_irreducible']}  <- route to human/skip",
         f"  Removable share of fails: {s['removable_share']:.0%}",
+        _fmt_adapter_slice(s.get("adapter_slice")),
         f"  Needs-human (gated, $0) : {s.get('needs_human', 0)}  <- CAPTCHA/email-verif/SSO, no LLM spent",
         f"  Automatability          : {s.get('automatability', 0.0):.0%}  <- applied / (automatable jobs)",
         "-" * 56,

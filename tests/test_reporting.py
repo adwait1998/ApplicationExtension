@@ -81,3 +81,28 @@ def test_empty_and_loader(tmp_path):
     assert len(rows) == 1  # blank + bad-json skipped
     s = summarize_review(rows)
     assert s["applied"] == 1
+
+
+def test_adapter_slice_isolated_for_acceptance_judging():
+    """Acceptance #6 must be judged on adapter-path jobs ONLY (the mixed
+    Phase-F average was Workday-polluted). adapter_slice = tier_used
+    starting 'greenhouse_adapter' only."""
+    rows = [
+        # adapter-path
+        {"dry_run": False, "status": "applied", "tier_used": "greenhouse_adapter", "cost_usd": 0.90},
+        {"dry_run": False, "status": "applied", "tier_used": "greenhouse_adapter_submit", "cost_usd": 0.05},
+        {"dry_run": False, "status": "needs_review:timeout",
+         "failure_class": "transient_timeout", "tier_used": "greenhouse_adapter"},
+        # NOT adapter-path (Workday/indeed/LLM) — must be excluded from the slice
+        {"dry_run": False, "status": "applied", "tier_used": "skill_record", "cost_usd": 3.50},
+        {"dry_run": False, "status": "applied", "tier_used": "legacy_llm", "cost_usd": 4.20},
+    ]
+    s = summarize_review(rows)
+    a = s["adapter_slice"]
+    assert a["n"] == 3                       # only the 3 greenhouse_adapter* rows
+    assert a["applied"] == 2
+    assert a["fail_A_removable"] == 1        # the timeout
+    # $/apply on the slice = (0.90 + 0.05) / 2 applied = 0.475 — NOT
+    # dragged up by the $3.50/$4.20 Workday/LLM jobs
+    assert a["cost_per_apply_usd"] == 0.475
+    assert "Adapter-path (v2 acc#6)" in format_report(s)
