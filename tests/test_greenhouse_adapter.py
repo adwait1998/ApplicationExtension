@@ -184,3 +184,12 @@ def test_adapter_never_guesses_custom_question(page, resume):
     assert page.locator("#cust").input_value() == ""
     assert any("proud of" in u["label"].lower() for u in res.unresolved)
     assert res.used_llm is False
+
+
+def test_adapter_cdp_pass_is_fail_open_on_dead_port():
+    """The launcher wiring (_greenhouse_adapter_pass) MUST never raise — a
+    dead/uncontactable Chrome → None so run_job falls back to prefill+LLM.
+    This is the guarantee that makes the live wiring safe."""
+    from applypilot.apply.launcher import _greenhouse_adapter_pass
+    out = _greenhouse_adapter_pass(59999, {"personal": {}}, "/nonexistent/r.pdf")
+    assert out is None
