@@ -705,6 +705,95 @@ def _compute_verification_verdict(
     return confidence, verified
 
 
+# Per-document success/failure scan. Run in EVERY frame (Playwright reaches
+# cross-origin children), then aggregated by _scan_frames_for_success.
+_FRAME_SCAN_JS = r"""
+() => {
+  const text = (document.body ? document.body.innerText : '').replace(/\s+/g, ' ').trim();
+  const lower = text.toLowerCase();
+  const successPatterns = [
+    'application received','application submitted','application complete',
+    'thank you for applying','thanks for applying','thank you for your application',
+    'thank you for your interest','successfully submitted','we received your application',
+    'we have received your application','we will review your application',
+    'our team is reviewing','your application has been submitted',
+    'your application has been received','application has been sent','next steps',
+    'we will be in touch','we got it from here',"we've got it from here",'we got it',
+    'sign in to mygreenhouse',
+  ];
+  const hits = successPatterns.filter(p => lower.includes(p));
+  const submit = Array.from(document.querySelectorAll('button, input[type=submit]'))
+    .find(el => /submit application|submit my application/i.test(el.innerText || el.value || ''));
+  const submitVisible = !!submit;
+  const submitEnabled = !!submit && !submit.disabled && submit.getAttribute('aria-disabled') !== 'true';
+  const validationErrors = Array.from(document.querySelectorAll(
+    '[aria-invalid="true"], .error, .errors, .field-error, [data-testid*="error" i], [role="alert"]'
+  )).map(el => (el.innerText || el.textContent || '').trim()).filter(Boolean);
+  return {hits, submitVisible, submitEnabled, validationErrors, evidence: text.slice(0, 1200)};
+}
+"""
+
+
+def _scan_frames_for_success(page) -> dict:
+    """Aggregate the success/failure scan across the top page AND every
+    child frame (Greenhouse/Lever embed the form cross-origin). Union the
+    confirmation hits; submit/validation present if seen in ANY frame;
+    evidence prefers a frame that has hits.
+
+    Best-effort per frame — a detached/navigating frame is skipped, never
+    fatal. Top-frame URL is always the reported url.
+    """
+    agg_hits: list[str] = []
+    submit_visible = False
+    submit_enabled = False
+    validation_errors: list[str] = []
+    evidence = ""
+    evidence_from_hit_frame = False
+
+    try:
+        frames = list(page.frames)
+    except Exception:
+        frames = []
+    # Cap to keep it fast; real ATS pages have <~10 frames.
+    for fr in frames[:12]:
+        # No URL-based skipping: set_content pages are about:blank and
+        # srcdoc embeds are about:srcdoc — filtering those drops the very
+        # frames we need. A genuinely empty frame just returns empty hits
+        # (harmless). Best-effort: a detached/navigating frame is skipped.
+        try:
+            st = fr.evaluate(_FRAME_SCAN_JS)
+        except Exception:
+            continue
+        if not isinstance(st, dict):
+            continue
+        if st.get("hits"):
+            for h in st["hits"]:
+                if h not in agg_hits:
+                    agg_hits.append(h)
+        submit_visible = submit_visible or bool(st.get("submitVisible"))
+        submit_enabled = submit_enabled or bool(st.get("submitEnabled"))
+        if st.get("validationErrors"):
+            validation_errors.extend(st["validationErrors"])
+        ev = st.get("evidence") or ""
+        # Prefer evidence from a frame that actually has a confirmation hit.
+        if ev and (not evidence or (st.get("hits") and not evidence_from_hit_frame)):
+            evidence = ev
+            evidence_from_hit_frame = bool(st.get("hits"))
+
+    try:
+        top_url = page.url
+    except Exception:
+        top_url = ""
+    return {
+        "url": top_url,
+        "hits": agg_hits,
+        "submitVisible": submit_visible,
+        "submitEnabled": submit_enabled,
+        "validationErrors": validation_errors,
+        "evidence": evidence,
+    }
+
+
 def _verify_submission_success(cdp_port: int, verify_threshold: float = 0.75,
                                previous_url: str | None = None) -> dict:
     """Weighted multi-signal submission verifier with confidence score."""
@@ -735,47 +824,16 @@ def _verify_submission_success(cdp_port: int, verify_threshold: float = 0.75,
             result["error"] = "no_page"
             return result
 
-        state = page.evaluate(
-            """() => {
-              const text = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
-              const lower = text.toLowerCase();
-              const successPatterns = [
-                'application received',
-                'application submitted',
-                'application complete',
-                'thank you for applying',
-                'thanks for applying',
-                'thank you for your application',
-                'thank you for your interest',
-                'successfully submitted',
-                'we received your application',
-                'we have received your application',
-                'we will review your application',
-                'our team is reviewing',
-                'your application has been submitted',
-                'your application has been received',
-                'application has been sent',
-                'next steps',
-                'we will be in touch',
-                'we got it from here',
-                "we've got it from here",
-                'we got it',
-                'sign in to mygreenhouse',
-              ];
-              const hits = successPatterns.filter(p => lower.includes(p));
-              // Match only the actual submit-application button; bare "submit"
-              // (e.g. "Submit feedback", "Submit comment") false-positives on
-              // many post-success pages.
-              const submit = Array.from(document.querySelectorAll('button, input[type=submit]'))
-                .find(el => /submit application|submit my application/i.test(el.innerText || el.value || ''));
-              const submitVisible = !!submit;
-              const submitEnabled = !!submit && !submit.disabled && submit.getAttribute('aria-disabled') !== 'true';
-              const validationErrors = Array.from(document.querySelectorAll(
-                '[aria-invalid="true"], .error, .errors, .field-error, [data-testid*="error" i], [role="alert"]'
-              )).map(el => (el.innerText || el.textContent || '').trim()).filter(Boolean);
-              return {url: window.location.href, hits, submitVisible, submitEnabled, validationErrors, evidence: text.slice(0, 1200)};
-            }"""
-        )
+        # Verifier v3 (iter-13): scan EVERY frame, not just the top window.
+        # Greenhouse/Lever embed the application form in a cross-origin
+        # iframe (e.g. boards.greenhouse.io/embed inside roblox.com careers).
+        # After submit the "application received" message renders INSIDE that
+        # iframe. Top-window document.body.innerText misses it (and JS can't
+        # read a cross-origin iframe), so the verifier saw the careers
+        # landing page → conf 0.2 → real submissions mis-flagged
+        # needs_review. Playwright's frame API reaches cross-origin frames,
+        # so aggregate the success scan across all of them.
+        state = _scan_frames_for_success(page)
 
         current_url = state.get("url", "")
         previous_canonical = _canonicalize_url(previous_url or "")
