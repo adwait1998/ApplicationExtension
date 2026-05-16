@@ -982,3 +982,29 @@ live + user-gated. Loop correctly idles here.
   & $PY -m applypilot report                        # read the "Adapter-path (v2 acc#6)" line
 Emit RALPH-DONE iff that line shows (A)-fails=0 AND $/apply < ~1.35 AND
 pass-rate ≥ ~60%. Else iterate on whatever the slice says is failing.
+
+## Iteration 12 — User feedback: early-career roles wasting applies
+
+User: *"It also applied to a fellowship/internship"* (same class as the
+iter-11 manager-level feedback). Nida has 5 years' professional
+experience — internship / fellowship / apprenticeship / new-grad /
+co-op / student / trainee roles are a DIFFERENT (entry-level) job that
+waste live apply attempts.
+
+Fix (scorer.py): added `_EARLY_CAREER_RE` word-boundary regex
+(intern|fellow|apprentice|trainee|co-op|new-grad|early-career|student)
+and an override in `_prefilter_score` that forces score=1 for any
+matched bucket. Word boundaries so "internal"/"international" do NOT
+false-positive (regression-tested). SCORE_PROMPT updated for defense-
+in-depth (intern/fellow examples → 1).
+
+Tests: +16 reject cases, +3 false-positive guards → 63 prefilter tests,
+228 full suite, all green. $0 deterministic purge downgraded 10
+already-scored rows — **4 were score 7-8** (e.g. "Product Design
+Internship" 8, "[2026] Design & Creative Fellowship" 8), i.e. live
+attempts the pipeline *would* have spent. Eligible(>=7) queue: 429.
+
+Loop still correctly idles on RALPH-DONE: the iter-11/12 prefilter fixes
+are scoring-quality, not the acceptance-#6 live gate. The b86314n32
+adapter slice = 5/7 (71%), (A)-fails=2, $/apply=$1.289 — pass-rate and
+$/apply clear, but **(A)-fails ≠ 0**, so v2 is NOT shipped yet.
