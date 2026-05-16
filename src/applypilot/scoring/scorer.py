@@ -30,6 +30,7 @@ CRITICAL — these are SEPARATE career fields, do NOT conflate them just because
 - Researcher / Research Scientist / Data Scientist / ML Engineer = a DIFFERENT field. Score 1-2.
 - Content Designer / UX Writer / Content Strategist = adjacent writing field, NOT visual/product design. Score at most 4 unless the JD is explicitly a hybrid product-design role.
 - People-MANAGEMENT design roles (Design Manager, Product Design Manager, Director of Design, Head of Design, VP Design, Creative Director) = a DIFFERENT (management) job. The candidate is a 5-year individual contributor, NOT a manager. Score 1-2 even though the title contains "Design".
+- Internship / Fellowship / Apprenticeship / New-Grad / Co-op / Student / Trainee roles = early-career, a DIFFERENT (entry-level) job. The candidate has 5 years' professional experience. Score 1-2 even though the title contains "Design".
 - "Design" in non-UX contexts (chip design, protein design, instructional design) = different field. Score 1-2.
 
 Examples (Product Design candidate):
@@ -46,6 +47,8 @@ Examples (Product Design candidate):
 - "Product Design Manager" → 2   (people-management, NOT an IC designer role)
 - "Director of Design" → 1   (management/exec, not IC)
 - "Design Lead" → 7   (senior IC track — fit; "lead" is not "manager")
+- "UX Design Intern" → 1   (early-career, candidate has 5 yrs experience)
+- "Design Fellow, Summer 2026" → 1   (fellowship = entry-level program)
 
 Output format (3 lines, NO other text):
 SCORE: <number 1-10>
@@ -183,6 +186,18 @@ _DESIGN_MGMT_MARKERS = (
     "vp of", "chief ", "people lead",
 )
 
+# Early-career / training roles. The candidate has 5 years of professional
+# experience — an internship / fellowship / apprenticeship / new-grad /
+# co-op / student role is a DIFFERENT (entry-level, often unpaid or
+# stipend) job, not a fit, and applying wastes a live attempt. Word-
+# boundary regex so "internal" / "international" do NOT false-positive.
+_EARLY_CAREER_RE = re.compile(
+    r"\b(intern|interns|internship|internships|fellow|fellows|fellowship"
+    r"|fellowships|apprentice|apprenticeship|trainee|co-?op|new[\s-]?grad"
+    r"|new[\s-]?graduate|early[\s-]?career|student)\b",
+    re.IGNORECASE,
+)
+
 
 def _prefilter_score(target_role: str, title: str) -> dict | None:
     """Return a forced score=1 result if the title clearly mismatches target_role.
@@ -214,6 +229,18 @@ def _prefilter_score(target_role: str, title: str) -> dict | None:
             "keywords": "",
             "reasoning": (f"Pre-filter: '{title}' is a people-management / "
                           f"over-leveled role; candidate is an IC designer."),
+        }
+
+    # Early-career override (any field): the candidate is a 5-year
+    # professional, so intern/fellow/apprentice/new-grad/student roles are
+    # off-target even when they say "design" — they waste live attempts.
+    if _EARLY_CAREER_RE.search(title):
+        return {
+            "score": 1,
+            "keywords": "",
+            "reasoning": (f"Pre-filter: '{title}' is an early-career / "
+                          f"internship-fellowship role; candidate has 5 "
+                          f"years' professional experience."),
         }
 
     # If title contains an excluded keyword AND no matching keyword, auto-fail

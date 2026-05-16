@@ -58,6 +58,23 @@ TARGET = "Product Designer"
     "Creative Director",
     "Sr. Manager, UX Design, Prime Video",
     "Director, Experience Design",
+    # iter-12: early-career / training roles — candidate has 5 yrs
+    # professional experience. Internship/fellowship waste live attempts.
+    "UX Design Intern",
+    "Product Design Intern, Summer 2026",
+    "Design Internship - Fall",
+    "Design Fellow",
+    "Design Fellowship Program",
+    "UX Apprentice",
+    "Product Design Apprenticeship",
+    "New Grad Product Designer",
+    "New-Graduate UX Designer",
+    "Early Career Designer",
+    "Early-Career Product Designer",
+    "Product Design Co-op",
+    "UX Design Coop, 2026",
+    "Student Product Designer",
+    "Design Trainee",
 ])
 def test_prefilter_rejects_off_track_roles(title):
     r = _prefilter_score(TARGET, title)
@@ -75,6 +92,11 @@ def test_prefilter_rejects_off_track_roles(title):
     "Senior UX Designer",
     "Design Lead, Growth",             # "lead" = senior IC track, NOT manager
     "Lead Product Designer",
+    # iter-12 false-positive guards: word-boundary regex must NOT treat
+    # "internal" / "international" as "intern".
+    "Internal Tools Product Designer",
+    "International Product Designer",
+    "Senior Internal Communications Designer",
 ])
 def test_prefilter_preserves_design_roles(title):
     # None == not prefiltered → goes to the LLM for merit scoring
