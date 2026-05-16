@@ -682,6 +682,16 @@ DO NOT field-by-field correct. DO NOT take screenshots between fills. The autofi
 - Only snapshot again when you need element refs to click/fill.
 - Multi-page forms (Workday, Taleo, iCIMS): snapshot each new page, fill all fields, click Next/Continue. Repeat until final review page.
 - Fill ALL fields in ONE browser_fill_form call. Not one at a time.
+- NEVER use browser_type to enter a text-field value. browser_type emits
+  one keystroke at a time — typing an email/phone/name that way burns
+  whole minutes and has timed out entire applies (sofi, PayPal). Plain
+  text inputs, textareas, name/email/phone, screening free-text: ALWAYS
+  browser_fill_form (it sets the value in one shot). browser_type is
+  ONLY allowed for react-select / combobox "search-as-you-type" filtering
+  (1 short query), never for filling a field's final value.
+- Budget tripwire: if you are past ~120s and still entering basic text
+  fields, you are keystroke-typing — stop and re-do them via one
+  browser_fill_form call.
 - Keep your thinking SHORT. Don't repeat page structure back.
 - CAPTCHA AWARENESS: After any navigation, Apply/Submit/Login click, or when a page feels stuck -- run CAPTCHA DETECT (see CAPTCHA section). Invisible CAPTCHAs (Turnstile, reCAPTCHA v3) show NO visual widget but block form submissions silently. The detect script finds them even when invisible.
 
