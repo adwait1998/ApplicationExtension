@@ -1539,6 +1539,27 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         if ready_state.get("missing"):
             add_event(f"[W{worker_id}] Prefill missing: {', '.join(ready_state['missing'][:4])}")
 
+    # Reliability-v2 Phase E: automatability gate. BEFORE spending an LLM
+    # apply, scan the loaded page for a hard blocker (visible CAPTCHA,
+    # email-verification wall, SSO redirect, anti-bot interstitial). If
+    # found, queue for a human and short-circuit — these are the
+    # (B)-irreducible failures; paying Sonnet/Haiku to fail at a wall is
+    # pure waste. Fail-OPEN: any scanner error → proceed normally.
+    try:
+        from applypilot.apply.automatability import automatability_gate
+        _blocker = automatability_gate(
+            port, job, queue_path=config.LOG_DIR / "human_queue.jsonl")
+    except Exception:
+        _blocker = None
+    if _blocker:
+        duration_ms = int((time.time() - run_started) * 1000)
+        job_meta["failure_class"] = f"blocker_{_blocker}"
+        _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
+        add_event(f"[W{worker_id}] needs_human: {_blocker} (no LLM spent)")
+        update_state(worker_id, status="needs_review",
+                     last_action=f"needs_human: {_blocker}")
+        return f"needs_review:needs_human_{_blocker}", duration_ms, prefill_status
+
     # Build the prompt (after prefill so we can tell the agent what was already filled)
     agent_prompt = prompt_mod.build_prompt(
         job=job,

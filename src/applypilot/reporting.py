@@ -50,6 +50,16 @@ def _is_terminal_nonfailure(row: dict) -> bool:
     return s in ("skipped", "paused") or s.startswith("dry_run:")
 
 
+def is_needs_human(row: dict) -> bool:
+    """Phase E: the automatability gate deferred this to a human BEFORE
+    spending an LLM (status needs_review:needs_human_*, or a blocker_*
+    failure class). Counted separately — it's a correct deferral, not a
+    pipeline failure."""
+    blob = " ".join(str(row.get(k) or "").lower()
+                     for k in ("status", "failure_class"))
+    return "needs_human" in blob
+
+
 def classify_failure_bucket(row: dict) -> str | None:
     """Return 'A' (removable), 'B' (irreducible), or None (not a failure)."""
     if _is_success(row) or _is_terminal_nonfailure(row):
@@ -80,13 +90,23 @@ def summarize_review(rows: list[dict]) -> dict[str, Any]:
     it = sum(int(r.get("input_tokens") or 0) for r in live)
     cache_denom = cr + cc + it
 
+    needs_human = sum(1 for r in live if is_needs_human(r))
+
     by_ats: dict[str, dict[str, int]] = {}
     for r in live:
         ats = str(r.get("prefill_ats") or r.get("site") or "unknown")
-        d = by_ats.setdefault(ats, {"n": 0, "applied": 0})
+        d = by_ats.setdefault(ats, {"n": 0, "applied": 0, "needs_human": 0,
+                                    "a_fail": 0, "b_fail": 0})
         d["n"] += 1
         if _is_success(r):
             d["applied"] += 1
+        if is_needs_human(r):
+            d["needs_human"] += 1
+        bucket = classify_failure_bucket(r)
+        if bucket == "A":
+            d["a_fail"] += 1
+        elif bucket == "B":
+            d["b_fail"] += 1
 
     by_tier: dict[str, dict[str, int]] = {}
     for r in live:
@@ -107,7 +127,17 @@ def summarize_review(rows: list[dict]) -> dict[str, Any]:
         "cost_per_apply_usd": round(cost / len(cost_rows), 3) if cost_rows else None,
         "cost_rows": len(cost_rows),
         "cache_hit_rate": round(cr / cache_denom, 3) if cache_denom else None,
-        "by_ats": {k: {**v, "pass_rate": round(v["applied"] / v["n"], 3) if v["n"] else 0.0}
+        "needs_human": needs_human,
+        # automatability = of the jobs that WERE automatable (not env-blocked
+        # / deferred to a human), how often did we actually apply.
+        "automatability": (
+            round(applied / max(1, n - b_fail - needs_human), 3) if n else 0.0
+        ),
+        "by_ats": {k: {**v,
+                       "pass_rate": round(v["applied"] / v["n"], 3) if v["n"] else 0.0,
+                       "automatability": round(
+                           v["applied"] / max(1, v["n"] - v["b_fail"] - v["needs_human"]),
+                           3) if v["n"] else 0.0}
                    for k, v in sorted(by_ats.items())},
         "by_tier": {k: {**v, "pass_rate": round(v["applied"] / v["n"], 3) if v["n"] else 0.0}
                     for k, v in sorted(by_tier.items())},
@@ -141,6 +171,8 @@ def format_report(summary: dict[str, Any]) -> str:
         f"  Failures (A) removable  : {s['fail_A_removable']}  <- engineer these away",
         f"  Failures (B) irreducible: {s['fail_B_irreducible']}  <- route to human/skip",
         f"  Removable share of fails: {s['removable_share']:.0%}",
+        f"  Needs-human (gated, $0) : {s.get('needs_human', 0)}  <- CAPTCHA/email-verif/SSO, no LLM spent",
+        f"  Automatability          : {s.get('automatability', 0.0):.0%}  <- applied / (automatable jobs)",
         "-" * 56,
         f"  Total cost         : ${s['total_cost_usd']:.2f}"
         + ("" if s["cost_rows"] else "   (NO cost telemetry in rows yet)"),
