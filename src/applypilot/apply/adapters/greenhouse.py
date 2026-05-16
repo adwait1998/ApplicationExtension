@@ -233,10 +233,72 @@ def _required_labels_on_page(page: "Page") -> list[str]:
         return []
 
 
+def _answer_context(profile: dict) -> str:
+    """Compact applicant context for the answer-cache on novel free-text."""
+    per = profile.get("personal", {}) or {}
+    exp = profile.get("experience", {}) or {}
+    bits = []
+    if per.get("full_name"):
+        bits.append(f"Name: {per['full_name']}")
+    if exp.get("current_title"):
+        bits.append(f"Role: {exp['current_title']}")
+    if exp.get("years_of_experience_total"):
+        bits.append(f"Experience: {exp['years_of_experience_total']} years")
+    return " | ".join(bits)
+
+
+def _form_scope(page: "Page"):
+    """The Greenhouse form is often embedded in a child iframe (vanity
+    careers sites like careers.roblox.com). Return the Page or the child
+    Frame that actually contains the application form so locators resolve.
+    Frame has the same locator/get_by_role/evaluate API as Page, so the
+    rest of the adapter is scope-agnostic."""
+    try:
+        frames = list(page.frames)
+    except Exception:
+        return page
+    for fr in frames:
+        try:
+            if fr.locator(
+                '#first_name, input[name*="first" i], '
+                'input[autocomplete="given-name"], '
+                '[class*="select__control"]'
+            ).count() > 0:
+                return fr
+        except Exception:
+            continue
+    return page
+
+
+def submit_greenhouse(scope, *, interaction_ms: int = 4000) -> tuple[bool, str | None]:
+    """Deterministically click the Greenhouse submit button via a healing
+    locator. Returns (submitted, error)."""
+    btn_spec = ElementSpec(role="button", name="Submit application",
+                           label="Submit application", text="Submit application",
+                           fingerprint={"tag": "button",
+                                        "label_text": "submit application"})
+    try:
+        bloc, _ = heal(scope, btn_spec, timeout_ms=1200)
+        if bloc is None:
+            return False, "submit button not found"
+        bloc.click(timeout=interaction_ms)
+        return True, None
+    except Exception as e:
+        return False, f"submit failed: {type(e).__name__}: {e}"
+
+
 def fill_greenhouse(page: "Page", profile: dict, resume_pdf_path: str, *,
-                    submit: bool = True, interaction_ms: int = 4000) -> AdapterResult:
-    """Deterministically fill a Greenhouse form. Zero LLM."""
+                    submit: bool = True, interaction_ms: int = 4000,
+                    answer_cache=None) -> AdapterResult:
+    """Deterministically fill a Greenhouse form. Zero Claude-Code LLM.
+
+    Operates on the form's actual frame (handles iframe-embedded vanity
+    careers sites). If `answer_cache` is provided, unresolved free-text
+    screening questions are answered from it (profile-seeded / cached →
+    $0; genuine novelty → the cheap provider-flexible llm.py client, NOT
+    a Claude Code subprocess) and removed from `unresolved`."""
     res = AdapterResult()
+    page = _form_scope(page)        # <-- scope to the GH form frame
     plan = _standard_plan(profile, resume_pdf_path)
     matched_labels: list[str] = []
 
@@ -280,19 +342,43 @@ def fill_greenhouse(page: "Page", profile: dict, resume_pdf_path: str, *,
             continue
         res.unresolved.append({"label": lbl, "type": "unknown"})
 
-    if submit:
-        btn_spec = ElementSpec(role="button", name="Submit application",
-                               label="Submit application", text="Submit application",
-                               fingerprint={"tag": "button",
-                                            "label_text": "submit application"})
-        try:
-            bloc, _ = heal(page, btn_spec, timeout_ms=1200)
-            if bloc is not None:
-                bloc.click(timeout=interaction_ms)
-                res.submitted = True
-            else:
-                res.error = "submit button not found"
-        except Exception as e:
-            res.error = f"submit failed: {type(e).__name__}: {e}"
+    # Resolve remaining free-text screening questions via the semantic
+    # answer-cache (Phase D). Seed/cache hits cost $0; genuine novelty
+    # uses the cheap provider-flexible llm.py client — NOT a Claude Code
+    # subprocess. Resolved questions are filled and dropped from
+    # `unresolved`; the adapter never blind-guesses (cache decides).
+    if answer_cache is not None and res.unresolved:
+        ctx = _answer_context(profile)
+        still: list[dict] = []
+        for u in res.unresolved:
+            lab = u["label"]
+            loc = None
+            for tag in ("textarea", "input"):
+                loc, _, _ = _heal_any(page, [lab], None, tag, "", timeout_ms=900)
+                if loc is not None:
+                    break
+            if loc is None:
+                still.append(u)
+                continue
+            try:
+                ans = answer_cache.answer(lab, context=ctx).answer
+                if ans:
+                    loc.fill(ans, timeout=interaction_ms)
+                    res.fields_filled.append(f"answered:{lab[:24]}")
+                else:
+                    still.append(u)
+            except Exception:
+                still.append(u)
+        res.unresolved = still
+
+    # submit: True = always; False = never (LLM submits); "auto" = submit
+    # deterministically ONLY when the form is fully satisfied (no
+    # unresolved custom questions left, and we actually filled fields) —
+    # this is the path that eliminates the LLM submit (no timeout, ~$0).
+    do_submit = (submit is True) or (
+        submit == "auto" and not res.unresolved and bool(res.fields_filled))
+    if do_submit:
+        res.submitted, res.error = submit_greenhouse(
+            page, interaction_ms=interaction_ms)
 
     return res

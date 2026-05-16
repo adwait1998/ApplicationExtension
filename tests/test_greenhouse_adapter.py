@@ -193,3 +193,64 @@ def test_adapter_cdp_pass_is_fail_open_on_dead_port():
     from applypilot.apply.launcher import _greenhouse_adapter_pass
     out = _greenhouse_adapter_pass(59999, {"personal": {}}, "/nonexistent/r.pdf")
     assert out is None
+
+
+# ---- iter-9: frame-embedded form, answer-cache wiring, auto-submit ----
+
+_IFRAME_WRAP = """<!doctype html><html><body>
+  <h1>Careers at Roblox</h1>
+  <iframe id="gh" srcdoc='__INNER__'></iframe>
+</body></html>"""
+
+
+def _embed(form_html: str) -> str:
+    # srcdoc attribute uses single quotes in the wrapper → escape inner.
+    return _IFRAME_WRAP.replace("__INNER__", form_html.replace("'", "&apos;"))
+
+
+def test_adapter_drives_iframe_embedded_form(page, resume):
+    """roblox-class: the GH form lives in a child iframe. _form_scope must
+    target that frame so the adapter actually drives it (this batch's
+    'roblox fell to skill_record' gap)."""
+    page.set_content(_embed(_FORM))
+    page.wait_for_timeout(200)
+    res = fill_greenhouse(page, _PROFILE, resume, submit=True)
+    for k in ("first_name", "email", "resume", "work_authorization", "gender"):
+        assert k in res.fields_filled, f"{k} not filled in iframe (got {res.fields_filled})"
+    assert res.used_llm is False
+
+
+def test_answer_cache_resolves_custom_question(page, resume):
+    """With an answer-cache, the custom required Q is filled (cache hit,
+    $0) and removed from unresolved — so the form can fully resolve."""
+    from applypilot.apply.answer_cache import AnswerCache
+    q = "Describe a product you shipped that you're proud of"
+    calls = []
+    ac = AnswerCache(_PROFILE)
+    ac.answer(q, llm_fn=lambda question, ctx: (calls.append(1), "Shipped a design system at Intuit.")[1])
+    assert len(calls) == 1  # warmed once
+    page.set_content(_FORM)
+    res = fill_greenhouse(page, _PROFILE, resume, submit=False, answer_cache=ac)
+    assert not any("proud of" in u["label"].lower() for u in res.unresolved), res.unresolved
+    assert page.locator("#cust").input_value().startswith("Shipped a design system")
+    assert len(calls) == 1  # cache hit on the fill — no extra LLM
+    assert res.used_llm is False
+
+
+def test_auto_submit_only_when_fully_resolved(page, resume):
+    from applypilot.apply.answer_cache import AnswerCache
+    # (a) custom Q UNRESOLVED + submit='auto' → must NOT submit (LLM's job)
+    page.set_content(_FORM)
+    r1 = fill_greenhouse(page, _PROFILE, resume, submit="auto")
+    assert r1.submitted is False
+    assert any("proud of" in u["label"].lower() for u in r1.unresolved)
+    assert not page.locator("#done").is_visible()
+    # (b) custom Q resolved via cache + submit='auto' → submits
+    q = "Describe a product you shipped that you're proud of"
+    ac = AnswerCache(_PROFILE)
+    ac.answer(q, llm_fn=lambda question, ctx: "A payments flow at Brex.")
+    page.set_content(_FORM)
+    r2 = fill_greenhouse(page, _PROFILE, resume, submit="auto", answer_cache=ac)
+    assert r2.unresolved == []
+    assert r2.submitted is True
+    assert page.locator("#done").is_visible()

@@ -795,16 +795,21 @@ def _scan_frames_for_success(page) -> dict:
 
 
 def _greenhouse_adapter_pass(cdp_port: int, profile: dict,
-                             resume_pdf_path: str) -> dict | None:
+                             resume_pdf_path: str,
+                             allow_submit: bool = False) -> dict | None:
     """Connect to the live Chrome and run the deterministic Greenhouse
-    adapter (zero LLM, self-healing locators). submit=False — the LLM
-    still submits + verifies for now. Fail-OPEN: any error → None (caller
-    falls back to the existing prefill+LLM flow). Returns a small dict
-    {fields_filled, unresolved} for telemetry/prompt context."""
+    adapter (zero Claude-Code LLM, self-healing locators, answer-cache for
+    free-text). submit="auto" when allow_submit: the adapter submits
+    deterministically ONLY if the form is fully satisfied (no unresolved
+    custom Qs) — that path skips the LLM entirely (no timeout, ~$0). If
+    anything custom remains, submit stays with the LLM. Fail-OPEN: any
+    error → None (caller falls back to prefill+LLM). Returns
+    {fields_filled, unresolved, submitted}."""
     pw = browser = None
     try:
         from playwright.sync_api import sync_playwright
         from applypilot.apply.adapters.greenhouse import fill_greenhouse
+        from applypilot.apply.answer_cache import AnswerCache
         pw = sync_playwright().start()
         browser = pw.chromium.connect_over_cdp(
             f"http://127.0.0.1:{cdp_port}", timeout=3000)
@@ -812,9 +817,13 @@ def _greenhouse_adapter_pass(cdp_port: int, profile: dict,
         page = pages[-1] if pages else None
         if page is None:
             return None
-        res = fill_greenhouse(page, profile, resume_pdf_path, submit=False)
+        ac = AnswerCache(profile, bank_path=config.APP_DIR / "answer_bank.json")
+        res = fill_greenhouse(
+            page, profile, resume_pdf_path,
+            submit=("auto" if allow_submit else False), answer_cache=ac)
         return {"fields_filled": res.fields_filled,
-                "unresolved": res.unresolved}
+                "unresolved": res.unresolved,
+                "submitted": bool(res.submitted)}
     except Exception as e:
         logger.debug("_greenhouse_adapter_pass failed-open: %s", e)
         return None
@@ -1599,11 +1608,13 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 
     # Reliability-v2 Phase C: deterministic Greenhouse adapter pass.
     # When the v2 flag is on and prefill detected Greenhouse, run the
-    # self-healing adapter to deterministically complete the FULL standard
-    # form (more than prefill's ~14 fields) with zero LLM. ADDITIVE +
-    # best-effort: submit stays with the LLM for now (safer), unmapped
-    # custom questions are left for the agent. Any failure → fall back to
-    # the existing prefill+LLM flow. Never hard-fails.
+    # self-healing adapter (frame-aware, answer-cache for free-text) to
+    # complete the FULL form with zero Claude-Code LLM. If it leaves NO
+    # unresolved custom questions, it SUBMITS deterministically and we
+    # skip the LLM entirely → no timeout, ~$0 (this is the (A)-timeout +
+    # cost elimination). Otherwise it just front-loads fills and the LLM
+    # finishes/submits. ADDITIVE + fail-OPEN: any error → existing
+    # prefill+LLM flow, unchanged. Never hard-fails.
     try:
         from applypilot.apply.skill_runner import is_skill_flow_enabled
         if (is_skill_flow_enabled()
@@ -1611,7 +1622,8 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                 and prefill_status.get("ats") == "greenhouse"
                 and not prefill_status.get("error")):
             adapter_res = _greenhouse_adapter_pass(
-                port, profile, str(Path(resume_path).with_suffix(".pdf")))
+                port, profile, str(Path(resume_path).with_suffix(".pdf")),
+                allow_submit=not dry_run)
             if adapter_res:
                 ff = prefill_status.setdefault("fields_filled", [])
                 for k in adapter_res.get("fields_filled", []):
@@ -1620,13 +1632,58 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                 prefill_status["adapter"] = {
                     "fields_filled": adapter_res.get("fields_filled", []),
                     "unresolved": adapter_res.get("unresolved", []),
+                    "submitted": adapter_res.get("submitted", False),
                 }
-                prefill_status["tier_used"] = "greenhouse_adapter"
+                prefill_status["tier_used"] = (
+                    "greenhouse_adapter_submit"
+                    if adapter_res.get("submitted") else "greenhouse_adapter")
                 add_event(
                     f"[W{worker_id}] Greenhouse adapter filled "
                     f"{len(adapter_res.get('fields_filled', []))} fields, "
-                    f"{len(adapter_res.get('unresolved', []))} unresolved -> LLM"
+                    f"{len(adapter_res.get('unresolved', []))} unresolved, "
+                    f"submitted={adapter_res.get('submitted')}"
                 )
+                # Adapter submitted deterministically → the application is
+                # SENT. Do NOT spawn the LLM (would double-submit). Verify
+                # and return, mirroring the post-RESULT:APPLIED path.
+                if adapter_res.get("submitted") and not dry_run:
+                    _write_job_runtime_metadata(
+                        job["url"], increment_submit_attempt=True,
+                        checkpoint=_checkpoint(CHECKPOINT_SUBMIT_ATTEMPTED,
+                                               source="greenhouse_adapter"))
+                    job_meta["checkpoint_stage"] = CHECKPOINT_SUBMIT_ATTEMPTED
+                    duration_ms = int((time.time() - run_started) * 1000)
+                    try:
+                        verification = _verify_submission_success(
+                            port, verify_threshold=verify_threshold,
+                            previous_url=apply_url)
+                    except Exception as ve:
+                        logger.debug("adapter-submit verify error: %s", ve)
+                        verification = {"verified": False,
+                                        "error": f"verify_exc:{ve}"}
+                    job_meta["verification_confidence"] = verification.get("confidence")
+                    job_meta["verification_evidence"] = verification
+                    if verification.get("verified"):
+                        _write_job_runtime_metadata(
+                            job["url"], apply_result_json={"status": "applied",
+                            "via": "greenhouse_adapter"},
+                            verification_evidence=verification,
+                            verification_confidence=verification.get("confidence"),
+                            checkpoint=_checkpoint(CHECKPOINT_VERIFICATION_COMPLETE))
+                        add_event(f"[W{worker_id}] APPLIED via adapter (no LLM) "
+                                  f"conf={verification.get('confidence')}")
+                        update_state(worker_id, status="applied",
+                                     last_action="adapter-submit applied")
+                        return "applied", duration_ms, prefill_status
+                    job_meta["failure_class"] = "verification_unverified_submission"
+                    _write_job_runtime_metadata(
+                        job["url"], verification_evidence=verification,
+                        verification_confidence=verification.get("confidence"),
+                        last_failure_class=job_meta["failure_class"])
+                    add_event(f"[W{worker_id}] adapter submitted, UNVERIFIED")
+                    update_state(worker_id, status="needs_review",
+                                 last_action="adapter-submit unverified")
+                    return "needs_review:unverified_submission", duration_ms, prefill_status
     except Exception as e:
         logger.debug("greenhouse adapter pass skipped: %s", e)
 
