@@ -936,3 +936,18 @@ recorded. Gate correctly passed; adapter+LLM completed incl. email
 verification + submit; verifier v3 clean. **Phase C done-when MET**
 (synthetic zero-LLM fill + one live Greenhouse apply → applied).
 Next: Phase F live batch (user-authorized).
+
+## Iteration 9 — Reliability v2: adapter completion (frame + answer-cache + submit) — 2026-05-16
+
+Autonomous $0 iteration (user away; no live runs). Closed the 3
+(A)-removable gaps the GH-only batch exposed:
+- **_form_scope()**: adapter now targets the iframe holding the GH form →
+  fixes roblox-class vanity (careers.roblox.com) falling to skill_record.
+- **answer-cache wired (D→C)**: unresolved free-text resolved from the
+  semantic cache ($0 seed/hit; cheap llm.py on novelty; never blind-guess),
+  dropped from unresolved.
+- **submit="auto"**: adapter submits deterministically iff fully resolved;
+  run_job then skips the Claude spawn → eliminates the (A) transient_timeout
+  class + drops $/apply toward ~$0. Double-submit-safe + fail-open.
+3 new $0 tests; suite 196→199 green. Live re-validation of acceptance #6
+deferred to a user-authorized batch (loop guardrail; user away).
