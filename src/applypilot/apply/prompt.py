@@ -661,7 +661,16 @@ Greenhouse (boards.greenhouse.io, job-boards.greenhouse.io, embedded greenhouse 
 3. For any dropdown you DO still need to set (custom screening question), use the KEYBOARD, never a bare option-click: browser_click the control to focus it → type the answer text → press ArrowDown → press Enter. A synthetic click on the portal option visually selects but does NOT commit react-select state. Keyboard commits it. Verify with a snapshot that the control now shows the chosen value, not "Select...".
 4. Custom free-text screening questions: answer in 1-3 concise sentences from the profile/resume. Don't agonize. A brief honest answer beats a perfect one that costs 10 turns.
 5. Email verification (Greenhouse "we sent a code"): Gmail MCP only — search_emails (query the sender/subject), read_email, extract the 8-char code, type it into the code field(s), then click Submit application again. Never open mail in the browser.
-6. Submit. Then snapshot once. Success = page text contains "thank you for your interest" / "thank you for applying" / "your application has been received" / "we'll be in touch". Output RESULT:APPLIED. If the page redirected to a careers homepage with no form and no error, that is ALSO success (the launcher verifier corroborates) — RESULT:APPLIED.
+6. Submit by CLICKING the actual "Submit application" button. NEVER use JavaScript `form.submit()`, `.submit()`, `HTMLFormElement.submit()`, `.requestSubmit()`, `form.dispatchEvent(...)`, or any browser_evaluate that calls a submission method on the form element directly. Greenhouse is a React app — native form.submit() BYPASSES React's submit handler, which resets all field state without actually submitting. This produces a falsely-positive "form cleared" signal that is NOT success.
+7. If the submit button click does not appear to work (no confirmation text within 5-10s):
+   7a. Scroll the button into view (browser_evaluate `document.querySelector('button[type=submit]')?.scrollIntoView({{block:'center'}})`), wait 1s, click it again.
+   7b. If still nothing, take a snapshot — check for inline validation errors (red text near fields). Fix any errors, then click submit again.
+   7c. After 3 honest submit-button-click attempts with no confirmation text and no validation errors visible, output RESULT:FAILED:submit_button_unresponsive. Do NOT fall back to JS form submission.
+8. After a click that appears to have worked: snapshot once. **Real success requires POSITIVE confirmation**:
+   - Page text contains one of: "thank you for your interest", "thank you for applying", "your application has been received", "we will review your application", "we'll be in touch", "application has been sent", "sign in to mygreenhouse" (Greenhouse confirmation fallback).
+   - OR the URL navigated to a distinct success path (e.g. /thank-you, /confirmation, /applied). A query-parameter change on the SAME job URL is NOT a redirect — it's a state update, not confirmation.
+   ONLY then: RESULT:APPLIED.
+9. **Empty-form-state is NOT success.** If the form's input fields appear empty/cleared after submit-click but you see NO confirmation text and NO success redirect, this is the React-stomp failure mode (the form re-rendered, state lost, submission did not go through). Output RESULT:NEEDS_REVIEW:submit_no_confirmation. Do NOT output RESULT:APPLIED on this evidence.
 
 Total Greenhouse budget target: ~150-250s. If you are past 400s still filling fields, you are scroll-looping or re-filling pre-filled fields — stop, go straight to Submit.
 
