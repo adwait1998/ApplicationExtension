@@ -124,7 +124,6 @@ def summarize_review(rows: list[dict]) -> dict[str, Any]:
            if str(r.get("tier_used") or "").startswith("greenhouse_adapter")]
     adp_applied = sum(1 for r in adp if _is_success(r))
     adp_a = sum(1 for r in adp if classify_failure_bucket(r) == "A")
-    adp_cost_rows = [r for r in adp if r.get("cost_usd") is not None]
     adp_cost = sum(float(r.get("cost_usd") or 0) for r in adp)
     adapter_slice = {
         "n": len(adp),
@@ -207,9 +206,9 @@ def format_report(summary: dict[str, Any]) -> str:
         "-" * 56,
         f"  Total cost         : ${s['total_cost_usd']:.2f}"
         + ("" if s["cost_rows"] else "   (NO cost telemetry in rows yet)"),
-        f"  Cost / apply       : "
+        "  Cost / apply       : "
         + (f"${s['cost_per_apply_usd']:.3f}" if s["cost_per_apply_usd"] is not None else "n/a"),
-        f"  Cache hit rate     : "
+        "  Cache hit rate     : "
         + (f"{s['cache_hit_rate']:.0%}" if s["cache_hit_rate"] is not None else "n/a"),
         "-" * 56,
         "  Pass rate by ATS:",

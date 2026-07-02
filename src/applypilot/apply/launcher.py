@@ -29,7 +29,7 @@ from rich.live import Live
 
 from applypilot import config
 from applypilot.database import get_connection
-from applypilot.apply import chrome, dashboard, prompt as prompt_mod
+from applypilot.apply import prompt as prompt_mod
 from applypilot.apply.browser_stream import (
     BrowserObservation,
     BrowserStateStream,
@@ -1496,7 +1496,7 @@ def _fetch_apply_candidates(
         params.append(f"%{site_contains.lower()}%")
     url_clauses = ""
     if blocked_patterns:
-        url_clauses = " ".join(f"AND url NOT LIKE ?" for _ in blocked_patterns)
+        url_clauses = " ".join("AND url NOT LIKE ?" for _ in blocked_patterns)
         params.extend(blocked_patterns)
 
     return conn.execute(f"""
@@ -1753,7 +1753,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                 params.append(f"%{site_contains.lower()}%")
             url_clauses = ""
             if blocked_patterns:
-                url_clauses = " ".join(f"AND url NOT LIKE ?" for _ in blocked_patterns)
+                url_clauses = " ".join("AND url NOT LIKE ?" for _ in blocked_patterns)
                 params.extend(blocked_patterns)
             # Fetch a batch so we can skip manual_ats jobs in one pass instead
             # of returning None and making the worker think the queue is empty.

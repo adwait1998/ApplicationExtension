@@ -22,7 +22,6 @@ Design tenets:
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -150,7 +149,6 @@ class SkillRecorder:
 
         unresolved: list[UnresolvedField] = []
         actions: list[Action] = []
-        required_sel_set: list[str] = []
         for cap in reduced:
             self._infer_value_source(cap)
             if cap.inferred_kind == "fill" and cap.inferred_value_source is None:

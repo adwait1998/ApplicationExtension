@@ -99,7 +99,6 @@ def _seed_bank(profile: dict) -> list[dict]:
     a standard question is a hit (zero LLM) without any prior run."""
     p = profile or {}
     wa = p.get("work_authorization", {}) or {}
-    per = p.get("personal", {}) or {}
     exp = p.get("experience", {}) or {}
     auth = "Yes" if str(wa.get("legally_authorized_to_work", "")).lower() in ("true", "yes", "1") else "No"
     spon = "Yes" if str(wa.get("require_sponsorship", "")).lower() in ("true", "yes", "1") else "No"
