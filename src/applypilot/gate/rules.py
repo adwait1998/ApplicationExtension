@@ -15,15 +15,13 @@ _CARVEOUT_RE = re.compile(
 
 _MGMT_RE = re.compile(r"\b(manager|director|head of|vp|vice president|chief|"
                       r"people manager|hiring manager)\b", re.I)
-_MGMT_TITLE_RE = re.compile(r"\bmanager\b|,\s*manager\b", re.I)
 _EARLY_RE = re.compile(r"\b(intern|internship|apprentice|apprenticeship|"
                        r"fellow|fellowship|new[ -]?grad|new[ -]?graduate|co[ -]?op)\b", re.I)
-_LEAD_IC_RE = re.compile(r"\blead\b", re.I)  # "Lead" is IC, not management
 
 _SPONSOR_BLOCK_RE = re.compile(
     r"(without sponsorship|no (visa )?sponsorship|(cannot|unable to|do not|"
     r"does not) sponsor|must be (a )?(us|u\.s\.) citizen|us citizenship required|"
-    r"security clearance|requires? .* clearance|no .* sponsorship|"
+    r"security clearance|requires?\s+(a\s+)?(security\s+)?clearance|"
     r"not able to sponsor|opt/cpt not)", re.I)
 
 _MANUAL_ATS_RE = re.compile(
@@ -70,11 +68,13 @@ def seniority_rule(title: str, policy: dict) -> Verdict:
     if _EARLY_RE.search(t):
         m = _EARLY_RE.search(t)
         return Verdict("REJECT", "seniority_early_career", m.group(0))
-    if policy.get("ic_only"):
-        # "Lead X" is IC; "Manager"/"Director"/etc. is management
-        if _MGMT_RE.search(t) and not (_LEAD_IC_RE.search(t) and not _MGMT_TITLE_RE.search(t)):
-            m = _MGMT_RE.search(t)
-            return Verdict("REJECT", "seniority_management_track", m.group(0))
+    # Management tokens (manager/director/vp/head of/chief) => management track.
+    # "Lead" is NOT a management token and is not in _MGMT_RE, so IC "Lead"
+    # titles pass without a special carve-out. (User rule: reject Director/VP/
+    # Head/Manager/Creative-Director for a 5yr IC designer.)
+    if policy.get("ic_only") and _MGMT_RE.search(t):
+        m = _MGMT_RE.search(t)
+        return Verdict("REJECT", "seniority_management_track", m.group(0))
     return Verdict("PASS", "seniority_ok", t)
 
 

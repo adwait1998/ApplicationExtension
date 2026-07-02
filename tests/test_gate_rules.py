@@ -16,6 +16,24 @@ def test_intern_rejected():
 def test_senior_ic_accepted():
     assert seniority_rule("Senior Product Designer", SENIORITY).result == "PASS"
 
+def test_lead_director_is_management_rejected():
+    assert seniority_rule("Lead, Director of Design", SENIORITY).result == "REJECT"
+
+def test_creative_director_rejected():
+    assert seniority_rule("Creative Director", SENIORITY).result == "REJECT"
+
+def test_lead_ic_still_accepted():
+    assert seniority_rule("Lead Product Designer", SENIORITY).result == "PASS"
+
+def test_head_of_design_rejected():
+    assert seniority_rule("Head of Design", SENIORITY).result == "REJECT"
+
+def test_sponsorship_benign_mention_not_rejected():
+    # a benign "sponsorship" mention that is NOT a hard block -> UNKNOWN, not REJECT
+    v = sponsorship_rule("Our benefits program has no impact on sponsorship perks.",
+                         needs_sponsorship=True)
+    assert v.result == "UNKNOWN"
+
 def test_sponsorship_hard_marker_rejects():
     v = sponsorship_rule("Must be authorized to work in the US without sponsorship.",
                          needs_sponsorship=True)
