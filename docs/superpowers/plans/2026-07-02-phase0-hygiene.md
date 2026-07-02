@@ -196,6 +196,8 @@ Expected: clean. If there are violations, fix mechanical ones (unused imports, w
 Run: `& $PY -m pytest tests/ -q`
 Expected: all pass (verified in Task 2; re-run to catch ruff-fix regressions).
 
+> **CI-coverage fix (added during execution):** the CI install step must be `pip install -e ".[dev,ui]"`, not `.[dev]`. `tests/test_webui.py` starts with `pytest.importorskip("fastapi")`, so without the `ui` extra the 13 web-UI safety tests (incl. `test_run_whitelist_has_no_live_apply`) silently SKIP in CI and the "UI cannot trigger live applies" contract goes ungated. Applied as commit after Task 4.
+
 - [ ] **Step 2: Enable CI on push/PR + make it callable**
 
 In `.github/workflows/ci.yml`, replace lines 3-4:
