@@ -1,3 +1,5 @@
+import pytest
+
 from applypilot.gate.rules import seniority_rule, sponsorship_rule, automatability_rule
 
 SENIORITY = {"accept_bands": ["mid", "senior"], "ic_only": True}
@@ -46,6 +48,24 @@ def test_sponsorship_silent_is_unknown_for_visa_user():
 
 def test_sponsorship_irrelevant_when_not_needed():
     assert sponsorship_rule("US citizenship required.", needs_sponsorship=False).result == "PASS"
+
+@pytest.mark.parametrize("desc", [
+    "We are not able to provide visa sponsorship for this role.",
+    "This position is not eligible for visa sponsorship.",
+    "The company does not offer visa sponsorship.",
+    "We will not sponsor applicants for work visas.",
+    "We will not provide sponsorship at this time.",
+    "Visa sponsorship is not available for this position.",
+])
+def test_sponsorship_verb_separated_negations_reject(desc):
+    v = sponsorship_rule(desc, needs_sponsorship=True)
+    assert v.result == "REJECT" and v.code == "sponsorship_blocked"
+
+def test_sponsorship_benign_still_unknown():
+    # must NOT be caught by the widened regex
+    v = sponsorship_rule("Our benefits program has no impact on sponsorship perks.",
+                         needs_sponsorship=True)
+    assert v.result == "UNKNOWN"
 
 def test_workday_without_account_parks():
     v = automatability_rule("https://adobe.wd5.myworkdayjobs.com/x/job/y_R1", workday_accounts=[])

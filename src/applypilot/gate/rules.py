@@ -19,8 +19,14 @@ _EARLY_RE = re.compile(r"\b(intern|internship|apprentice|apprenticeship|"
                        r"fellow|fellowship|new[ -]?grad|new[ -]?graduate|co[ -]?op)\b", re.I)
 
 _SPONSOR_BLOCK_RE = re.compile(
-    r"(without sponsorship|no (visa )?sponsorship|(cannot|unable to|do not|"
-    r"does not) sponsor|must be (a )?(us|u\.s\.) citizen|us citizenship required|"
+    r"(without sponsorship|no (visa )?sponsorship|"
+    r"(cannot|unable to|do not|does not|will not|won'?t)\s+sponsor|"
+    # verb-separated negation, e.g. "not able to provide visa sponsorship",
+    # "does not offer visa sponsorship", "not eligible for visa sponsorship"
+    r"(not (able to|eligible)|does not|will not|unable to|cannot|do not)\b[^.]{0,40}\bsponsor(ship)?\b|"
+    # reversed order, e.g. "sponsorship is not available/offered/provided"
+    r"sponsorship\b[^.]{0,25}\bnot\s+(available|offered|provided|possible)|"
+    r"must be (a )?(us|u\.s\.) citizen|us citizenship required|"
     r"security clearance|requires?\s+(a\s+)?(security\s+)?clearance|"
     r"not able to sponsor|opt/cpt not)", re.I)
 
