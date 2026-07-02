@@ -40,3 +40,22 @@ def test_workday():
 def test_unsupported():
     assert parse_ats_url("https://example.com/careers/123") is None
     assert parse_ats_url("") is None
+
+from applypilot.identity import identity_id
+
+def test_identity_id_from_ats_ref():
+    a = identity_id("https://boards.greenhouse.io/chime/jobs/8141068002?gh_jid=8141068002")
+    b = identity_id("https://boards.greenhouse.io/chime/jobs/8141068002?utm_source=li")
+    assert a == b == "greenhouse:chime:8141068002"   # tracking params collapse
+
+def test_identity_id_cross_source_same_posting():
+    # aggregator vanity URL and canonical URL for the same gh job -> same identity
+    canonical = identity_id("https://boards.greenhouse.io/airbnb/jobs/6153760")
+    vanity = identity_id("https://careers.airbnb.com/positions/6153760?gh_jid=6153760")
+    assert canonical == vanity == "greenhouse:airbnb:6153760"
+
+def test_identity_id_falls_back_to_normalized_url():
+    # unparseable ATS -> deterministic fallback on normalized (company,title,location) not raw url
+    key = identity_id("https://example.com/careers/x", company="Acme", title="Product Designer", location="Remote US")
+    assert key.startswith("norm:")
+    assert key == identity_id("https://other.example.com/y", company="acme", title="product designer", location="remote us")

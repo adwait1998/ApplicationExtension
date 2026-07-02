@@ -4,6 +4,7 @@ delegators). Exact-host matching only — substring 'lever'/'ashby' matching
 false-positives (e.g. 'cleverhealth')."""
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from urllib.parse import urlparse, unquote
@@ -110,3 +111,23 @@ def parse_ats_url(url: str) -> AtsRef | None:
             return AtsRef("greenhouse", token, job_id, confident=False)
 
     return None
+
+
+def _norm(s: str | None) -> str:
+    return " ".join((s or "").lower().split())
+
+
+def identity_id(url: str, *, company: str | None = None,
+                title: str | None = None, location: str | None = None) -> str:
+    """Stable cross-source identity for a job posting.
+
+    ATS-parseable -> 'ats:token:job_id' (or 'ats:token' when job_id unknown).
+    Otherwise -> 'norm:<sha1 of normalized company|title|location>'.
+    Keys money/reputation records (decisions, receipts, submission ledger,
+    already-applied block) so aliases and reposts fold correctly."""
+    ref = parse_ats_url(url)
+    if ref and ref.token:
+        return f"{ref.ats}:{ref.token}:{ref.job_id}" if ref.job_id else f"{ref.ats}:{ref.token}"
+    payload = "|".join((_norm(company), _norm(title), _norm(location)))
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+    return f"norm:{digest}"
