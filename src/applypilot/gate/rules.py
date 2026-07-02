@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 
+from applypilot.identity import parse_ats_url
+
 from . import Verdict
 from . import gazetteer as gz
 
@@ -10,6 +12,22 @@ _CARVEOUT_RE = re.compile(
     r"(not (available|eligible)|residents of|excluding|must reside|"
     r"overlap .* (\d+ )?(hours?|time ?zone)|must overlap|not .* residents|"
     r"itar|u\.?s\.? person|us citizens? only|must be a u\.?s\.? citizen)", re.I)
+
+_MGMT_RE = re.compile(r"\b(manager|director|head of|vp|vice president|chief|"
+                      r"people manager|hiring manager)\b", re.I)
+_MGMT_TITLE_RE = re.compile(r"\bmanager\b|,\s*manager\b", re.I)
+_EARLY_RE = re.compile(r"\b(intern|internship|apprentice|apprenticeship|"
+                       r"fellow|fellowship|new[ -]?grad|new[ -]?graduate|co[ -]?op)\b", re.I)
+_LEAD_IC_RE = re.compile(r"\blead\b", re.I)  # "Lead" is IC, not management
+
+_SPONSOR_BLOCK_RE = re.compile(
+    r"(without sponsorship|no (visa )?sponsorship|(cannot|unable to|do not|"
+    r"does not) sponsor|must be (a )?(us|u\.s\.) citizen|us citizenship required|"
+    r"security clearance|requires? .* clearance|no .* sponsorship|"
+    r"not able to sponsor|opt/cpt not)", re.I)
+
+_MANUAL_ATS_RE = re.compile(
+    r"(linkedin\.com/jobs|indeed\.com|glassdoor\.com|ziprecruiter\.com|ibegin\.tcs)", re.I)
 
 # Metros tried longest-first so "new york city" beats "new york" and
 # "san francisco bay area" beats "san francisco" during region resolution.
@@ -45,3 +63,47 @@ def location_rule(location: str, policy: dict, *, description: str = "",
     if non_us:
         return Verdict("REJECT", "location_onsite_non_us", loc)
     return Verdict("UNKNOWN", "location_unresolved", loc)
+
+
+def seniority_rule(title: str, policy: dict) -> Verdict:
+    t = (title or "").strip()
+    if _EARLY_RE.search(t):
+        m = _EARLY_RE.search(t)
+        return Verdict("REJECT", "seniority_early_career", m.group(0))
+    if policy.get("ic_only"):
+        # "Lead X" is IC; "Manager"/"Director"/etc. is management
+        if _MGMT_RE.search(t) and not (_LEAD_IC_RE.search(t) and not _MGMT_TITLE_RE.search(t)):
+            m = _MGMT_RE.search(t)
+            return Verdict("REJECT", "seniority_management_track", m.group(0))
+    return Verdict("PASS", "seniority_ok", t)
+
+
+def sponsorship_rule(description: str, *, needs_sponsorship: bool) -> Verdict:
+    if not needs_sponsorship:
+        return Verdict("PASS", "sponsorship_not_applicable")
+    m = _SPONSOR_BLOCK_RE.search(description or "")
+    if m:
+        start = max(0, m.start() - 30)
+        return Verdict("REJECT", "sponsorship_blocked", (description or "")[start:m.end() + 30])
+    return Verdict("UNKNOWN", "sponsorship_unknown")
+
+
+# NOTE (spec §5.2 rule 3): the H-1B LCA company-level sponsorship prior is
+# DEFERRED to Phase 4 (ranking bias, not the hard gate). v1 = the hard-marker
+# regex above + sponsorship_unknown -> review queue.
+
+
+def automatability_rule(url: str, *, workday_accounts: list[str]) -> Verdict:
+    u = url or ""
+    if _MANUAL_ATS_RE.search(u):
+        return Verdict("REJECT", "manual_ats", u)
+    ref = parse_ats_url(u)
+    if ref is None:
+        return Verdict("UNKNOWN", "automatability_unknown", u)
+    if ref.ats == "workday":
+        if ref.token.lower() in {a.lower() for a in (workday_accounts or [])}:
+            return Verdict("PASS", "automatable_workday")
+        return Verdict("REJECT", "account_required", ref.token)
+    if ref.ats in {"greenhouse", "lever", "ashby"}:
+        return Verdict("PASS", "automatable_supported")
+    return Verdict("UNKNOWN", "automatability_unknown", u)
