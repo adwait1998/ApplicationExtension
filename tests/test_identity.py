@@ -59,3 +59,29 @@ def test_identity_id_falls_back_to_normalized_url():
     key = identity_id("https://example.com/careers/x", company="Acme", title="Product Designer", location="Remote US")
     assert key.startswith("norm:")
     assert key == identity_id("https://other.example.com/y", company="acme", title="product designer", location="remote us")
+
+def test_workday_board_slug_not_treated_as_job_id():
+    r = parse_ats_url("https://adobe.wd5.myworkdayjobs.com/external_experienced")
+    assert r.ats == "workday" and r.token == "adobe" and r.job_id is None
+
+def test_vanity_ats_vendor_name_not_used_as_token():
+    assert parse_ats_url("https://careers.lever.co/x?gh_jid=5") is None
+    assert parse_ats_url("https://jobs.greenhouse.io/x?gh_jid=7") is None
+
+def test_ats_token_two_segment_only_when_no_other_fields():
+    # bare board ref with distinguishing fields -> norm (don't fold distinct postings)
+    a = identity_id("https://jobs.lever.co/palantir", title="Staff Engineer", location="NYC")
+    b = identity_id("https://jobs.lever.co/palantir", title="Product Designer", location="SF")
+    assert a.startswith("norm:") and b.startswith("norm:") and a != b
+    # degenerate: no other fields -> 2-segment token form
+    assert identity_id("https://jobs.lever.co/palantir") == "lever:palantir"
+
+def test_uppercase_host():
+    r = parse_ats_url("https://BOARDS.GREENHOUSE.IO/chime/jobs/123")
+    assert r == AtsRef("greenhouse", "chime", "123", confident=True)
+
+def test_no_colon_injection_ever():
+    for u in ("https://boards.greenhouse.io/chime/jobs/123",
+              "https://jobs.lever.co/palantir/15f01f3a-922d-4cff-b093-888333d88628",
+              "https://adobe.wd5.myworkdayjobs.com/x/job/y/Role_R1"):
+        assert identity_id(u).count(":") == 2  # ats:token:job_id, never more

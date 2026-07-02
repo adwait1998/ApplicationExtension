@@ -12,6 +12,7 @@ from urllib.parse import urlparse, unquote
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{1,80}$")
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _GH_JID_RE = re.compile(r"[?&]gh_jid=(\d+)", re.I)
+# dc (wdN) is intentionally excluded from identity: tenants migrate wd5->wd103, so folding across the datacenter is desired.
 _WD_HOST_RE = re.compile(r"^(?P<tenant>[a-z0-9-]+)\.(?P<dc>wd\d+)\.myworkdayjobs\.com$")
 _WD_REQ_RE = re.compile(r"_([A-Za-z0-9-]+)$")
 _VANITY_STOP = {"greenhouse", "lever", "ashbyhq", "myworkdayjobs", "icims"}
@@ -84,7 +85,11 @@ def parse_ats_url(url: str) -> AtsRef | None:
     wd = _WD_HOST_RE.match(host)
     if wd:
         job_id = None
-        if parts:
+        low_parts = [p.lower() for p in parts]
+        # Only the trailing _R<req> is a job id when the path has a /job/ or
+        # /details/ segment; else the underscore tail is the board slug
+        # (e.g. external_experienced) and must not be mistaken for a req id.
+        if parts and ("job" in low_parts or "details" in low_parts):
             m = _WD_REQ_RE.search(parts[-1])
             job_id = m.group(1) if m else None
         return AtsRef("workday", wd.group("tenant"), job_id, confident=True)
@@ -106,6 +111,8 @@ def parse_ats_url(url: str) -> AtsRef | None:
                 labels = [p for p in host.split(".") if p and p != "www"]
                 if len(labels) >= 2 and labels[0] not in _VANITY_STOP:
                     company = labels[0]
+        if company and company in _VANITY_STOP:
+            company = None  # host label is the ATS vendor, not the employer
         token = _clean_token(company)
         if token:
             return AtsRef("greenhouse", token, job_id, confident=False)
@@ -126,8 +133,10 @@ def identity_id(url: str, *, company: str | None = None,
     Keys money/reputation records (decisions, receipts, submission ledger,
     already-applied block) so aliases and reposts fold correctly."""
     ref = parse_ats_url(url)
-    if ref and ref.token:
-        return f"{ref.ats}:{ref.token}:{ref.job_id}" if ref.job_id else f"{ref.ats}:{ref.token}"
+    if ref and ref.token and ref.job_id:
+        return f"{ref.ats}:{ref.token}:{ref.job_id}"
+    if ref and ref.token and not any((company, title, location)):
+        return f"{ref.ats}:{ref.token}"
     payload = "|".join((_norm(company), _norm(title), _norm(location)))
     digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
     return f"norm:{digest}"
