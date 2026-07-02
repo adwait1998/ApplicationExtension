@@ -21,8 +21,8 @@ def profile():
         "personal": {
             "first_name": "Nida",
             "last_name": "Shah",
-            "email": "nidashah1409@gmail.com",
-            "phone": "4807917968",
+            "email": "nida@example.com",
+            "phone": "5551234567",
             "city": "San Jose",
         },
         "responses": {
@@ -56,8 +56,8 @@ def test_recorder_basic_capture_commit_yaml(tmp_path, profile, resume_path):
     r.observe_tool_use("browser_fill_form", {"fields": [
         {"name": "first_name", "selector": "#first_name", "value": "Nida"},
         {"name": "last_name",  "selector": "#last_name",  "value": "Shah"},
-        {"name": "email",      "selector": "#email",      "value": "nidashah1409@gmail.com"},
-        {"name": "phone",      "selector": "#phone",      "value": "4807917968"},
+        {"name": "email",      "selector": "#email",      "value": "nida@example.com"},
+        {"name": "phone",      "selector": "#phone",      "value": "5551234567"},
     ]})
     r.observe_tool_use("browser_file_upload", {"selector": "#resume", "paths": [resume_path]})
     r.observe_tool_use("browser_type", {"selector": "#why_join", "value": "Excited to work on craft-led design."})
@@ -106,14 +106,14 @@ def test_recorder_derives_first_last_from_full_name(tmp_path, resume_path):
     profile = {
         "personal": {
             "full_name": "Nida Shah",
-            "email": "nidashah1409@gmail.com",
+            "email": "nida@example.com",
         }
     }
     r = SkillRecorder("derived", "greenhouse", "https://example.com", profile, resume_path)
     r.observe_tool_use("browser_fill_form", {"fields": [
         {"name": "first_name", "selector": "#first_name", "value": "Nida"},
         {"name": "last_name", "selector": "#last_name", "value": "Shah"},
-        {"name": "email", "selector": "#email", "value": "nidashah1409@gmail.com"},
+        {"name": "email", "selector": "#email", "value": "nida@example.com"},
     ]})
     r.observe_tool_use("browser_click", {"selector": "#submit"})
 
@@ -171,7 +171,7 @@ def test_recorder_final_state_wins(tmp_path, profile, resume_path):
     r = SkillRecorder("dedup", "greenhouse", "https://example.com", profile, resume_path)
     # Wrong value first, then corrected
     r.observe_tool_use("browser_type", {"selector": "#email", "value": "wrong@example.com"})
-    r.observe_tool_use("browser_type", {"selector": "#email", "value": "nidashah1409@gmail.com"})
+    r.observe_tool_use("browser_type", {"selector": "#email", "value": "nida@example.com"})
     r.observe_tool_use("browser_click", {"selector": "#submit"})
 
     skill = r.commit(out)
@@ -236,7 +236,7 @@ def test_recorder_extracts_name_attribute_from_fill_form(tmp_path, profile, resu
     r = SkillRecorder("form", "greenhouse", "https://example.com", profile, resume_path)
     r.observe_tool_use("browser_fill_form", {"fields": [
         {"name": "first_name", "ref": "e21", "value": "Nida"},
-        {"name": "email",      "ref": "e22", "value": "nidashah1409@gmail.com"},
+        {"name": "email",      "ref": "e22", "value": "nida@example.com"},
     ]})
     r.observe_tool_use("browser_click", {"ref": "e99", "element": 'button "Submit"'})
 

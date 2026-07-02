@@ -5,6 +5,12 @@ resume.pdf
 *.env
 .env.*
 !.env.example
+resume.pdf.bak.*
+answer_bank.json
+searches.yaml
+!src/applypilot/config/searches.example.yaml
+ats_companies.yaml
+!src/applypilot/config/ats_companies.yaml
 
 # Runtime artifacts
 *.db
@@ -14,6 +20,14 @@ chrome-workers/
 apply-workers/
 apply_logs/
 logs/
+*.db-wal
+*.db-shm
+*.db-journal
+loop-state.json
+feature.md
+.tmp-applypilot-cli/
+.fuse_hidden*
+*.pre-scrub.bak
 
 # MCP configs (per-machine)
 .mcp*.json

@@ -66,8 +66,8 @@ def profile():
         "personal": {
             "first_name": "Nida",
             "last_name": "Shah",
-            "email": "nidashah1409@gmail.com",
-            "phone": "4807917968",
+            "email": "nida@example.com",
+            "phone": "5551234567",
         },
         "responses": {
             "why_join": "Excited to work on craft-led design.",
@@ -138,8 +138,8 @@ def test_replay_happy_path(page, profile, tmp_resume):
     # Verify each field was actually filled
     assert page.locator("#first_name").input_value() == "Nida"
     assert page.locator("#last_name").input_value() == "Shah"
-    assert page.locator("#email").input_value() == "nidashah1409@gmail.com"
-    assert page.locator("#phone").input_value() == "4807917968"
+    assert page.locator("#email").input_value() == "nida@example.com"
+    assert page.locator("#phone").input_value() == "5551234567"
     assert page.locator("#why_join").input_value() == "Excited to work on craft-led design."
     assert page.locator("#work_auth").input_value() == "Yes"
     # The submit button was clicked, revealing the success div
