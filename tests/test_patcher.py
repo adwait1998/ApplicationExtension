@@ -39,7 +39,7 @@ def profile():
     return {
         "personal": {
             "full_name": "Nida Shah",
-            "email": "nidashah1409@gmail.com",
+            "email": "nida@example.com",
             "city": "San Jose",
         },
         "experience": {

@@ -6,11 +6,9 @@ resume.pdf
 .env.*
 !.env.example
 resume.pdf.bak.*
-answer_bank.json
-searches.yaml
-!src/applypilot/config/searches.example.yaml
-ats_companies.yaml
-!src/applypilot/config/ats_companies.yaml
+/answer_bank.json
+/searches.yaml
+/ats_companies.yaml
 
 # Runtime artifacts
 *.db
@@ -23,8 +21,9 @@ logs/
 *.db-wal
 *.db-shm
 *.db-journal
-loop-state.json
-feature.md
+/loop-state.json
+# ralph-loop scratch spec
+/feature.md
 .tmp-applypilot-cli/
 .fuse_hidden*
 *.pre-scrub.bak

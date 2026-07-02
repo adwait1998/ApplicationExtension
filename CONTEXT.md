@@ -100,7 +100,7 @@ Motorola Solutions Workday job (ECH Application Specialist) is marked applied fr
 ## Known issues / future work
 
 - **Lever / Ashby pre-fill not implemented** — selectors not reliably documented. Would need to inspect production pages.
-- **Workday tenants need pre-registered accounts** with the email verification flow done manually. Profile has password `@StarWars123` (updated 2026-05-09) set; works for Motorola, but each new tenant requires creating + verifying an account first. Profile email is `nidashah1409@gmail.com` (used across all job sites including Workday).
+- **Workday tenants need pre-registered accounts** with the email verification flow done manually. The shared Workday password lives in `profile.json` (`personal.password`, updated 2026-05-09); works for Motorola, but each new tenant requires creating + verifying an account first. The profile email (`personal.email` in `profile.json`) is used across all job sites including Workday.
 - **MiKTeX not installed** — original plan called for LaTeX vision-feedback resume tailoring. Skipped. Resume is fixed `.pdf` (32KB).
 - **Resume tailoring per-job is disabled** — launcher now uses master `resume.pdf` as fallback. The scoring/tailor module exists but Gemma 3 4B fabricates content (validator catches; status `failed_validation`). Tailoring deferred until a stronger model is wired in.
 - **Smart-extract disabled** — replaced by ats_boards. Set `APPLYPILOT_SMART_EXTRACT=1` to re-enable.
