@@ -88,7 +88,7 @@ def _standard_plan(profile: dict, resume_pdf_path: str) -> list[dict]:
                     "eligible to work", "currently authorized"],
          "kind": "combobox",
          "preferred": ((_yn(wa.get("legally_authorized_to_work", "")),)
-                       + ("yes, i am authorized", "authorized"))},
+                       + ("yes, i am authorized", "yes, i am legally authorized"))},
         {"key": "sponsorship",
          "labels": ["sponsorship", "require sponsorship", "need sponsorship", "visa"],
          "kind": "combobox",
@@ -202,6 +202,9 @@ def _select_combobox(page: "Page", control, preferred: tuple[str, ...],
     target = _match_real_option(tuple(p for p in preferred if p), options)
     if target is None:
         return False
+    if _polarity_conflict(preferred, target):
+        log.debug("greenhouse adapter rejected polarity-conflicting option %r for %r", target, preferred)
+        return False
     typ = _combobox_input(page, control)        # react-select inner <input>
     try:
         try:
@@ -229,6 +232,25 @@ def _select_combobox(page: "Page", control, preferred: tuple[str, ...],
     return False
 
 
+def _polarity_conflict(preferred: tuple[str, ...], target: str) -> bool:
+    """Avoid fuzzy matching an affirmative intent to a negative option."""
+    first = next((str(p).strip().lower() for p in preferred if str(p).strip()), "")
+    low = str(target or "").strip().lower()
+    if not first or not low:
+        return False
+    wants_yes = first == "yes" or first.startswith("yes,") or first.startswith("yes ")
+    wants_no = first == "no" or first.startswith("no,") or first.startswith("no ")
+    target_negative = bool(
+        low == "no"
+        or low.startswith("no,")
+        or low.startswith("no ")
+        or " not " in f" {low} "
+        or "n't" in low
+    )
+    target_affirmative = low == "yes" or low.startswith("yes,") or low.startswith("yes ")
+    return (wants_yes and target_negative) or (wants_no and target_affirmative)
+
+
 def _required_labels_on_page(page: "Page") -> list[str]:
     """Labels of required form controls, for the unresolved (Tier-2) sweep."""
     try:
@@ -245,6 +267,72 @@ def _required_labels_on_page(page: "Page") -> list[str]:
                 if (!t) { const c=el.closest('div,fieldset,li'); const L=c&&c.querySelector('label,legend'); if(L) t=L.textContent; }
                 t = norm(t);
                 if (t && t.length < 160) out.push(t);
+              }
+              return [...new Set(out)];
+            }"""
+        )) or []
+    except Exception:
+        return []
+
+
+def _missing_required_labels_on_page(page: "Page") -> list[str]:
+    """Required labels whose associated control is still empty or invalid."""
+    try:
+        return list(page.evaluate(
+            """() => {
+              const norm = s => (s||'').replace(/\\s+/g,' ').trim();
+              const visible = el => {
+                if (!el) return false;
+                const r = el.getBoundingClientRect();
+                const cs = getComputedStyle(el);
+                return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none';
+              };
+              const labelFor = el => {
+                let t = '';
+                if (el.id) {
+                  const L=document.querySelector('label[for=\"'+CSS.escape(el.id)+'\"]');
+                  if(L) t=L.textContent;
+                }
+                if (!t) {
+                  const W=el.closest('label');
+                  if(W) t=W.textContent;
+                }
+                if (!t) {
+                  const c=el.closest('div,fieldset,li');
+                  const L=c&&c.querySelector('label,legend');
+                  if(L) t=L.textContent;
+                }
+                return norm(t);
+              };
+              const hasValue = el => {
+                if (!el) return false;
+                const tag = (el.tagName || '').toLowerCase();
+                const type = (el.type || '').toLowerCase();
+                if (type === 'checkbox' || type === 'radio') {
+                  if (el.name) return !!document.querySelector(`[name="${CSS.escape(el.name)}"]:checked`);
+                  return !!el.checked;
+                }
+                if (type === 'file') return !!(el.files && el.files.length);
+                const aria = (el.getAttribute('aria-invalid') || '').toLowerCase();
+                if (aria === 'true') return false;
+                if (el.matches(':invalid')) return false;
+                const c = el.closest('[class*=select__control],[class*=Select__control],fieldset,li,div');
+                const text = norm(c ? c.innerText : '');
+                const value = norm(el.value);
+                if (el.getAttribute('role') === 'combobox' || /select__input|react-select/i.test(el.className || '')) {
+                  return !!value || (!!text && !/^select\\.\\.\\.?$/i.test(text));
+                }
+                if (tag === 'select') return !!el.value;
+                return !!value;
+              };
+              const out = [];
+              const reqd = Array.from(document.querySelectorAll(
+                '[required], [aria-required="true"], [class*="required"]'
+              )).filter(visible);
+              for (const el of reqd) {
+                if (hasValue(el)) continue;
+                const label = labelFor(el);
+                if (label && label.length < 160) out.push(label);
               }
               return [...new Set(out)];
             }"""
@@ -290,9 +378,40 @@ def _form_scope(page: "Page"):
     return page
 
 
+def _post_submit_verdict(button_gone: bool, errors_visible: bool,
+                         button_enabled: bool, deadline_hit: bool) -> tuple[bool | None, str | None]:
+    """Pure decision core for post-click submit confirmation.
+
+    Returns (verdict, error): verdict True = submitted, False = not
+    submitted, None = keep polling. Click success != submission —
+    Greenhouse keeps the form on screen with field errors when anything
+    is invalid; previously that still reported submitted=True, the LLM
+    was skipped, and the job landed in needs_review:unverified_submission
+    with zero chance of recovery.
+    """
+    if button_gone:
+        return True, None
+    if errors_visible:
+        return False, "submit_rejected: validation errors visible after click"
+    if deadline_hit:
+        if button_enabled:
+            return False, "submit_unconfirmed: form still interactive after click"
+        # Button present but disabled at deadline → most likely mid-flight
+        # submission; treat as submitted (verifier still runs downstream).
+        return True, None
+    return None, None
+
+
+_VALIDATION_ERROR_SELECTOR = (
+    ".field-error, .error-message, [role='alert'], "
+    ".helper-text--error, [class*='error'][class*='field']"
+)
+
+
 def submit_greenhouse(scope, *, interaction_ms: int = 4000) -> tuple[bool, str | None]:
     """Deterministically click the Greenhouse submit button via a healing
-    locator. Returns (submitted, error)."""
+    locator, then CONFIRM the submission took (form gone / no validation
+    errors). Returns (submitted, error)."""
     btn_spec = ElementSpec(role="button", name="Submit application",
                            label="Submit application", text="Submit application",
                            fingerprint={"tag": "button",
@@ -302,9 +421,34 @@ def submit_greenhouse(scope, *, interaction_ms: int = 4000) -> tuple[bool, str |
         if bloc is None:
             return False, "submit button not found"
         bloc.click(timeout=interaction_ms)
-        return True, None
     except Exception as e:
         return False, f"submit failed: {type(e).__name__}: {e}"
+
+    # Post-click confirmation loop (~6s budget).
+    deadline = time.time() + max(6.0, interaction_ms / 1000)
+    while True:
+        deadline_hit = time.time() >= deadline
+        try:
+            button_gone = not bloc.is_visible()
+        except Exception:
+            # Detached element / navigated page → the form is gone.
+            return True, None
+        errors_visible = False
+        button_enabled = False
+        try:
+            err = scope.locator(_VALIDATION_ERROR_SELECTOR).first
+            errors_visible = err.is_visible()
+        except Exception:
+            pass
+        try:
+            button_enabled = bloc.is_enabled()
+        except Exception:
+            return True, None
+        verdict, error = _post_submit_verdict(
+            button_gone, errors_visible, button_enabled, deadline_hit)
+        if verdict is not None:
+            return verdict, error
+        time.sleep(0.25)
 
 
 def fill_greenhouse(page: "Page", profile: dict, resume_pdf_path: str, *,
@@ -390,6 +534,17 @@ def fill_greenhouse(page: "Page", profile: dict, resume_pdf_path: str, *,
             except Exception:
                 still.append(u)
         res.unresolved = still
+
+    # Final safety gate for submit="auto": known standard controls can fail to
+    # commit, especially react-select comboboxes. Do not submit while the live
+    # form still reports required controls as empty/invalid.
+    for lbl in _missing_required_labels_on_page(page):
+        low = lbl.lower()
+        if "resume" in low or low == "cv" or "resume/cv" in low:
+            continue
+        if any((u.get("label") or "").lower() == low for u in res.unresolved):
+            continue
+        res.unresolved.append({"label": lbl, "type": "unknown"})
 
     # submit: True = always; False = never (LLM submits); "auto" = submit
     # deterministically ONLY when the form is fully satisfied (no

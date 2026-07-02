@@ -90,7 +90,8 @@ _FORM = """
   wire('wa-c','wa-i','wa-m','wa-v');
   wire('g-c','g-i','g-m','g-v');
   document.getElementById('sub').addEventListener('click',()=>{
-    document.getElementById('done').style.display='block';});
+    document.getElementById('done').style.display='block';
+    document.getElementById('sub').remove();});
 </script>
 </form></body></html>
 """
@@ -254,6 +255,27 @@ def test_auto_submit_only_when_fully_resolved(page, resume):
     assert r2.unresolved == []
     assert r2.submitted is True
     assert page.locator("#done").is_visible()
+
+
+def test_auto_submit_blocks_when_standard_required_combobox_still_missing(page, resume):
+    form = _FORM.replace(
+        '<input class="select__input" id="wa-i" autocomplete="off">',
+        '<input class="select__input" id="wa-i" autocomplete="off" required aria-required="true">',
+    ).replace(
+        '<div class="select__option">Yes, I am authorized to work in the US</div>',
+        '<div class="select__option">No, I am not authorized</div>',
+    )
+    from applypilot.apply.answer_cache import AnswerCache
+    q = "Describe a product you shipped that you're proud of"
+    ac = AnswerCache(_PROFILE)
+    ac.answer(q, llm_fn=lambda question, ctx: "A payments flow at Brex.")
+
+    page.set_content(form)
+    res = fill_greenhouse(page, _PROFILE, resume, submit="auto", answer_cache=ac)
+
+    assert res.submitted is False
+    assert not page.locator("#done").is_visible()
+    assert any("authorized" in u["label"].lower() for u in res.unresolved), res.unresolved
 
 
 # Regression: gusto 7640344 "Principal Product Designer, CoreX AI" timed
