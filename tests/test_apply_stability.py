@@ -138,6 +138,16 @@ def test_apply_result_classification_permanent_and_success():
         "not_eligible_location",
         True,
     )
+    assert launcher._classify_apply_result("failed:candidate_profile_only") == (
+        "failed",
+        "candidate_profile_only",
+        True,
+    )
+    assert launcher._classify_apply_result("failed:apply_button_not_found") == (
+        "failed",
+        "apply_button_not_found",
+        True,
+    )
 
 
 def test_acquire_job_seen_guard_skips_same_url(monkeypatch):
@@ -155,6 +165,114 @@ def test_acquire_job_seen_guard_skips_same_url(monkeypatch):
     assert first is not None
     assert first["url"] == "https://example.com/job"
     assert second is None
+
+
+def test_reset_manual_scopes_to_resolved_site(monkeypatch):
+    conn = _make_jobs_conn()
+    conn.execute("DELETE FROM jobs")
+    rows = [
+        (
+            "https://www.linkedin.com/jobs/view/direct-ts",
+            "Designer",
+            "Adapt (TheirStack)",
+            "https://ats.rippling.com/adapt/jobs/1",
+            "manual",
+        ),
+        (
+            "https://www.linkedin.com/jobs/view/unresolved-ts",
+            "Designer",
+            "Harvey (TheirStack)",
+            "https://www.linkedin.com/jobs/view/unresolved-ts",
+            "manual",
+        ),
+        (
+            "https://example.com/direct-other",
+            "Designer",
+            "Greenhouse",
+            "https://boards.greenhouse.io/example/jobs/2",
+            "manual",
+        ),
+        (
+            "https://example.com/failed-ts",
+            "Designer",
+            "Mercury (TheirStack)",
+            "https://boards.greenhouse.io/mercury/jobs/3",
+            "failed",
+        ),
+    ]
+    for url, title, site, app_url, status in rows:
+        conn.execute(
+            """
+            INSERT INTO jobs (
+                url, title, site, application_url, tailored_resume_path,
+                fit_score, location, full_description, cover_letter_path,
+                apply_status, apply_attempts, apply_error, agent_id
+            ) VALUES (?, ?, ?, ?, NULL, 9, 'Remote', 'Role description', NULL, ?, 3, 'manual ATS', 'worker-0')
+            """,
+            (url, title, site, app_url, status),
+        )
+    conn.commit()
+    monkeypatch.setattr(launcher, "get_connection", lambda: conn)
+
+    count = launcher.reset_manual(site_contains="theirstack", resolved_only=True)
+
+    assert count == 1
+    reset_row = conn.execute(
+        "SELECT apply_status, apply_attempts, apply_error, agent_id FROM jobs WHERE url = ?",
+        ("https://www.linkedin.com/jobs/view/direct-ts",),
+    ).fetchone()
+    assert dict(reset_row) == {
+        "apply_status": None,
+        "apply_attempts": 0,
+        "apply_error": None,
+        "agent_id": None,
+    }
+    rows_by_url = {
+        row["url"]: row["apply_status"]
+        for row in conn.execute("SELECT url, apply_status FROM jobs")
+    }
+    assert rows_by_url["https://www.linkedin.com/jobs/view/unresolved-ts"] == "manual"
+    assert rows_by_url["https://example.com/direct-other"] == "manual"
+    assert rows_by_url["https://example.com/failed-ts"] == "failed"
+
+
+def test_preapply_location_gate_rejects_clear_nonlocal_onsite():
+    profile = {"personal": {"city": "San Jose"}}
+    job = {
+        "title": "Product Designer",
+        "location": "New York, NY",
+        "full_description": "This role is on-site and based in New York, NY.",
+    }
+
+    assert launcher._preapply_location_reject(job, profile, {}) == "not_eligible_location"
+
+
+def test_preapply_location_gate_keeps_remote_and_local_roles():
+    profile = {"personal": {"city": "San Jose"}}
+
+    assert launcher._preapply_location_reject(
+        {"title": "Product Designer (Remote)", "location": "New York, NY", "full_description": "Remote eligible."},
+        profile,
+        {},
+    ) is None
+    assert launcher._preapply_location_reject(
+        {"title": "Product Designer", "location": "San Jose, CA", "full_description": "Hybrid role."},
+        profile,
+        {},
+    ) is None
+
+
+def test_preapply_location_gate_uses_workday_url_location_and_ignores_limited_wfa():
+    profile = {"personal": {"city": "San Jose"}}
+    job = {
+        "title": "Senior AI UX Product Designer",
+        "location": "",
+        "url": "https://example.wd5.myworkdayjobs.com/site/job/Mexico-Mexico-City/Senior-AI-UX-Product-Designer_123",
+        "application_url": "https://example.wd5.myworkdayjobs.com/site/job/Mexico-Mexico-City/Senior-AI-UX-Product-Designer_123",
+        "full_description": "Hybrid Work Model: 2-3 days a week in the office. Work from anywhere for up to 8 weeks per year.",
+    }
+
+    assert launcher._preapply_location_reject(job, profile, {}) == "not_eligible_location"
 
 
 def test_dashboard_updates_mark_dirty():
@@ -294,7 +412,12 @@ def test_applied_result_does_not_trigger_retry(monkeypatch):
     monkeypatch.setattr(launcher, "cleanup_worker", lambda *args, **kwargs: None)
     monkeypatch.setattr(launcher, "run_job", counting_run_job)
     monkeypatch.setattr(launcher, "mark_result", lambda *args, **kwargs: None)
-    monkeypatch.setattr(launcher, "write_review_log", lambda *args, **kwargs: None)
+    review_logs = []
+    monkeypatch.setattr(
+        launcher,
+        "write_review_log",
+        lambda *args, **kwargs: review_logs.append((args, kwargs)),
+    )
     monkeypatch.setattr(launcher, "add_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(launcher, "update_state", lambda *args, **kwargs: None)
     monkeypatch.setattr(launcher, "_write_job_runtime_metadata", lambda *args, **kwargs: None)
@@ -313,6 +436,8 @@ def test_applied_result_does_not_trigger_retry(monkeypatch):
     )
     assert applied == 1
     assert failed == 0
+    assert review_logs
+    assert review_logs[-1][1].get("failure_class") is None
 
 
 def test_permanent_failure_does_not_trigger_retry(monkeypatch):
@@ -346,7 +471,7 @@ def test_permanent_failure_does_not_trigger_retry(monkeypatch):
     assert len(run_job_calls) == 1
 
 
-def test_transient_failure_does_retry(monkeypatch):
+def test_retryable_transient_failure_does_retry(monkeypatch):
     """The retry mechanism still works for genuine transient failures
     (no_result_line is transient + retryable; timeout is NOT — see
     test_timeout_is_not_retried)."""
@@ -354,9 +479,9 @@ def test_transient_failure_does_retry(monkeypatch):
     _lock_job(conn)
 
     run_job_calls = []
-    # First call a retryable transient (no_result_line), second call applied
+    # First call a retryable transient, second call applied.
     responses = [
-        ("needs_review:no_result_line", 100, {"ats": "greenhouse", "fields_filled": [], "duration_ms": 1, "error": None}),
+        ("needs_review:browser_unavailable", 100, {"ats": "greenhouse", "fields_filled": [], "duration_ms": 1, "error": None}),
         ("applied", 100, {"ats": "greenhouse", "fields_filled": [], "duration_ms": 1, "error": None}),
     ]
 
@@ -385,6 +510,69 @@ def test_transient_failure_does_retry(monkeypatch):
         launcher._stop_event.clear()
 
     assert len(run_job_calls) == 2, "retryable transient should trigger one retry"
+
+
+def test_no_result_line_is_not_retried(monkeypatch):
+    """A missing result line can happen after a manual or real submit. Do not
+    retry the same role, because that can duplicate the application."""
+    conn = _make_jobs_conn()
+    _lock_job(conn)
+
+    run_job_calls = []
+
+    def run_job_seq(*args, **kwargs):
+        run_job_calls.append(kwargs)
+        return "needs_review:no_result_line", 100, {
+            "ats": "unsupported",
+            "fields_filled": [],
+            "duration_ms": 1,
+            "error": None,
+        }
+
+    monkeypatch.setattr(launcher, "get_connection", lambda: conn)
+    monkeypatch.setattr(launcher, "acquire_job", lambda **kwargs: _worker_job())
+    monkeypatch.setattr(launcher, "_wait_for_resources", lambda worker_id: None)
+    monkeypatch.setattr(launcher, "launch_chrome", lambda *args, **kwargs: object())
+    monkeypatch.setattr(launcher, "cleanup_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "run_job", run_job_seq)
+    monkeypatch.setattr(launcher, "mark_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "write_review_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "add_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "update_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher, "_write_job_runtime_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(launcher._stop_event, "wait", lambda timeout=None: False)
+    launcher._stop_event.clear()
+
+    try:
+        launcher.worker_loop(worker_id=0, limit=1, dry_run=False, max_transient_retries=2)
+    finally:
+        launcher._stop_event.clear()
+
+    assert len(run_job_calls) == 1
+
+
+def test_stream_snapshot_needed_is_retryable_and_detected():
+    assert launcher._needs_snapshot_fallback(
+        "Tool browser_snapshot is not allowed in this strict stream pass"
+    )
+    assert launcher._needs_snapshot_fallback(
+        "Tool browser_type is not allowed in this strict stream pass"
+    )
+    assert launcher._classify_failure_class(
+        "needs_review:stream_snapshot_needed",
+        "stream_snapshot_needed",
+    ) == "transient_stream_snapshot_needed"
+    assert not launcher._is_permanent_failure("needs_review:stream_snapshot_needed")
+
+
+def test_infer_applied_when_result_line_missing_but_success_is_clear():
+    output = """
+    The application for the Product Design position has been successfully submitted
+    with all required information. The form is now locked and no further changes
+    can be made.
+    """
+
+    assert launcher._infer_result_code_from_success_text(output) == "applied"
 
 
 def test_timeout_is_not_retried(monkeypatch):
@@ -490,6 +678,9 @@ def test_failure_class_mapping():
     assert launcher._classify_failure_class("failed:form_validation_error", "form_validation_error") == "validation_form_validation_error"
     assert launcher._classify_failure_class("needs_review:unverified_submission", "unverified_submission") == "verification_unverified_submission"
     assert launcher._classify_failure_class("failed:unsafe_permissions", "unsafe_permissions") == "policy_unsafe_permissions"
+    assert launcher._classify_failure_class("failed:not_eligible_location", "not_eligible_location") == "policy_not_eligible_location"
+    assert launcher._classify_failure_class("failed:candidate_profile_only", "candidate_profile_only") == "blocker_candidate_profile_only"
+    assert launcher._classify_failure_class("failed:apply_button_not_found", "apply_button_not_found") == "blocker_apply_button_not_found"
 
 
 def test_idempotency_duplicate_detection(monkeypatch):

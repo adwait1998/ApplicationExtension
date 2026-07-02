@@ -95,8 +95,28 @@ boards:
 
 # Search defaults
 defaults:
-  results_per_site: 100  # Max results per board per query
-  hours_old: 72          # Only jobs posted within this many hours
+  results_per_site: 25   # Max results per board per query
+  hours_old: 24          # Only jobs posted within this many hours
+
+# TheirStack API discovery (paid/API-backed, opt-in).
+# Run with: applypilot run discover --source theirstack
+# Auth: set THEIRSTACK_API_KEY or APPLYPILOT_THEIRSTACK_API_KEY in ~/.applypilot/.env.
+theirstack:
+  limit: 25              # API page size
+  max_results: 25        # Credit guardrail per run; TheirStack charges per returned job
+  # enabled: false       # Set APPLYPILOT_THEIRSTACK_ENABLED=1 to include in default discovery
+  # job_title_or: []     # Optional override; defaults to queries above
+  # job_country_code_or: ["US"]
+  # filters: {}          # Advanced TheirStack request body fields pass through here
+
+# Optional positive title targeting. If present, discovery stores only titles
+# containing one of these phrases. Keep these precise; broad words like
+# "product" will admit Product Manager noise.
+title_include:
+  - "software engineer"
+  - "backend engineer"
+  - "full stack engineer"
+  - "python engineer"
 
 # Negative keywords -- skip jobs with these in the title (case-insensitive)
 exclude_titles:

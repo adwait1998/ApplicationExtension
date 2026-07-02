@@ -16,13 +16,14 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
+from copy import deepcopy
+from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from applypilot.config import load_env, ensure_dirs
+from applypilot.config import DEFAULTS, load_env, ensure_dirs
 from applypilot.database import init_db, get_connection, get_stats
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ console = Console()
 STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf")
 
 STAGE_META: dict[str, dict] = {
-    "discover": {"desc": "Job discovery (JobSpy + Workday + smart extract)"},
+    "discover": {"desc": "Job discovery (JobSpy + Workday + ATS boards + TheirStack)"},
     "enrich":   {"desc": "Detail enrichment (full descriptions + apply URLs)"},
     "score":    {"desc": "LLM scoring (fit 1-10)"},
     "tailor":   {"desc": "Resume tailoring (LLM + validation)"},
@@ -60,10 +61,115 @@ _UPSTREAM: dict[str, str | None] = {
 # Individual stage runners
 # ---------------------------------------------------------------------------
 
-VALID_SOURCES = ("jobspy", "workday", "ats_boards", "smartextract")
+VALID_SOURCES = ("jobspy", "workday", "ats_boards", "theirstack", "smartextract")
+QUICK_MAX_AGE_HOURS = 24
 
 
-def _run_discover(workers: int = 1, sources: list[str] | None = None) -> dict:
+def _ready_to_apply_count(
+    min_score: int = 8,
+    max_age_hours: int = QUICK_MAX_AGE_HOURS,
+    limit: int = 100,
+    site_contains: str | None = None,
+) -> int:
+    """Count fresh jobs that the apply queue can actually automate."""
+    from applypilot.apply.launcher import preview_apply_queue
+
+    return len(preview_apply_queue(
+        limit=limit,
+        min_score=min_score,
+        max_age_hours=max_age_hours,
+        site_contains=site_contains,
+    ))
+
+
+def _top_apply_queue_urls(
+    target_ready: int,
+    min_score: int = 8,
+    max_age_hours: int = QUICK_MAX_AGE_HOURS,
+    site_contains: str | None = None,
+) -> list[str]:
+    """Return the current top apply queue URLs without acquiring jobs."""
+    from applypilot.apply.launcher import preview_apply_queue
+
+    return [
+        job["url"]
+        for job in preview_apply_queue(
+            limit=target_ready,
+            min_score=min_score,
+            max_age_hours=max_age_hours,
+            site_contains=site_contains,
+        )
+    ]
+
+
+def _is_theirstack_scope(sources: list[str] | None = None, site_contains: str | None = None) -> bool:
+    if sources and "theirstack" in {s.lower() for s in sources}:
+        return True
+    return bool(site_contains and "theirstack" in site_contains.lower())
+
+
+def _theirstack_resolver_kwargs(
+    *,
+    sources: list[str] | None = None,
+    site_contains: str | None = None,
+    min_score: int = 8,
+    target_ready: int = 10,
+    quick: bool = False,
+) -> dict:
+    if not _is_theirstack_scope(sources, site_contains):
+        return {}
+    return {
+        "resolve_linkedin_site_contains": "TheirStack",
+        "resolve_linkedin_limit": max(target_ready * 2, 10),
+        "resolve_linkedin_min_score": max(min_score, 8),
+        "resolve_linkedin_max_age_hours": QUICK_MAX_AGE_HOURS if quick else None,
+    }
+
+
+def _quick_jobspy_config(target_ready: int) -> dict:
+    """Build a small high-signal JobSpy config for quick mode."""
+    from applypilot import config
+
+    cfg = deepcopy(config.load_search_config() or {})
+    cfg["sites"] = ["linkedin", "google"]
+    cfg["tiers"] = [1]
+    defaults = dict(cfg.get("defaults", {}))
+    defaults["hours_old"] = min(int(defaults.get("hours_old", QUICK_MAX_AGE_HOURS)), QUICK_MAX_AGE_HOURS)
+    defaults["results_per_site"] = min(int(defaults.get("results_per_site", 25)), max(8, target_ready))
+    cfg["defaults"] = defaults
+
+    locations = cfg.get("locations", []) or []
+    preferred: list[dict] = []
+    for loc in locations:
+        value = str(loc.get("location", "")).lower()
+        if loc.get("remote") or "remote" in value:
+            preferred.append(loc)
+    for loc in locations:
+        value = str(loc.get("location", "")).lower()
+        if "san francisco" in value or "san jose" in value:
+            preferred.append(loc)
+
+    deduped = []
+    seen = set()
+    for loc in preferred or locations:
+        key = (loc.get("location"), bool(loc.get("remote")))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(loc)
+        if len(deduped) >= 2:
+            break
+    if deduped:
+        cfg["locations"] = deduped
+    return cfg
+
+
+def _run_discover(
+    workers: int = 1,
+    sources: list[str] | None = None,
+    quick: bool = False,
+    target_ready: int = 10,
+) -> dict:
     """Stage: Job discovery — JobSpy, Workday, ATS boards, smart-extract.
 
     Args:
@@ -71,7 +177,17 @@ def _run_discover(workers: int = 1, sources: list[str] | None = None) -> dict:
         sources: Which sub-stages to run. None = all enabled by default.
                  Valid: "jobspy", "workday", "ats_boards", "smartextract".
     """
-    enabled = set(sources) if sources else {"jobspy", "workday", "ats_boards"}
+    enabled = set(sources) if sources else (
+        {"ats_boards", "jobspy"} if quick else {"jobspy", "workday", "ats_boards"}
+    )
+    if (
+        "theirstack" not in enabled
+        and (
+            os.environ.get("APPLYPILOT_THEIRSTACK_ENABLED") == "1"
+            or os.environ.get("THEIRSTACK_ENABLED") == "1"
+        )
+    ):
+        enabled.add("theirstack")
     if "smartextract" not in enabled and os.environ.get("APPLYPILOT_SMART_EXTRACT") == "1":
         enabled.add("smartextract")
 
@@ -79,10 +195,10 @@ def _run_discover(workers: int = 1, sources: list[str] | None = None) -> dict:
 
     # JobSpy
     if "jobspy" in enabled:
-        console.print("  [cyan]JobSpy full crawl...[/cyan]")
+        console.print("  [cyan]JobSpy quick crawl...[/cyan]" if quick else "  [cyan]JobSpy full crawl...[/cyan]")
         try:
             from applypilot.discovery.jobspy import run_discovery
-            run_discovery()
+            run_discovery(_quick_jobspy_config(target_ready) if quick else None)
             stats["jobspy"] = "ok"
         except Exception as e:
             log.error("JobSpy crawl failed: %s", e)
@@ -119,6 +235,20 @@ def _run_discover(workers: int = 1, sources: list[str] | None = None) -> dict:
     else:
         stats["ats_boards"] = "skipped"
 
+    # TheirStack API source. Opt-in because returned jobs consume TheirStack credits.
+    if "theirstack" in enabled:
+        console.print("  [cyan]TheirStack API...[/cyan]")
+        try:
+            from applypilot.discovery.theirstack import run_theirstack_discovery
+            result = run_theirstack_discovery()
+            stats["theirstack"] = result.get("status", "ok")
+        except Exception as e:
+            log.error("TheirStack crawl failed: %s", e)
+            console.print(f"  [red]TheirStack error:[/red] {e}")
+            stats["theirstack"] = f"error: {e}"
+    else:
+        stats["theirstack"] = "skipped"
+
     # Smart extract — opt-in only; replaced by ats_boards which hits JSON
     # APIs directly (~50x faster, no LLM cost).
     if "smartextract" in enabled:
@@ -137,33 +267,89 @@ def _run_discover(workers: int = 1, sources: list[str] | None = None) -> dict:
     return stats
 
 
-def _run_enrich(workers: int = 1) -> dict:
+def _run_enrich(
+    workers: int = 1,
+    limit: int | None = None,
+    max_total: int | None = None,
+) -> dict:
     """Stage: Detail enrichment — scrape full descriptions and apply URLs."""
     try:
         from applypilot.enrichment.detail import run_enrichment
-        run_enrichment(workers=workers)
+        kwargs = {"workers": workers}
+        if limit is not None:
+            kwargs["limit"] = limit
+        if max_total is not None:
+            kwargs["max_total"] = max_total
+        run_enrichment(**kwargs)
         return {"status": "ok"}
     except Exception as e:
         log.error("Enrichment failed: %s", e)
         return {"status": f"error: {e}"}
 
 
-def _run_score() -> dict:
-    """Stage: LLM scoring — assign fit scores 1-10."""
+def _run_score(
+    limit: int = 0,
+    resolve_linkedin_site_contains: str | None = None,
+    resolve_linkedin_limit: int = 0,
+    resolve_linkedin_min_score: int = 8,
+    resolve_linkedin_max_age_hours: float | None = None,
+) -> dict:
+    """Stage: LLM scoring - assign fit scores 1-10."""
     try:
         from applypilot.scoring.scorer import run_scoring
-        run_scoring()
-        return {"status": "ok"}
+        stats = run_scoring(limit=limit)
+        result = {"status": "ok", "scoring": stats}
+        if resolve_linkedin_site_contains and resolve_linkedin_limit > 0:
+            from applypilot.enrichment.linkedin_outbound import resolve_linkedin_jobs
+
+            resolver_stats = resolve_linkedin_jobs(
+                limit=resolve_linkedin_limit,
+                min_score=resolve_linkedin_min_score,
+                write=True,
+                use_browser=True,
+                headless=True,
+                manual_unblock_seconds=0,
+                retry_hours=0,
+                site_contains=resolve_linkedin_site_contains,
+                max_age_hours=resolve_linkedin_max_age_hours,
+            )
+            if resolver_stats["processed"]:
+                log.info(
+                    "Post-score LinkedIn resolver (%s): %d/%d resolved | easy=%d expired=%d unknown=%d error=%d",
+                    resolve_linkedin_site_contains,
+                    resolver_stats["resolved"],
+                    resolver_stats["processed"],
+                    resolver_stats["easy_apply_only"],
+                    resolver_stats["expired"],
+                    resolver_stats["unknown"],
+                    resolver_stats["error"],
+                )
+            result["linkedin_outbound"] = resolver_stats
+        return result
     except Exception as e:
         log.error("Scoring failed: %s", e)
         return {"status": f"error: {e}"}
 
 
-def _run_tailor(min_score: int = 7, validation_mode: str = "normal") -> dict:
+def _run_tailor(
+    min_score: int = 7,
+    validation_mode: str = "normal",
+    limit: int = 20,
+    job_urls: list[str] | None = None,
+    site_contains: str | None = None,
+    applyable_only: bool = False,
+) -> dict:
     """Stage: Resume tailoring — generate tailored resumes for high-fit jobs."""
     try:
         from applypilot.scoring.tailor import run_tailoring
-        run_tailoring(min_score=min_score, validation_mode=validation_mode)
+        run_tailoring(
+            min_score=min_score,
+            limit=limit,
+            validation_mode=validation_mode,
+            job_urls=job_urls,
+            site_contains=site_contains,
+            applyable_only=applyable_only,
+        )
         return {"status": "ok"}
     except Exception as e:
         log.error("Tailoring failed: %s", e)
@@ -279,7 +465,12 @@ _PENDING_SQL: dict[str, str] = {
 _STREAM_POLL_INTERVAL = 10
 
 
-def _count_pending(stage: str, min_score: int = 7) -> int:
+def _count_pending(
+    stage: str,
+    min_score: int = 7,
+    site_contains: str | None = None,
+    applyable_only: bool = False,
+) -> int:
     """Count pending work items for a stage."""
     if stage == "enrich":
         from applypilot.enrichment.detail import SKIP_DETAIL_SITES
@@ -312,9 +503,23 @@ def _count_pending(stage: str, min_score: int = 7) -> int:
     if sql is None:
         return 0
     conn = get_connection()
+    params: list[object] = []
+    if site_contains and stage in {"tailor", "cover"}:
+        sql += " AND LOWER(site) LIKE ?"
+        params.append(f"%{site_contains.lower()}%")
+    if applyable_only and stage == "tailor":
+        sql += (
+            " AND applied_at IS NULL "
+            "AND (apply_status IS NULL OR apply_status = 'failed') "
+            f"AND (apply_attempts IS NULL OR apply_attempts < {int(DEFAULTS['max_apply_attempts'])}) "
+            "AND application_url IS NOT NULL "
+            "AND LOWER(TRIM(application_url)) NOT IN ('', 'none', 'null', 'nan', 'nat') "
+            "AND (LOWER(TRIM(application_url)) LIKE 'http://%' OR LOWER(TRIM(application_url)) LIKE 'https://%') "
+            "AND LOWER(TRIM(application_url)) NOT LIKE '%linkedin.com/jobs/view%'"
+        )
     if "?" in sql:
-        return conn.execute(sql, (min_score,)).fetchone()[0]
-    return conn.execute(sql).fetchone()[0]
+        return conn.execute(sql, (min_score, *params)).fetchone()[0]
+    return conn.execute(sql, params).fetchone()[0]
 
 
 def _run_stage_streaming(
@@ -325,6 +530,10 @@ def _run_stage_streaming(
     workers: int = 1,
     validation_mode: str = "normal",
     sources: list[str] | None = None,
+    site_contains: str | None = None,
+    applyable_only: bool = False,
+    quick: bool = False,
+    target_ready: int = 10,
 ) -> None:
     """Run a single stage in streaming mode: loop until upstream done + no work.
 
@@ -337,10 +546,41 @@ def _run_stage_streaming(
     if stage in ("tailor", "cover"):
         kwargs["min_score"] = min_score
         kwargs["validation_mode"] = validation_mode
+    if stage == "tailor" and site_contains:
+        kwargs["site_contains"] = site_contains
+    if stage == "tailor" and applyable_only:
+        kwargs["applyable_only"] = True
     if stage in ("discover", "enrich"):
         kwargs["workers"] = workers
     if stage == "discover" and sources is not None:
         kwargs["sources"] = sources
+    if stage == "discover":
+        kwargs["quick"] = quick
+        kwargs["target_ready"] = target_ready
+    if quick and stage == "enrich":
+        budget = max(target_ready * 3, 20)
+        kwargs["limit"] = max(target_ready, 10)
+        kwargs["max_total"] = budget
+    if quick and stage == "score":
+        kwargs["limit"] = max(target_ready * 3, 20)
+    if stage == "score":
+        kwargs.update(
+            _theirstack_resolver_kwargs(
+                sources=sources,
+                site_contains=site_contains,
+                min_score=min_score,
+                target_ready=target_ready,
+                quick=quick,
+            )
+        )
+    if quick and stage == "tailor":
+        kwargs["limit"] = target_ready
+        kwargs["job_urls"] = _top_apply_queue_urls(
+                target_ready,
+                min_score=max(min_score, 8),
+                max_age_hours=QUICK_MAX_AGE_HOURS,
+                site_contains=site_contains,
+            )
 
     upstream = _UPSTREAM[stage]
 
@@ -362,7 +602,12 @@ def _run_stage_streaming(
             # Wait a bit for upstream to produce some work before first run
             tracker.wait(upstream, timeout=_STREAM_POLL_INTERVAL)
 
-        pending = _count_pending(stage, min_score)
+        pending = _count_pending(
+            stage,
+            min_score,
+            site_contains=site_contains,
+            applyable_only=applyable_only,
+        )
 
         if pending > 0:
             try:
@@ -390,13 +635,30 @@ def _run_stage_streaming(
 
 def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
                     validation_mode: str = "normal",
-                    sources: list[str] | None = None) -> dict:
+                    sources: list[str] | None = None,
+                    site_contains: str | None = None,
+                    applyable_only: bool = False,
+                    quick: bool = False,
+                    target_ready: int = 10) -> dict:
     """Execute stages one at a time (original behavior)."""
     results: list[dict] = []
     errors: dict[str, str] = {}
     pipeline_start = time.time()
 
     for name in ordered:
+        if quick and name in {"enrich", "score"}:
+            ready = _ready_to_apply_count(
+                min_score=max(min_score, 8),
+                limit=target_ready,
+                site_contains=site_contains,
+            )
+            if ready >= target_ready:
+                console.print(
+                    f"\n  [green]Quick target met:[/green] {ready}/{target_ready} fresh jobs ready. "
+                    f"Skipping remaining stages."
+                )
+                break
+
         meta = STAGE_META[name]
         console.print(f"\n{'=' * 70}")
         console.print(f"  [bold]STAGE: {name}[/bold] — {meta['desc']}")
@@ -411,10 +673,41 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
             if name in ("tailor", "cover"):
                 kwargs["min_score"] = min_score
                 kwargs["validation_mode"] = validation_mode
+            if name == "tailor" and site_contains:
+                kwargs["site_contains"] = site_contains
+            if name == "tailor" and applyable_only:
+                kwargs["applyable_only"] = True
             if name in ("discover", "enrich"):
                 kwargs["workers"] = workers
             if name == "discover" and sources is not None:
                 kwargs["sources"] = sources
+            if name == "discover":
+                kwargs["quick"] = quick
+                kwargs["target_ready"] = target_ready
+            if quick and name == "enrich":
+                budget = max(target_ready * 3, 20)
+                kwargs["limit"] = max(target_ready, 10)
+                kwargs["max_total"] = budget
+            if quick and name == "score":
+                kwargs["limit"] = max(target_ready * 3, 20)
+            if name == "score":
+                kwargs.update(
+                    _theirstack_resolver_kwargs(
+                        sources=sources,
+                        site_contains=site_contains,
+                        min_score=min_score,
+                        target_ready=target_ready,
+                        quick=quick,
+                    )
+                )
+            if quick and name == "tailor":
+                kwargs["limit"] = target_ready
+                kwargs["job_urls"] = _top_apply_queue_urls(
+                    target_ready,
+                    min_score=max(min_score, 8),
+                    max_age_hours=QUICK_MAX_AGE_HOURS,
+                    site_contains=site_contains,
+                )
             result = runner(**kwargs)
             elapsed = time.time() - t0
 
@@ -447,7 +740,11 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
 
 def _run_streaming(ordered: list[str], min_score: int, workers: int = 1,
                    validation_mode: str = "normal",
-                   sources: list[str] | None = None) -> dict:
+                   sources: list[str] | None = None,
+                   site_contains: str | None = None,
+                   applyable_only: bool = False,
+                   quick: bool = False,
+                   target_ready: int = 10) -> dict:
     """Execute stages concurrently with DB as conveyor belt."""
     tracker = _StageTracker()
     stop_event = threading.Event()
@@ -469,7 +766,7 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1,
         start_times[name] = time.time()
         t = threading.Thread(
             target=_run_stage_streaming,
-            args=(name, tracker, stop_event, min_score, workers, validation_mode, sources),
+            args=(name, tracker, stop_event, min_score, workers, validation_mode, sources, site_contains, applyable_only, quick, target_ready),
             name=f"stage-{name}",
             daemon=True,
         )
@@ -518,6 +815,10 @@ def run_pipeline(
     workers: int = 1,
     validation_mode: str = "normal",
     sources: list[str] | None = None,
+    site_contains: str | None = None,
+    applyable_only: bool = False,
+    quick: bool = False,
+    target_ready: int = 10,
 ) -> dict:
     """Run pipeline stages.
 
@@ -527,6 +828,8 @@ def run_pipeline(
         dry_run: If True, preview stages without executing.
         stream: If True, run stages concurrently (streaming mode).
         workers: Number of parallel threads for discovery/enrichment stages.
+        quick: If True, use small targeted budgets for discovery/enrich/score.
+        target_ready: Desired fresh ready-to-apply count for quick mode.
 
     Returns:
         Dict with keys: stages (list of result dicts), errors (dict), elapsed (float).
@@ -540,6 +843,9 @@ def run_pipeline(
     if stages is None:
         stages = ["all"]
     ordered = _resolve_stages(stages)
+    if quick and stream:
+        console.print("[yellow]Quick mode uses bounded sequential stages; ignoring --stream.[/yellow]")
+        stream = False
 
     # Banner
     mode = "streaming" if stream else "sequential"
@@ -551,6 +857,12 @@ def run_pipeline(
     console.print(f"  Min score:  {min_score}")
     console.print(f"  Workers:    {workers}")
     console.print(f"  Validation: {validation_mode}")
+    if site_contains:
+        console.print(f"  Site:       contains {site_contains}")
+    if applyable_only:
+        console.print("  Tailor:     applyable jobs only")
+    if quick:
+        console.print(f"  Quick:      target {target_ready} ready jobs")
     console.print(f"  Stages:     {' -> '.join(ordered)}")
 
     # Pre-run stats
@@ -569,11 +881,19 @@ def run_pipeline(
     if stream:
         result = _run_streaming(ordered, min_score, workers=workers,
                                 validation_mode=validation_mode,
-                                sources=sources)
+                                sources=sources,
+                                site_contains=site_contains,
+                                applyable_only=applyable_only,
+                                quick=quick,
+                                target_ready=target_ready)
     else:
         result = _run_sequential(ordered, min_score, workers=workers,
                                  validation_mode=validation_mode,
-                                 sources=sources)
+                                 sources=sources,
+                                 site_contains=site_contains,
+                                 applyable_only=applyable_only,
+                                 quick=quick,
+                                 target_ready=target_ready)
 
     # Summary table
     console.print(f"\n{'=' * 70}")
@@ -605,7 +925,13 @@ def run_pipeline(
     console.print(f"    Scored:         {final['scored']}")
     console.print(f"    Tailored:       {final['tailored']}")
     console.print(f"    Cover letters:  {final['with_cover_letter']}")
-    console.print(f"    Ready to apply: {final['ready_to_apply']}")
+    console.print(f"    Auto-applyable: {final['ready_to_apply']} (all ages)")
+    fresh_ready = _ready_to_apply_count(
+        min_score=max(min_score, 8),
+        max_age_hours=QUICK_MAX_AGE_HOURS,
+        limit=100,
+    )
+    console.print(f"    Fresh queue:    {fresh_ready} (24h, score >= {max(min_score, 8)})")
     console.print(f"    Applied:        {final['applied']}")
     console.print(f"{'=' * 70}\n")
 

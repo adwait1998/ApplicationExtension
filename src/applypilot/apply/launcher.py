@@ -30,12 +30,18 @@ from rich.live import Live
 from applypilot import config
 from applypilot.database import get_connection
 from applypilot.apply import chrome, dashboard, prompt as prompt_mod
+from applypilot.apply.browser_stream import (
+    BrowserObservation,
+    BrowserStateStream,
+    summarize_observation,
+)
 from applypilot.apply.prefill import prefill_application
 from applypilot.apply.chrome import (
     launch_chrome, cleanup_worker, kill_all_chrome,
     reset_worker_dir, cleanup_on_exit, _kill_process_tree,
     BASE_CDP_PORT,
 )
+from applypilot.apply.visual_trace import VisualTraceRecorder
 from applypilot.apply.dashboard import (
     init_worker, update_state, add_event, get_state,
     render_full, get_totals, wait_for_change,
@@ -65,7 +71,10 @@ _claude_lock = threading.Lock()
 
 # Jobs claimed during the current process. This prevents one bad URL from
 # being retried by another worker in the same run after a timeout/no-result.
+# Sites are also tracked so sequential workers do one pass across companies
+# before returning to the same company, while still draining thin queues.
 _run_seen_urls: set[str] = set()
+_run_seen_sites: set[str] = set()
 _run_seen_lock = threading.Lock()
 
 _allowed_tools_supported: bool | None = None
@@ -96,8 +105,22 @@ if platform.system() != "Windows":
 # MCP config
 # ---------------------------------------------------------------------------
 
-def _make_mcp_config(cdp_port: int) -> dict:
-    """Build MCP config dict for a specific CDP port."""
+def _make_mcp_config(cdp_port: int, dry_run: bool = False) -> dict:
+    """Build MCP config dict for a specific CDP port.
+
+    `dry_run` is forwarded to the applypilot_stream server so final submits
+    are refused SERVER-SIDE — the prompt-only dry-run guard failed live
+    (Twilio, 2026-06-12: the model passed allow_submit=true during a dry run
+    and a real application was submitted).
+    """
+    stream_args = [
+        "-m",
+        "applypilot.apply.stream_mcp_server",
+        "--cdp-port",
+        str(cdp_port),
+    ]
+    if dry_run:
+        stream_args.append("--dry-run")
     return {
         "mcpServers": {
             "playwright": {
@@ -107,6 +130,10 @@ def _make_mcp_config(cdp_port: int) -> dict:
                     f"--cdp-endpoint=http://localhost:{cdp_port}",
                     f"--viewport-size={config.DEFAULTS['viewport']}",
                 ],
+            },
+            "applypilot_stream": {
+                "command": sys.executable,
+                "args": stream_args,
             },
             "gmail": {
                 "command": "npx",
@@ -138,32 +165,121 @@ def _claude_supports_allowed_tools(claude_bin: str) -> bool:
     return _allowed_tools_supported
 
 
-def _allowed_tools_arg() -> str:
+def _allowed_tools_arg(
+    *,
+    allow_snapshot: bool = True,
+    allow_raw_browser: bool = True,
+    allow_navigate: bool = True,
+) -> str:
     """Restrict Claude to the browser MCP and read/send-only Gmail tools."""
-    return ",".join([
-        "mcp__playwright__browser_navigate",
-        "mcp__playwright__browser_snapshot",
-        "mcp__playwright__browser_click",
-        "mcp__playwright__browser_type",
-        "mcp__playwright__browser_fill_form",
-        "mcp__playwright__browser_file_upload",
-        "mcp__playwright__browser_evaluate",
-        "mcp__playwright__browser_take_screenshot",
+    tools = [
+        "mcp__applypilot_stream__stream_latest",
+        "mcp__applypilot_stream__stream_wait_for_change",
+        "mcp__applypilot_stream__stream_execute",
         "mcp__playwright__browser_tabs",
-        "mcp__playwright__browser_press_key",
-        "mcp__playwright__browser_hover",
-        "mcp__playwright__browser_select_option",
-        "mcp__playwright__browser_console_messages",
         "mcp__gmail__search_emails",
         "mcp__gmail__read_email",
         "mcp__gmail__send_email",
-    ])
+    ]
+    if allow_navigate:
+        tools.insert(3, "mcp__playwright__browser_navigate")
+    if allow_raw_browser:
+        tools[5:5] = [
+            "mcp__playwright__browser_click",
+            "mcp__playwright__browser_type",
+            "mcp__playwright__browser_fill_form",
+            "mcp__playwright__browser_file_upload",
+            "mcp__playwright__browser_evaluate",
+            "mcp__playwright__browser_press_key",
+            "mcp__playwright__browser_hover",
+            "mcp__playwright__browser_select_option",
+            "mcp__playwright__browser_console_messages",
+            "mcp__playwright__browser_network_requests",
+        ]
+    if allow_snapshot:
+        tools.insert(4, "mcp__playwright__browser_snapshot")
+        tools.insert(5, "mcp__playwright__browser_take_screenshot")
+    return ",".join(tools)
+
+
+def _disallowed_tools_arg(
+    *,
+    allow_snapshot: bool = True,
+    allow_raw_browser: bool = True,
+    allow_navigate: bool = True,
+) -> str:
+    """Deny non-apply tools and hard-block snapshots during strict stream pass."""
+    tools = [
+        "Task", "WebFetch", "WebSearch", "TodoWrite", "Read", "Write", "Edit", "MultiEdit",
+        "NotebookRead", "NotebookEdit", "Bash", "PowerShell", "Glob", "Grep", "LS",
+        "mcp__playwright__browser_run_code_unsafe",
+        "mcp__playwright__browser_wait_for",
+        "mcp__gmail__draft_email", "mcp__gmail__modify_email",
+        "mcp__gmail__delete_email", "mcp__gmail__download_attachment",
+        "mcp__gmail__batch_modify_emails", "mcp__gmail__batch_delete_emails",
+        "mcp__gmail__create_label", "mcp__gmail__update_label",
+        "mcp__gmail__delete_label", "mcp__gmail__get_or_create_label",
+        "mcp__gmail__list_email_labels", "mcp__gmail__create_filter",
+        "mcp__gmail__list_filters", "mcp__gmail__get_filter",
+        "mcp__gmail__delete_filter",
+    ]
+    if not allow_snapshot:
+        tools.append("mcp__playwright__browser_snapshot")
+        tools.append("mcp__playwright__browser_take_screenshot")
+    if not allow_navigate:
+        tools.append("mcp__playwright__browser_navigate")
+    if not allow_raw_browser:
+        tools.extend([
+            "mcp__playwright__browser_click",
+            "mcp__playwright__browser_type",
+            "mcp__playwright__browser_fill_form",
+            "mcp__playwright__browser_file_upload",
+            "mcp__playwright__browser_evaluate",
+            "mcp__playwright__browser_press_key",
+            "mcp__playwright__browser_hover",
+            "mcp__playwright__browser_select_option",
+            "mcp__playwright__browser_console_messages",
+            "mcp__playwright__browser_network_requests",
+        ])
+    return ",".join(tools)
 
 
 def _is_claude_usage_limit(text: str) -> bool:
     """Detect Claude CLI account/usage-limit responses in plain or JSON text."""
     lower = text.lower()
     return any(pattern in lower for pattern in CLAUDE_LIMIT_PATTERNS)
+
+
+def _needs_snapshot_fallback(output: str) -> bool:
+    """Detect a strict stream pass blocked by unavailable fallback browser tools."""
+    lower = (output or "").lower()
+    blocked_tool_mentioned = any(
+        tool in lower
+        for tool in (
+            "browser_snapshot",
+            "browser_take_screenshot",
+            "browser_click",
+            "browser_type",
+            "browser_fill_form",
+            "browser_file_upload",
+            "browser_evaluate",
+            "browser_press_key",
+            "browser_select_option",
+        )
+    )
+    if not blocked_tool_mentioned:
+        return False
+    return any(
+        marker in lower
+        for marker in (
+            "not available",
+            "unavailable",
+            "not allowed",
+            "permission",
+            "tool",
+            "stream_snapshot_needed",
+        )
+    )
 
 
 def _canonicalize_url(url: str) -> str:
@@ -186,9 +302,36 @@ def _canonicalize_url(url: str) -> str:
     return urlunparse(normalized)
 
 
+_INVALID_URL_TEXT = {"", "none", "nan", "nat", "null"}
+
+
+def _valid_http_url(value) -> str | None:
+    """Return a usable HTTP(S) URL, ignoring common stringified nulls."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in _INVALID_URL_TEXT:
+        return None
+    if not text.lower().startswith(("http://", "https://")):
+        return None
+    return text
+
+
+def _effective_apply_url(job: dict) -> str | None:
+    """Prefer a real direct apply URL, otherwise fall back to the listing URL."""
+    return _valid_http_url(job.get("application_url")) or _valid_http_url(job.get("url"))
+
+
+def _job_with_effective_apply_url(row) -> dict:
+    """Convert a DB row to a job dict with application_url normalized."""
+    job = dict(row)
+    job["application_url"] = _effective_apply_url(job)
+    return job
+
+
 def _compute_idempotency_key(job: dict, profile: dict | None = None) -> str:
     """Build a stable idempotency key for this candidate+job submission intent."""
-    apply_url = job.get("application_url") or job.get("url") or ""
+    apply_url = _effective_apply_url(job) or ""
     canonical = _canonicalize_url(apply_url)
     candidate = ""
     if profile:
@@ -203,6 +346,90 @@ def _compute_idempotency_key(job: dict, profile: dict | None = None) -> str:
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     return digest
+
+
+_REMOTE_LOCATION_RE = re.compile(
+    r"\b(remote|work from home|work-from-home|wfh|distributed)\b",
+    re.I,
+)
+_ONSITE_LOCATION_RE = re.compile(
+    r"\b(on[- ]?site|hybrid|in[- ]office|office-based|based in|located in|relocat(?:e|ion))\b",
+    re.I,
+)
+
+
+def _preapply_location_reject(job: dict, profile: dict, search_config: dict | None = None) -> str | None:
+    """Return a rejection reason for clearly non-local onsite/hybrid roles.
+
+    Conservative by design: remote wording wins, local accepted markers win,
+    and empty/uncertain locations continue to the browser.
+    """
+    personal = profile.get("personal", {}) if isinstance(profile, dict) else {}
+    if search_config is None:
+        # Only fall back to disk config when the caller passed nothing.
+        # An explicit {} means "no accept patterns" — previously `{}` was
+        # falsy and silently loaded defaults whose markers neutered the gate.
+        search_config = config.load_search_config() or {}
+    location_cfg = search_config.get("location", {}) if isinstance(search_config, dict) else {}
+    accepted = [str(personal.get("city") or "").strip().lower()]
+    accepted.extend(str(x).strip().lower() for x in location_cfg.get("accept_patterns", []) or [])
+    accepted.extend(["san francisco bay area", "bay area"])
+    accepted = [x for x in dict.fromkeys(accepted) if x]
+
+    title = str(job.get("title") or "")
+    loc = str(job.get("location") or "")
+    desc = str(job.get("full_description") or "")
+    apply_url = _effective_apply_url(job) or ""
+    combined = " ".join([title, loc, apply_url, desc[:5000]]).lower()
+
+    if not (loc.strip() or apply_url.strip()):
+        return None
+    if _REMOTE_LOCATION_RE.search(combined) and not re.search(r"\b(up to|for up to)\s+\d+\s+weeks\b", combined):
+        return None
+    # Word-boundary match so short markers ("CA", "US", "SF") can't fire on
+    # substrings of ordinary words ("appliCAtions", "joins US", ...), which
+    # made the accept check pass for nearly every job description.
+    if any(re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", combined) for marker in accepted):
+        return None
+
+    concrete_city_state = bool(re.search(r"\b[A-Z][a-zA-Z .'-]+,\s*(?:[A-Z]{2}|[A-Za-z .'-]+)\b", loc))
+    if _ONSITE_LOCATION_RE.search(combined) or concrete_city_state:
+        return "not_eligible_location"
+    return None
+
+
+_WORKDAY_TENANT_RE = re.compile(r"https?://([a-z0-9-]+)\.wd\d+\.myworkdayjobs\.com", re.I)
+
+
+def _workday_account_reject(job: dict, search_config: dict | None = None) -> str | None:
+    """Park Workday jobs whose tenant has no registered account.
+
+    Workday requires a pre-registered, email-verified account per tenant
+    (manual step). Without one the LLM burns 350-430s + cost discovering a
+    login wall (the 4 blocker_login_issue rows of 2026-05-20..22 were all
+    exactly this). Tenants with working accounts are listed under
+    `workday_accounts` in searches.yaml; unknown tenants are parked
+    pre-spawn. No list configured → gate is a no-op (backward compatible).
+    """
+    url = _effective_apply_url(job) or ""
+    m = _WORKDAY_TENANT_RE.match(url.strip().lower())
+    if not m:
+        return None
+    if search_config is None:
+        search_config = config.load_search_config() or {}
+    raw = search_config.get("workday_accounts") if isinstance(search_config, dict) else None
+    if not raw:
+        return None
+    tenants = {str(t).strip().lower() for t in raw if str(t).strip()}
+    if m.group(1) in tenants:
+        return None
+    return "workday_account_required"
+
+
+def _preapply_reject_reason(job: dict, profile: dict, search_config: dict | None = None) -> str | None:
+    """All pre-spawn rejection checks, cheapest first. None = proceed."""
+    return (_workday_account_reject(job, search_config)
+            or _preapply_location_reject(job, profile, search_config))
 
 
 def _read_job_row(url: str) -> dict | None:
@@ -339,21 +566,106 @@ def _classify_failure_class(result: str, reason: str | None = None, hint: str | 
     r = (reason or result or "").lower()
     if r.startswith("policy_"):
         return r
-    if r in {"unsafe_permissions", "unsafe_verification", "not_a_job_application", "sso_required"}:
+    if r in {
+        "unsafe_permissions", "unsafe_verification", "not_a_job_application",
+        "sso_required", "not_eligible_location", "not_eligible_salary",
+        "not_eligible_work_auth",
+    }:
         return f"policy_{r}"
-    if r in {"captcha", "email_verification_required", "login_issue"}:
+    if r in {"captcha", "email_verification_required", "login_issue", "workday_account_required"}:
+        return f"blocker_{r}"
+    if r in {"candidate_profile_only", "apply_button_not_found"}:
         return f"blocker_{r}"
     if r in {"unverified_submission", "possible_duplicate_guard"}:
         return f"verification_{r}"
     if r in {"form_validation_error", "resume_upload_failed", "phone_country_validation"}:
         return f"validation_{r}"
-    if r in {"timeout", "no_result_line", "browser_unavailable", "interrupted", "rate_limited", "stuck", "page_error"}:
+    if r in {
+        "timeout", "no_result_line", "browser_unavailable", "interrupted",
+        "rate_limited", "stuck", "page_error", "stream_snapshot_needed",
+    }:
         return f"transient_{r}"
     if result.startswith("needs_review:"):
         return f"verification_{r or 'needs_review'}"
     if result.startswith("failed:"):
         return f"validation_{r or 'failed'}"
     return "transient_unknown"
+
+
+_DRY_RUN_SUBMIT_BLOCKER_JS = """
+(() => {
+  if (window.__applypilotDryRunBlocker) return;
+  window.__applypilotDryRunBlocker = true;
+  const isSubmitText = (t) => /submit (my )?application|^\\s*submit\\s*$/i.test((t || '').trim());
+  document.addEventListener('submit', (e) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+  document.addEventListener('click', (e) => {
+    const el = e.target && e.target.closest
+      ? e.target.closest('button, input[type=submit], [role=button]') : null;
+    if (!el) return;
+    const label = el.innerText || el.value || el.getAttribute('aria-label') || '';
+    if (isSubmitText(label)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }, true);
+  try {
+    HTMLFormElement.prototype.submit = function () {};
+    if (HTMLFormElement.prototype.requestSubmit) {
+      HTMLFormElement.prototype.requestSubmit = function () {};
+    }
+  } catch (err) { /* best-effort */ }
+})()
+"""
+
+
+def _inject_dry_run_submit_blocker(cdp_port: int) -> bool:
+    """Best-effort DOM-level submit blocker for dry runs (defense in depth).
+
+    Iter-17 incident: a dry-run submitted a real application because the only
+    guard was prose in the prompt. The stream MCP server now refuses submits
+    server-side; this blocker additionally neuters form submission inside the
+    page itself, covering raw Playwright-MCP clicks. Installed as an init
+    script (survives navigation) plus an immediate evaluate on open pages.
+    Fail-OPEN: any error is logged and the dry run proceeds (the server-side
+    guard remains).
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.connect_over_cdp(f"http://localhost:{cdp_port}")
+            for ctx in browser.contexts:
+                try:
+                    ctx.add_init_script(_DRY_RUN_SUBMIT_BLOCKER_JS)
+                except Exception:
+                    pass
+                for page in ctx.pages:
+                    try:
+                        page.evaluate(_DRY_RUN_SUBMIT_BLOCKER_JS)
+                    except Exception:
+                        pass
+            browser.close()  # CDP-connected: releases the socket only
+        return True
+    except Exception as e:  # noqa: BLE001 — never break the dry run
+        logger.debug("dry-run submit blocker injection failed (non-fatal): %s", e)
+        return False
+
+
+def _classify_no_result(stop_requested: bool, default_class: str) -> tuple[str, str]:
+    """Classify an agent run that ended without a RESULT line.
+
+    Transcript evidence (Adapt/Fanatics 2026-05-21): runs killed by operator
+    Ctrl+C end with cmd.exe's "Terminate batch job (Y/N)?" and no RESULT line.
+    Those were logged as agent failures (transient_no_result_line /
+    verification_missing_structured_result), polluting the removable-failure
+    counts. When a stop was requested, the truthful class is "interrupted".
+    """
+    if stop_requested:
+        return "transient_interrupted", "needs_review:interrupted"
+    return default_class, "needs_review:no_result_line"
 
 
 def _artifact_stem(job: dict, worker_id: int, suffix: str) -> str:
@@ -403,8 +715,90 @@ def _capture_browser_artifact(cdp_port: int, job: dict, worker_id: int, suffix: 
                 pass
 
 
-def _check_greenhouse_submit_ready(cdp_port: int) -> dict:
+def _latest_stream_observation(browser_stream=None, *, refresh: bool = False) -> BrowserObservation | None:
+    if browser_stream is None:
+        return None
+    try:
+        if refresh and hasattr(browser_stream, "refresh_now"):
+            obs = browser_stream.refresh_now(timeout_ms=3000)
+        else:
+            obs = browser_stream.latest()
+    except Exception:
+        logger.debug("browser stream latest failed", exc_info=True)
+        return None
+    if isinstance(obs, BrowserObservation) and not obs.error:
+        return obs
+    return None
+
+
+def _is_voluntary_eeo_label(label: str) -> bool:
+    low = re.sub(r"\s+", " ", (label or "").strip().lower())
+    if not re.search(r"gender|race|ethnicity|hispanic|latino|veteran|disability|sexual orientation|transgender", low):
+        return False
+    return bool(re.search(r"voluntary|self-identif|equal employment|eeo|demographic|decline|prefer not|wish to answer", low))
+
+
+def _greenhouse_ready_from_observation(obs: BrowserObservation) -> dict:
+    missing: list[str] = []
+    for label in obs.required_missing:
+        text = str(label).replace("*", "").strip()
+        low = text.lower()
+        if not text:
+            continue
+        if "resume" in low or low == "cv" or "resume/cv" in low:
+            continue
+        if low == "country" or low.startswith("country "):
+            continue
+        if _is_voluntary_eeo_label(text):
+            continue
+        if text not in missing:
+            missing.append(text)
+    if not obs.resume_present and "Resume/CV" not in missing:
+        missing.append("Resume/CV")
+    submit_enabled = obs.submit_enabled
+    return {
+        "ready": bool(submit_enabled) and not missing,
+        "missing": missing,
+        "submit_enabled": bool(submit_enabled),
+        "error": None,
+        "source": "browser_stream",
+    }
+
+
+def _validation_from_observation(obs: BrowserObservation) -> dict:
+    country_text = ""
+    for control in obs.controls:
+        hay = " ".join([control.label, control.selector, control.value]).lower()
+        if "country" in hay:
+            country_text = control.value.strip().lower()
+            break
+    phone_country_ok = not country_text or bool(re.search(r"(united states|\+1|\bus\b)", country_text, re.I))
+    result = {
+        "valid": False,
+        "missing": list(obs.required_missing),
+        "validation_errors": list(obs.validation_errors),
+        "resume_present": bool(obs.resume_present),
+        "phone_country_ok": phone_country_ok,
+        "submit_enabled": bool(obs.submit_enabled),
+        "url": obs.url,
+        "error": None,
+        "source": "browser_stream",
+    }
+    result["valid"] = (
+        not result["missing"]
+        and not result["validation_errors"]
+        and result["resume_present"]
+        and result["phone_country_ok"]
+    )
+    return result
+
+
+def _check_greenhouse_submit_ready(cdp_port: int, browser_stream=None) -> dict:
     """Inspect the active Greenhouse form and report whether required fields are filled."""
+    stream_obs = _latest_stream_observation(browser_stream, refresh=True)
+    if stream_obs is not None:
+        return _greenhouse_ready_from_observation(stream_obs)
+
     pw = None
     browser = None
     result = {"ready": False, "missing": [], "submit_enabled": False, "error": None}
@@ -531,8 +925,12 @@ def _check_greenhouse_submit_ready(cdp_port: int) -> dict:
                 pass
 
 
-def _validate_required_fields(cdp_port: int) -> dict:
+def _validate_required_fields(cdp_port: int, browser_stream=None) -> dict:
     """Cross-ATS required field validator for pre/post submit checks."""
+    stream_obs = _latest_stream_observation(browser_stream, refresh=True)
+    if stream_obs is not None:
+        return _validation_from_observation(stream_obs)
+
     pw = None
     browser = None
     result = {
@@ -841,7 +1239,8 @@ def _greenhouse_adapter_pass(cdp_port: int, profile: dict,
 
 
 def _verify_submission_success(cdp_port: int, verify_threshold: float = 0.75,
-                               previous_url: str | None = None) -> dict:
+                               previous_url: str | None = None,
+                               browser_stream=None) -> dict:
     """Weighted multi-signal submission verifier with confidence score."""
     pw = None
     browser = None
@@ -854,7 +1253,7 @@ def _verify_submission_success(cdp_port: int, verify_threshold: float = 0.75,
         "error": None,
     }
     try:
-        required_state = _validate_required_fields(cdp_port)
+        required_state = _validate_required_fields(cdp_port, browser_stream=browser_stream)
         result["required_validation"] = required_state
 
         from playwright.sync_api import sync_playwright
@@ -945,6 +1344,21 @@ def _extract_result_code(output: str) -> str | None:
         match = re.fullmatch(r"RESULT:FAILED:([A-Za-z0-9_.-]+)", clean)
         if match:
             return f"failed:{match.group(1)}"
+    return None
+
+
+def _infer_result_code_from_success_text(output: str) -> str | None:
+    """Conservative fallback when Claude omits RESULT after a clear submit."""
+    tail = (output or "")[-3000:].lower()
+    success_markers = (
+        "application has been successfully submitted",
+        "application was successfully submitted",
+        "has been successfully submitted",
+        "successfully submitted with all required",
+        "form is now locked",
+    )
+    if any(marker in tail for marker in success_markers):
+        return "applied"
     return None
 
 
@@ -1056,8 +1470,238 @@ def _wait_for_resources(worker_id: int) -> None:
 # Database operations
 # ---------------------------------------------------------------------------
 
+def _fetch_apply_candidates(
+    conn,
+    min_score: int = 8,
+    max_age_hours: int | None = None,
+    site_contains: str | None = None,
+    limit: int = 50,
+) -> list:
+    """Fetch apply-eligible candidates in deterministic queue order."""
+    blocked_sites, blocked_patterns = _load_blocked()
+    params: list = [min_score]
+    age_clause = ""
+    if max_age_hours and max_age_hours > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+        age_clause = "AND discovered_at IS NOT NULL AND discovered_at >= ?"
+        params.append(cutoff)
+    site_clause = ""
+    if blocked_sites:
+        placeholders = ",".join("?" * len(blocked_sites))
+        site_clause = f"AND site NOT IN ({placeholders})"
+        params.extend(blocked_sites)
+    site_contains_clause = ""
+    if site_contains:
+        site_contains_clause = "AND LOWER(site) LIKE ?"
+        params.append(f"%{site_contains.lower()}%")
+    url_clauses = ""
+    if blocked_patterns:
+        url_clauses = " ".join(f"AND url NOT LIKE ?" for _ in blocked_patterns)
+        params.extend(blocked_patterns)
+
+    return conn.execute(f"""
+        SELECT url, title, site, application_url, tailored_resume_path,
+               fit_score, location, full_description, cover_letter_path,
+               discovered_at
+        FROM (
+            SELECT url, title, site, application_url, tailored_resume_path,
+                   fit_score, location, full_description, cover_letter_path,
+                   discovered_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY site ORDER BY discovered_at DESC, RANDOM()
+                   ) AS site_idx
+            FROM (
+                SELECT url, title, site, application_url, tailored_resume_path,
+                       fit_score, location, full_description, cover_letter_path,
+                       discovered_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY site, LOWER(TRIM(title))
+                           ORDER BY
+                             CASE WHEN LOWER(COALESCE(application_url, '')) LIKE '%greenhouse%'
+                                    OR LOWER(COALESCE(url, '')) LIKE '%greenhouse%'
+                                    OR LOWER(COALESCE(application_url, '')) LIKE '%lever.co%'
+                                    OR LOWER(COALESCE(url, '')) LIKE '%lever.co%'
+                                    OR LOWER(COALESCE(application_url, '')) LIKE '%ashby%'
+                                    OR LOWER(COALESCE(url, '')) LIKE '%ashby%'
+                                    OR LOWER(COALESCE(application_url, '')) LIKE '%myworkdayjobs%'
+                                    OR LOWER(COALESCE(url, '')) LIKE '%myworkdayjobs%'
+                                  THEN 0 ELSE 1 END,
+                             discovered_at DESC
+                       ) AS dup_rn
+                FROM jobs
+                WHERE (apply_status IS NULL OR apply_status = 'failed')
+                  AND (apply_attempts IS NULL OR apply_attempts < ?)
+                  AND fit_score >= ?
+                  {age_clause}
+                  AND site NOT IN (SELECT site FROM jobs WHERE apply_status = 'in_progress')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM jobs d
+                      WHERE d.site = jobs.site
+                        AND d.url != jobs.url
+                        AND LOWER(TRIM(d.title)) = LOWER(TRIM(jobs.title))
+                        AND (d.applied_at IS NOT NULL
+                             OR d.apply_status IS NOT NULL)
+                  )
+                  {site_clause}
+                  {site_contains_clause}
+                  {url_clauses}
+            )
+            WHERE dup_rn = 1
+        )
+        ORDER BY fit_score DESC, site_idx ASC, discovered_at DESC, RANDOM()
+        LIMIT ?
+    """, [config.DEFAULTS["max_apply_attempts"]] + params + [limit]).fetchall()
+
+
+def _first_applyable_from_rows(rows, *, mutate_manual: bool, use_run_seen: bool):
+    """Pick the next applyable row from fetched candidates."""
+    from applypilot.config import is_manual_ats
+
+    row = None
+    profile_for_gate = None
+    search_config_for_gate = None
+    if mutate_manual:
+        try:
+            profile_for_gate = config.load_profile()
+            search_config_for_gate = config.load_search_config()
+        except Exception:
+            profile_for_gate = None
+
+    def _is_manual(candidate) -> bool:
+        apply_url = _effective_apply_url(dict(candidate))
+        if not apply_url:
+            if mutate_manual:
+                conn = get_connection()
+                conn.execute(
+                    "UPDATE jobs SET apply_status = 'failed', apply_error = 'no apply URL', "
+                    "apply_attempts = ? WHERE url = ?",
+                    (config.DEFAULTS["max_apply_attempts"], candidate["url"]),
+                )
+                logger.info("Skipping job with no apply URL: %s", candidate["url"][:80])
+            return True
+        if not is_manual_ats(apply_url):
+            return False
+        if mutate_manual:
+            conn = get_connection()
+            conn.execute(
+                "UPDATE jobs SET apply_status = 'manual', apply_error = 'manual ATS' WHERE url = ?",
+                (candidate["url"],),
+            )
+            logger.info("Skipping manual ATS: %s", candidate["url"][:80])
+        return True
+
+    def _is_preapply_rejected(candidate) -> bool:
+        if not mutate_manual or profile_for_gate is None:
+            return False
+        reason = _preapply_reject_reason(dict(candidate), profile_for_gate, search_config_for_gate)
+        if not reason:
+            return False
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE jobs SET apply_status = 'failed', apply_error = ?, apply_attempts = ?, "
+                "last_failure_class = ? WHERE url = ?",
+                (reason, config.DEFAULTS["max_apply_attempts"], _classify_failure_class(f"failed:{reason}", reason), candidate["url"]),
+            )
+        except Exception:
+            conn.execute(
+                "UPDATE jobs SET apply_status = 'failed', apply_error = ?, apply_attempts = ? WHERE url = ?",
+                (reason, config.DEFAULTS["max_apply_attempts"], candidate["url"]),
+            )
+        logger.info("Skipping pre-apply ineligible location: %s", candidate["url"][:80])
+        return True
+
+    idx = 0
+    while idx < len(rows) and not row:
+        score = rows[idx]["fit_score"]
+        group = []
+        while idx < len(rows) and rows[idx]["fit_score"] == score:
+            group.append(rows[idx])
+            idx += 1
+
+        deferred_seen_site = []
+        for candidate in group:
+            if use_run_seen:
+                with _run_seen_lock:
+                    if candidate["url"] in _run_seen_urls:
+                        continue
+                    if candidate["site"] in _run_seen_sites:
+                        deferred_seen_site.append(candidate)
+                        continue
+            if _is_manual(candidate):
+                continue
+            if _is_preapply_rejected(candidate):
+                continue
+            row = candidate
+            break
+
+        if row:
+            break
+
+        for candidate in deferred_seen_site:
+            if use_run_seen:
+                with _run_seen_lock:
+                    if candidate["url"] in _run_seen_urls:
+                        continue
+            if _is_manual(candidate):
+                continue
+            if _is_preapply_rejected(candidate):
+                continue
+            row = candidate
+            break
+
+    return row
+
+
+def preview_apply_queue(
+    limit: int = 10,
+    min_score: int = 8,
+    max_age_hours: int | None = 24,
+    site_contains: str | None = None,
+) -> list[dict]:
+    """Return the top apply queue without acquiring or mutating jobs."""
+    conn = get_connection()
+    rows = list(_fetch_apply_candidates(
+        conn,
+        min_score=min_score,
+        max_age_hours=max_age_hours,
+        site_contains=site_contains,
+        limit=max(limit * 5, 50),
+    ))
+    picked: list[dict] = []
+    seen_urls: set[str] = set()
+    seen_sites: set[str] = set()
+
+    while rows and len(picked) < limit:
+        with _run_seen_lock:
+            saved_urls = set(_run_seen_urls)
+            saved_sites = set(_run_seen_sites)
+            _run_seen_urls.clear()
+            _run_seen_urls.update(seen_urls)
+            _run_seen_sites.clear()
+            _run_seen_sites.update(seen_sites)
+        try:
+            row = _first_applyable_from_rows(rows, mutate_manual=False, use_run_seen=True)
+        finally:
+            with _run_seen_lock:
+                _run_seen_urls.clear()
+                _run_seen_urls.update(saved_urls)
+                _run_seen_sites.clear()
+                _run_seen_sites.update(saved_sites)
+
+        if not row:
+            break
+        picked.append(_job_with_effective_apply_url(row))
+        seen_urls.add(row["url"])
+        seen_sites.add(row["site"])
+        rows = [r for r in rows if r["url"] != row["url"]]
+
+    return picked
+
+
 def acquire_job(target_url: str | None = None, min_score: int = 8,
-                worker_id: int = 0, max_age_hours: int | None = None) -> dict | None:
+                worker_id: int = 0, max_age_hours: int | None = None,
+                site_contains: str | None = None) -> dict | None:
     """Atomically acquire the next job to apply to.
 
     Args:
@@ -1103,6 +1747,10 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                 placeholders = ",".join("?" * len(blocked_sites))
                 site_clause = f"AND site NOT IN ({placeholders})"
                 params.extend(blocked_sites)
+            site_contains_clause = ""
+            if site_contains:
+                site_contains_clause = "AND LOWER(site) LIKE ?"
+                params.append(f"%{site_contains.lower()}%")
             url_clauses = ""
             if blocked_patterns:
                 url_clauses = " ".join(f"AND url NOT LIKE ?" for _ in blocked_patterns)
@@ -1114,8 +1762,8 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
             # stack 9 Stripe applies in a row. Greenhouse fraud-detection is
             # per-tenant; rapid same-company applies trigger email verification.
             # ROW_NUMBER() partitioned by site assigns each job an "Nth pick
-            # from this site" index in random order; the outer ORDER BY then
-            # interleaves: round 1 of every site, round 2, etc.
+            # from this site" index in newest-first order; the outer ORDER BY
+            # then interleaves: round 1 of every site, round 2, etc.
             # Per-site lock: exclude any company already being applied to by
             # another worker right now. Prevents two workers from hitting the
             # same Greenhouse tenant in parallel (which triggers fraud-detection
@@ -1130,23 +1778,30 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
             # selection-time filter, same pattern as the freshness gate.
             rows = conn.execute(f"""
                 SELECT url, title, site, application_url, tailored_resume_path,
-                       fit_score, location, full_description, cover_letter_path
+                       fit_score, location, full_description, cover_letter_path,
+                       discovered_at
                 FROM (
                     SELECT url, title, site, application_url, tailored_resume_path,
                            fit_score, location, full_description, cover_letter_path,
+                           discovered_at,
                            ROW_NUMBER() OVER (
-                               PARTITION BY site ORDER BY RANDOM()
+                               PARTITION BY site ORDER BY discovered_at DESC, RANDOM()
                            ) AS site_idx
                     FROM (
                         SELECT url, title, site, application_url, tailored_resume_path,
                                fit_score, location, full_description, cover_letter_path,
+                               discovered_at,
                                ROW_NUMBER() OVER (
                                    PARTITION BY site, LOWER(TRIM(title))
                                    ORDER BY
-                                     CASE WHEN application_url LIKE '%greenhouse%'
-                                            OR application_url LIKE '%lever.co%'
-                                            OR application_url LIKE '%ashby%'
-                                            OR application_url LIKE '%myworkdayjobs%'
+                                     CASE WHEN LOWER(COALESCE(application_url, '')) LIKE '%greenhouse%'
+                                            OR LOWER(COALESCE(url, '')) LIKE '%greenhouse%'
+                                            OR LOWER(COALESCE(application_url, '')) LIKE '%lever.co%'
+                                            OR LOWER(COALESCE(url, '')) LIKE '%lever.co%'
+                                            OR LOWER(COALESCE(application_url, '')) LIKE '%ashby%'
+                                            OR LOWER(COALESCE(url, '')) LIKE '%ashby%'
+                                            OR LOWER(COALESCE(application_url, '')) LIKE '%myworkdayjobs%'
+                                            OR LOWER(COALESCE(url, '')) LIKE '%myworkdayjobs%'
                                           THEN 0 ELSE 1 END,
                                      discovered_at DESC
                                ) AS dup_rn
@@ -1175,30 +1830,104 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                                      OR d.apply_status IS NOT NULL)
                           )
                           {site_clause}
+                          {site_contains_clause}
                           {url_clauses}
                     )
                     WHERE dup_rn = 1
                 )
-                ORDER BY fit_score DESC, site_idx ASC, RANDOM()
+                ORDER BY fit_score DESC, site_idx ASC, discovered_at DESC, RANDOM()
                 LIMIT 50
             """, [config.DEFAULTS["max_apply_attempts"]] + params).fetchall()
 
-        # Walk the batch: mark manual_ats hits and pick the first applyable.
+        # Walk the batch score-tier by score-tier: prefer an unseen site within
+        # the tier, then fall back to a seen site before dropping to a lower
+        # score. This keeps fit score above company spread.
         row = None
-        for candidate in rows:
-            with _run_seen_lock:
-                if candidate["url"] in _run_seen_urls:
-                    continue
-            apply_url = candidate["application_url"] or candidate["url"]
-            if is_manual_ats(apply_url):
+
+        profile_for_gate = None
+        search_config_for_gate = None
+        try:
+            profile_for_gate = config.load_profile()
+            search_config_for_gate = config.load_search_config()
+        except Exception:
+            profile_for_gate = None
+
+        def _mark_unapplyable_if_needed(candidate) -> bool:
+            apply_url = _effective_apply_url(dict(candidate))
+            if not apply_url:
                 conn.execute(
-                    "UPDATE jobs SET apply_status = 'manual', apply_error = 'manual ATS' WHERE url = ?",
-                    (candidate["url"],),
+                    "UPDATE jobs SET apply_status = 'failed', apply_error = 'no apply URL', "
+                    "apply_attempts = ? WHERE url = ?",
+                    (config.DEFAULTS["max_apply_attempts"], candidate["url"]),
                 )
-                logger.info("Skipping manual ATS: %s", candidate["url"][:80])
-                continue
-            row = candidate
-            break
+                logger.info("Skipping job with no apply URL: %s", candidate["url"][:80])
+                return True
+            if not is_manual_ats(apply_url):
+                return False
+            conn.execute(
+                "UPDATE jobs SET apply_status = 'manual', apply_error = 'manual ATS' WHERE url = ?",
+                (candidate["url"],),
+            )
+            logger.info("Skipping manual ATS: %s", candidate["url"][:80])
+            return True
+
+        def _mark_preapply_reject_if_needed(candidate) -> bool:
+            if profile_for_gate is None:
+                return False
+            reason = _preapply_reject_reason(dict(candidate), profile_for_gate, search_config_for_gate)
+            if not reason:
+                return False
+            failure_class = _classify_failure_class(f"failed:{reason}", reason)
+            try:
+                conn.execute(
+                    "UPDATE jobs SET apply_status = 'failed', apply_error = ?, apply_attempts = ?, "
+                    "last_failure_class = ? WHERE url = ?",
+                    (reason, config.DEFAULTS["max_apply_attempts"], failure_class, candidate["url"]),
+                )
+            except Exception:
+                conn.execute(
+                    "UPDATE jobs SET apply_status = 'failed', apply_error = ?, apply_attempts = ? WHERE url = ?",
+                    (reason, config.DEFAULTS["max_apply_attempts"], candidate["url"]),
+                )
+            logger.info("Skipping pre-apply ineligible location: %s", candidate["url"][:80])
+            return True
+
+        idx = 0
+        while idx < len(rows) and not row:
+            score = rows[idx]["fit_score"]
+            group = []
+            while idx < len(rows) and rows[idx]["fit_score"] == score:
+                group.append(rows[idx])
+                idx += 1
+
+            deferred_seen_site = []
+            for candidate in group:
+                with _run_seen_lock:
+                    if candidate["url"] in _run_seen_urls:
+                        continue
+                    if candidate["site"] in _run_seen_sites:
+                        deferred_seen_site.append(candidate)
+                        continue
+                if _mark_unapplyable_if_needed(candidate):
+                    continue
+                if _mark_preapply_reject_if_needed(candidate):
+                    continue
+                row = candidate
+                break
+
+            if row:
+                break
+
+            for candidate in deferred_seen_site:
+                with _run_seen_lock:
+                    if candidate["url"] in _run_seen_urls:
+                        continue
+                if _mark_unapplyable_if_needed(candidate):
+                    continue
+                if _mark_preapply_reject_if_needed(candidate):
+                    continue
+                row = candidate
+                break
 
         if not row:
             conn.commit()  # persist the manual marks
@@ -1213,9 +1942,10 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
         """, (f"worker-{worker_id}", now, row["url"]))
         with _run_seen_lock:
             _run_seen_urls.add(row["url"])
+            _run_seen_sites.add(row["site"])
         conn.commit()
 
-        return dict(row)
+        return _job_with_effective_apply_url(row)
     except Exception:
         conn.rollback()
         raise
@@ -1258,11 +1988,17 @@ def write_review_log(job: dict, status: str, model: str, duration_ms: int,
     """Append one JSON line per apply attempt to logs/review.jsonl."""
     config.ensure_dirs()
     path = config.LOG_DIR / "review.jsonl"
+    # Telemetry hygiene: a successful attempt is never a failure. Stale
+    # failure_class values (e.g. "transient_unknown" computed earlier in the
+    # attempt loop) were being logged on applied / dry_run:applied rows,
+    # polluting the (A)-removable failure counts in `applypilot report`.
+    if status in {"applied", "dry_run:applied"} or status.endswith(":applied"):
+        failure_class = None
     row = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "worker_id": worker_id,
         "job_url": job.get("url"),
-        "apply_url": job.get("application_url") or job.get("url"),
+        "apply_url": _effective_apply_url(job),
         "title": job.get("title"),
         "site": job.get("site"),
         "fit_score": job.get("fit_score"),
@@ -1407,6 +2143,45 @@ def reset_failed() -> int:
     return cursor.rowcount
 
 
+def reset_manual(site_contains: str | None = None, resolved_only: bool = False) -> int:
+    """Reset jobs marked manual so they can be retried by the apply queue.
+
+    Args:
+        site_contains: Optional case-insensitive filter on the jobs.site value.
+        resolved_only: If true, only reset manual jobs whose application_url is a
+            usable non-LinkedIn outbound URL. This is useful after resolving
+            LinkedIn listings to direct ATS links.
+
+    Returns:
+        Number of jobs reset.
+    """
+    conn = get_connection()
+    params: list[object] = []
+    site_clause = ""
+    if site_contains:
+        site_clause = "AND LOWER(site) LIKE ?"
+        params.append(f"%{site_contains.lower()}%")
+
+    resolved_clause = ""
+    if resolved_only:
+        resolved_clause = """
+          AND application_url IS NOT NULL
+          AND LOWER(TRIM(application_url)) NOT IN ('', 'none', 'null', 'nan', 'nat')
+          AND (LOWER(TRIM(application_url)) LIKE 'http://%' OR LOWER(TRIM(application_url)) LIKE 'https://%')
+          AND LOWER(TRIM(application_url)) NOT LIKE '%linkedin.com/jobs/view%'
+        """
+
+    cursor = conn.execute(f"""
+        UPDATE jobs SET apply_status = NULL, apply_error = NULL,
+                       apply_attempts = 0, agent_id = NULL
+        WHERE apply_status = 'manual'
+          {site_clause}
+          {resolved_clause}
+    """, params)
+    conn.commit()
+    return cursor.rowcount
+
+
 # ---------------------------------------------------------------------------
 # Per-job execution
 # ---------------------------------------------------------------------------
@@ -1421,7 +2196,9 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             escalation_mode: str = "pause",
             legacy_result_fallback: bool = True,
             retry_count: int = 0,
-            recorder=None) -> tuple[str, int, dict | None]:
+            recorder=None,
+            browser_stream=None,
+            visual_trace=None) -> tuple[str, int, dict | None]:
     """Spawn a Claude Code session for one job application.
 
     Returns:
@@ -1471,7 +2248,19 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     job["_run_meta"] = job_meta
 
     profile = config.load_profile()
-    apply_url = job.get("application_url") or job.get("url") or ""
+    apply_url = _effective_apply_url(job) or ""
+    job["application_url"] = apply_url
+    location_reject = _preapply_location_reject(job, profile)
+    if location_reject:
+        job_meta["failure_class"] = _classify_failure_class(f"failed:{location_reject}", location_reject)
+        _write_job_runtime_metadata(
+            job["url"],
+            last_failure_class=job_meta["failure_class"],
+            checkpoint=_checkpoint(CHECKPOINT_PAGE_REACHED, apply_url=_canonicalize_url(apply_url), preapply_location_gate=True),
+        )
+        add_event(f"[W{worker_id}] Pre-apply location reject: {location_reject}")
+        update_state(worker_id, status="failed", last_action=location_reject)
+        return f"failed:{location_reject}", int((time.time() - run_started) * 1000), None
     idempotency_key = _compute_idempotency_key(job, profile)
     job_meta["idempotency_key"] = idempotency_key
     _write_job_runtime_metadata(
@@ -1519,9 +2308,9 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     worker_dir = reset_worker_dir(worker_id)
     job["_upload_dir"] = str(worker_dir)
 
-    # Write per-worker MCP config
+    # Write per-worker MCP config (dry_run forwarded → server-side submit block)
     mcp_config_path = config.APP_DIR / f".mcp-apply-{worker_id}.json"
-    mcp_config_path.write_text(json.dumps(_make_mcp_config(port)), encoding="utf-8")
+    mcp_config_path.write_text(json.dumps(_make_mcp_config(port, dry_run=dry_run)), encoding="utf-8")
 
     # --- Deterministic pre-fill (Greenhouse v1) ---
     # Fills 4 standard fields + resume directly via CDP, BEFORE Claude spawns.
@@ -1534,7 +2323,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     try:
         prefill_status = prefill_application(
             cdp_port=port,
-            apply_url=job.get("application_url") or job["url"],
+            apply_url=apply_url,
             profile=profile,
             resume_pdf_path=str(Path(resume_path).with_suffix(".pdf")),
             timeout_s=30,
@@ -1547,12 +2336,52 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             "error": f"{type(e).__name__}: {e}",
             "duration_ms": 0,
         }
+    resolved_url = _valid_http_url(prefill_status.get("resolved_url") if prefill_status else None)
+    if resolved_url and resolved_url != apply_url:
+        apply_url = resolved_url
+        job["application_url"] = resolved_url
+        _write_job_runtime_metadata(
+            job["url"],
+            checkpoint=_checkpoint(
+                CHECKPOINT_PAGE_REACHED,
+                apply_url=_canonicalize_url(apply_url),
+                resolved_by="prefill",
+            ),
+        )
+        add_event(f"[W{worker_id}] Resolved apply URL: {resolved_url[:100]}")
     logger.info(
-        "prefill: ats=%s filled=%s err=%s dur=%dms",
+        "prefill: ats=%s filled=%s err=%s dur=%dms resolved=%s",
         prefill_status["ats"], prefill_status["fields_filled"],
         prefill_status["error"], prefill_status["duration_ms"],
+        prefill_status.get("resolved_url"),
     )
+
+    # Dry-run defense-in-depth (iter 17 incident): DOM-level submit blocker.
+    # The stream MCP server already refuses submits server-side in dry-run,
+    # but the raw Playwright MCP can still click buttons — block at the page.
+    if dry_run:
+        _inject_dry_run_submit_blocker(port)
     add_event(f"[W{worker_id}] Pre-filled {len(prefill_status['fields_filled'])} fields ({prefill_status['ats']})")
+    if (
+        prefill_status.get("ats") == "greenhouse"
+        and prefill_status.get("error") == "no_form_detected"
+        and not prefill_status.get("fields_filled")
+    ):
+        obs = _latest_stream_observation(browser_stream, refresh=True)
+        page_text = (obs.page_text_sample if obs else "").lower()
+        has_action_text = any(token in page_text for token in ("apply", "submit", "continue", "next"))
+        if obs is not None and not obs.controls and not obs.submit_buttons and not has_action_text:
+            duration_ms = int((time.time() - run_started) * 1000)
+            reason = "apply_button_not_found"
+            job_meta["failure_class"] = _classify_failure_class(f"failed:{reason}", reason)
+            _write_job_runtime_metadata(
+                job["url"],
+                last_failure_class=job_meta["failure_class"],
+                checkpoint=_checkpoint(CHECKPOINT_PAGE_REACHED, apply_url=_canonicalize_url(apply_url), no_form_no_apply=True),
+            )
+            add_event(f"[W{worker_id}] Greenhouse no form/apply controls; skipping LLM")
+            update_state(worker_id, status="failed", last_action=reason)
+            return f"failed:{reason}", duration_ms, prefill_status
     if "resume" in (prefill_status.get("fields_filled") or []):
         _write_job_runtime_metadata(
             job["url"],
@@ -1562,7 +2391,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 
     if dry_run and prefill_status.get("ats") == "greenhouse" and not prefill_status.get("error"):
         time.sleep(1.5)
-        ready_state = _check_greenhouse_submit_ready(port)
+        ready_state = _check_greenhouse_submit_ready(port, browser_stream=browser_stream)
         filled = set(prefill_status.get("fields_filled") or [])
         normalized_missing = []
         for missing in ready_state.get("missing", []):
@@ -1656,7 +2485,8 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                     try:
                         verification = _verify_submission_success(
                             port, verify_threshold=verify_threshold,
-                            previous_url=apply_url)
+                            previous_url=apply_url,
+                            browser_stream=browser_stream)
                     except Exception as ve:
                         logger.debug("adapter-submit verify error: %s", ve)
                         verification = {"verified": False,
@@ -1693,6 +2523,9 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         tailored_resume=resume_text,
         dry_run=dry_run,
         prefill_status=prefill_status,
+        browser_observation_summary=summarize_observation(
+            _latest_stream_observation(browser_stream, refresh=True)
+        ),
     )
 
     # Resolve claude binary via shared config helper (PATH + install glob)
@@ -1713,25 +2546,38 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         "--disable-slash-commands",
         "--permission-mode", "bypassPermissions",
         "--no-session-persistence",
-        "--disallowedTools", (
-            "Task,WebFetch,WebSearch,TodoWrite,Read,Write,Edit,MultiEdit,"
-            "NotebookRead,NotebookEdit,Bash,PowerShell,Glob,Grep,LS,"
-            "mcp__playwright__browser_run_code_unsafe,"
-            "mcp__playwright__browser_wait_for,"
-            "mcp__gmail__draft_email,mcp__gmail__modify_email,"
-            "mcp__gmail__delete_email,mcp__gmail__download_attachment,"
-            "mcp__gmail__batch_modify_emails,mcp__gmail__batch_delete_emails,"
-            "mcp__gmail__create_label,mcp__gmail__update_label,"
-            "mcp__gmail__delete_label,mcp__gmail__get_or_create_label,"
-            "mcp__gmail__list_email_labels,mcp__gmail__create_filter,"
-            "mcp__gmail__list_filters,mcp__gmail__get_filter,"
-            "mcp__gmail__delete_filter"
-        ),
         "--output-format", "stream-json",
         "--verbose", "-",
     ]
+    allow_snapshot_first_pass = os.environ.get(
+        "APPLYPILOT_ALLOW_SNAPSHOT_FIRST_PASS",
+        "0",
+    ).strip().lower() in {"1", "true", "yes", "on"} or retry_count > 0
+    allow_raw_browser_fallback = os.environ.get(
+        "APPLYPILOT_ALLOW_RAW_BROWSER_FIRST_PASS",
+        "0",
+    ).strip().lower() in {"1", "true", "yes", "on"} or retry_count > 0
+    allow_navigate_first_pass = os.environ.get(
+        "APPLYPILOT_ALLOW_NAVIGATE_AFTER_PREFILL",
+        "0",
+    ).strip().lower() in {"1", "true", "yes", "on"} or retry_count > 0 or not (prefill_status.get("fields_filled") or [])
+    cmd[12:12] = [
+        "--disallowedTools",
+        _disallowed_tools_arg(
+            allow_snapshot=allow_snapshot_first_pass,
+            allow_raw_browser=allow_raw_browser_fallback,
+            allow_navigate=allow_navigate_first_pass,
+        ),
+    ]
     if _claude_supports_allowed_tools(claude_bin):
-        cmd[6:6] = ["--allowedTools", _allowed_tools_arg()]
+        cmd[6:6] = [
+            "--allowedTools",
+            _allowed_tools_arg(
+                allow_snapshot=allow_snapshot_first_pass,
+                allow_raw_browser=allow_raw_browser_fallback,
+                allow_navigate=allow_navigate_first_pass,
+            ),
+        ]
 
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
@@ -1750,14 +2596,18 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     log_header = (
         f"\n{'=' * 60}\n"
         f"[{ts_header}] {job['title']} @ {job.get('site', '')}\n"
-        f"URL: {job.get('application_url') or job['url']}\n"
+        f"URL: {apply_url}\n"
         f"Score: {job.get('fit_score', 'N/A')}/10\n"
+        f"Stream strict snapshot fallback allowed: {allow_snapshot_first_pass}\n"
+        f"Stream strict raw browser fallback allowed: {allow_raw_browser_fallback}\n"
+        f"Stream strict navigate allowed: {allow_navigate_first_pass}\n"
         f"{'=' * 60}\n"
     )
 
     start = time.time()
     stats: dict = {}
     proc = None
+    strict_snapshot_violation = False
 
     try:
         proc = subprocess.Popen(
@@ -1830,6 +2680,23 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                             elif bt == "tool_use":
                                 raw_tool_name = block.get("name", "")
                                 inp = block.get("input", {}) or {}
+                                if (
+                                    raw_tool_name in {
+                                        "mcp__playwright__browser_snapshot",
+                                        "mcp__playwright__browser_take_screenshot",
+                                    }
+                                    and not allow_snapshot_first_pass
+                                ):
+                                    strict_snapshot_violation = True
+                                    text_parts.append(
+                                        "RESULT:FAILED:stream_snapshot_needed"
+                                    )
+                                    lf.write(
+                                        f"  >> {raw_tool_name.replace('mcp__playwright__', '')} BLOCKED: strict stream pass\n"
+                                    )
+                                    if proc is not None and proc.poll() is None:
+                                        _kill_process_tree(proc.pid)
+                                    break
                                 # Phase 4: Tier 3 recorder side-channel. When a
                                 # SkillRecorder is attached, observe every MCP
                                 # browser_* call so a skill YAML can be written
@@ -1859,6 +2726,11 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                                 else:
                                     desc = name
 
+                                if visual_trace is not None:
+                                    try:
+                                        visual_trace.mark_action(desc)
+                                    except Exception:
+                                        logger.debug("visual trace action mark failed", exc_info=True)
                                 lf.write(f"  >> {desc}\n")
                                 if _print_tool_calls:
                                     elapsed_s = int(time.time() - start)
@@ -1868,6 +2740,8 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                                 update_state(worker_id,
                                              actions=cur_actions + 1,
                                              last_action=desc[:35])
+                        if strict_snapshot_violation:
+                            break
                     elif msg_type == "result":
                         stats = {
                             "input_tokens": msg.get("usage", {}).get("input_tokens", 0),
@@ -1888,6 +2762,22 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                 except json.JSONDecodeError:
                     text_parts.append(line)
                     lf.write(line + "\n")
+
+        if strict_snapshot_violation:
+            duration_ms = int((time.time() - start) * 1000)
+            elapsed = int(time.time() - start)
+            job_meta["failure_class"] = "transient_stream_snapshot_needed"
+            add_event(f"[W{worker_id}] Blocked first-pass browser_snapshot; retrying with fallback ({elapsed}s)")
+            update_state(worker_id, status="needs_review",
+                         last_action=f"blocked snapshot ({elapsed}s)")
+            _write_job_runtime_metadata(
+                job["url"],
+                last_failure_class=job_meta["failure_class"],
+            )
+            if proc is not None and proc.poll() is None:
+                _kill_process_tree(proc.pid)
+            reader_thread.join(timeout=2)
+            return "needs_review:stream_snapshot_needed", duration_ms, prefill_status
 
         if timed_out:
             output = "\n".join(text_parts)
@@ -1965,8 +2855,23 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         result_code = _result_from_structured(structured_result) if structured_result else None
         if not result_code and legacy_result_fallback:
             result_code = _extract_result_code(output)
+        if not result_code:
+            result_code = _infer_result_code_from_success_text(output)
+        if not result_code and not allow_snapshot_first_pass and _needs_snapshot_fallback(output):
+            job_meta["failure_class"] = "transient_stream_snapshot_needed"
+            _write_job_runtime_metadata(
+                job["url"],
+                apply_result_json={"raw_output_truncated": output[-1000:]},
+                last_failure_class=job_meta["failure_class"],
+            )
+            add_event(f"[W{worker_id}] Stream strict pass needs snapshot fallback ({elapsed}s)")
+            update_state(worker_id, status="needs_review",
+                         last_action=f"stream snapshot fallback ({elapsed}s)")
+            return "needs_review:stream_snapshot_needed", duration_ms, prefill_status
         elif not result_code:
-            job_meta["failure_class"] = "verification_missing_structured_result"
+            fc, status_code = _classify_no_result(
+                _stop_event.is_set(), "verification_missing_structured_result")
+            job_meta["failure_class"] = fc
             _write_job_runtime_metadata(
                 job["url"],
                 apply_result_json={"raw_output_truncated": output[-1000:]},
@@ -1975,7 +2880,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             add_event(f"[W{worker_id}] Missing structured result ({elapsed}s)")
             update_state(worker_id, status="needs_review",
                          last_action=f"missing structured result ({elapsed}s)")
-            return "needs_review:no_result_line", duration_ms, prefill_status
+            return status_code, duration_ms, prefill_status
 
         if result_code in {"applied", "expired", "captcha", "login_issue"}:
             if result_code == "applied" and not dry_run:
@@ -1989,6 +2894,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                     port,
                     verify_threshold=verify_threshold,
                     previous_url=apply_url,
+                    browser_stream=browser_stream,
                 )
                 job_meta["verification_confidence"] = verification.get("confidence")
                 job_meta["verification_evidence"] = verification
@@ -2061,20 +2967,26 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 
         add_event(f"[W{worker_id}] NO RESULT ({elapsed}s)")
         update_state(worker_id, status="needs_review", last_action=f"no result ({elapsed}s)")
-        job_meta["failure_class"] = "transient_no_result_line"
+        fc, status_code = _classify_no_result(
+            _stop_event.is_set(), "transient_no_result_line")
+        job_meta["failure_class"] = fc
         _write_job_runtime_metadata(
             job["url"],
             apply_result_json=structured_result,
             last_failure_class=job_meta["failure_class"],
         )
-        return "needs_review:no_result_line", duration_ms, prefill_status
+        return status_code, duration_ms, prefill_status
 
     except subprocess.TimeoutExpired:
         duration_ms = int((time.time() - start) * 1000)
         elapsed = int(time.time() - start)
         job_meta["failure_class"] = "transient_timeout"
         if dry_run:
-            ready_state = _check_greenhouse_submit_ready(port) if prefill_status and prefill_status.get("ats") == "greenhouse" else {}
+            ready_state = (
+                _check_greenhouse_submit_ready(port, browser_stream=browser_stream)
+                if prefill_status and prefill_status.get("ats") == "greenhouse"
+                else {}
+            )
             if prefill_status is not None and ready_state:
                 prefill_status["submit_ready_after_agent"] = ready_state
             if ready_state.get("ready"):
@@ -2119,6 +3031,7 @@ PERMANENT_FAILURES: set[str] = {
     "not_a_job_application", "unsafe_permissions",
     "unsafe_verification", "sso_required",
     "site_blocked", "cloudflare_blocked", "blocked_by_cloudflare",
+    "candidate_profile_only", "apply_button_not_found",
 }
 
 PERMANENT_PREFIXES: tuple[str, ...] = ("site_blocked", "cloudflare", "blocked_by")
@@ -2133,6 +3046,7 @@ NEEDS_REVIEW_REASONS: set[str] = {
     "possible_duplicate_guard",
     "unverified_submission",
     "legal_attestation_ambiguous",
+    "stream_snapshot_needed",
 }
 
 
@@ -2175,7 +3089,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 escalation_mode: str = "pause",
                 legacy_result_fallback: bool = True,
                 startup_stagger: float = 0.0,
-                max_age_hours: int | None = None) -> tuple[int, int]:
+                max_age_hours: int | None = None,
+                site_contains: str | None = None) -> tuple[int, int]:
     """Run jobs sequentially until limit is reached or queue is empty.
 
     Args:
@@ -2211,7 +3126,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                      last_action="waiting for job", actions=0)
 
         job = acquire_job(target_url=target_url, min_score=min_score,
-                          worker_id=worker_id, max_age_hours=max_age_hours)
+                          worker_id=worker_id, max_age_hours=max_age_hours,
+                          site_contains=site_contains)
         if not job:
             if not continuous:
                 add_event(f"[W{worker_id}] Queue empty")
@@ -2230,6 +3146,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         empty_polls = 0
 
         chrome_proc = None
+        browser_stream = None
+        visual_trace = None
         attempt = 0
         total_duration_ms = 0
         result = "failed:unknown"
@@ -2242,6 +3160,31 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                     release_lock(job["url"])
                     break
                 chrome_proc = launch_chrome(worker_id, port=port, headless=headless)
+                stream_telemetry_enabled = os.environ.get(
+                    "APPLYPILOT_STREAM_TELEMETRY",
+                    "0",
+                ).strip().lower() in {"1", "true", "yes", "on"}
+                browser_stream = BrowserStateStream(
+                    port,
+                    poll_interval_s=0.75,
+                    telemetry_path=(
+                        config.LOG_DIR / f"browser_stream_{_artifact_stem(job, worker_id, 'state')}.jsonl"
+                        if stream_telemetry_enabled
+                        else None
+                    ),
+                ).start()
+                visual_trace_enabled = os.environ.get(
+                    "APPLYPILOT_VISUAL_TRACE",
+                    "0",
+                ).strip().lower() in {"1", "true", "yes", "on"}
+                if visual_trace_enabled:
+                    visual_trace = VisualTraceRecorder(
+                        port,
+                        config.LOG_DIR / f"visual_trace_{_artifact_stem(job, worker_id, 'frames')}",
+                        interval_s=float(os.environ.get("APPLYPILOT_VISUAL_TRACE_INTERVAL", "2.0")),
+                        max_frames=int(os.environ.get("APPLYPILOT_VISUAL_TRACE_MAX_FRAMES", "240")),
+                    ).start()
+                    add_event(f"[W{worker_id}] Visual trace: {visual_trace.index_path}")
 
                 # Phase 4: route through the skill-playbook dispatcher.
                 # When APPLYPILOT_USE_SKILLS is unset/0 the dispatcher is a
@@ -2263,10 +3206,18 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                         "escalation_mode": escalation_mode,
                         "legacy_result_fallback": legacy_result_fallback,
                         "retry_count": attempt,
+                        "visual_trace": visual_trace,
                     },
+                    browser_stream=browser_stream,
                 )
                 total_duration_ms += duration_ms
             finally:
+                if visual_trace is not None:
+                    visual_trace.close()
+                    visual_trace = None
+                if browser_stream is not None:
+                    browser_stream.close()
+                    browser_stream = None
                 if chrome_proc:
                     cleanup_worker(worker_id, chrome_proc)
                     chrome_proc = None
@@ -2276,8 +3227,12 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 
             meta = job.get("_run_meta", {})
             reason = result.split(":", 1)[-1] if ":" in result else result
-            failure_class = meta.get("failure_class") or _classify_failure_class(result, reason)
-            meta["failure_class"] = failure_class
+            if result == "applied":
+                failure_class = None
+                meta.pop("failure_class", None)
+            else:
+                failure_class = meta.get("failure_class") or _classify_failure_class(result, reason)
+                meta["failure_class"] = failure_class
 
             # BUG FIX (Phase 6, iter 11): never retry a result that's already
             # terminal — success or permanent failure. Previously, result="applied"
@@ -2298,7 +3253,10 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
             # Treat timeout as non-retryable: take the one full attempt, mark
             # needs_review, move on. (A genuinely transient slow-network
             # timeout is rare vs. "form too heavy"; not worth 2x the budget.)
-            NON_RETRYABLE_TRANSIENT = {"transient_timeout"}
+            # no_result_line may hide a real submit/manual intervention where
+            # the agent failed to report cleanly. Retrying the same role can
+            # duplicate the application, so stop and mark needs_review.
+            NON_RETRYABLE_TRANSIENT = {"transient_timeout", "transient_no_result_line"}
 
             should_retry = (
                 not dry_run
@@ -2472,7 +3430,8 @@ def main(limit: int = 1, target_url: str | None = None,
          escalation_mode: str | None = None,
          legacy_result_fallback: bool | None = None,
          startup_stagger: float = 4.0,
-         max_age_hours: int | None = None) -> None:
+         max_age_hours: int | None = None,
+         site_contains: str | None = None) -> None:
     """Launch the apply pipeline.
 
     Args:
@@ -2495,6 +3454,7 @@ def main(limit: int = 1, target_url: str | None = None,
     _stop_event.clear()
     with _run_seen_lock:
         _run_seen_urls.clear()
+        _run_seen_sites.clear()
     if job_timeout is None:
         job_timeout = config.DEFAULTS["apply_timeout"]
 
@@ -2567,6 +3527,7 @@ def main(limit: int = 1, target_url: str | None = None,
                 escalation_mode=escalation_mode,
                 legacy_result_fallback=legacy_result_fallback,
                 startup_stagger=startup_stagger,
+                site_contains=site_contains,
             )
 
         if effective_limit:
@@ -2598,6 +3559,7 @@ def main(limit: int = 1, target_url: str | None = None,
                     escalation_mode=escalation_mode,
                     legacy_result_fallback=legacy_result_fallback,
                     startup_stagger=startup_stagger,
+                    site_contains=site_contains,
                 ): i
                 for i in range(workers)
             }
@@ -2662,6 +3624,7 @@ def main(limit: int = 1, target_url: str | None = None,
                     escalation_mode=escalation_mode,
                     legacy_result_fallback=legacy_result_fallback,
                     startup_stagger=startup_stagger,
+                    site_contains=site_contains,
                 )
             else:
                 # Multi-worker â€” distribute limit across workers
@@ -2695,6 +3658,7 @@ def main(limit: int = 1, target_url: str | None = None,
                             escalation_mode=escalation_mode,
                             legacy_result_fallback=legacy_result_fallback,
                             startup_stagger=startup_stagger,
+                            site_contains=site_contains,
                         ): i
                         for i in range(workers)
                     }

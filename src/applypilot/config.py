@@ -255,11 +255,20 @@ def get_tier() -> int:
     """
     load_env()
 
-    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL"))
+    provider_override = (
+        os.environ.get("APPLYPILOT_LLM_PROVIDER")
+        or os.environ.get("LLM_PROVIDER")
+        or ""
+    ).strip().lower()
+    claude_requested = provider_override in {"claude", "claude-code", "claude_code"}
+    has_claude = find_claude_binary() is not None
+    has_llm = (
+        any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL"))
+        or (claude_requested and has_claude)
+    )
     if not has_llm:
         return 1
 
-    has_claude = find_claude_binary() is not None
     try:
         get_chrome_path()
         has_chrome = True

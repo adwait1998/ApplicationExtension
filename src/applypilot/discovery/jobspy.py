@@ -15,9 +15,23 @@ from datetime import datetime, timezone
 from jobspy import scrape_jobs
 
 from applypilot import config
-from applypilot.database import get_connection, init_db, store_jobs
+from applypilot.database import get_connection, init_db
+from applypilot.discovery.freshness import iso_or_none, is_recent
+from applypilot.discovery.title_filter import build_title_filter, title_matches
 
 log = logging.getLogger(__name__)
+
+
+def _clean_url(value) -> str | None:
+    """Return a usable HTTP URL or None for empty/pandas null-ish values."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "nan", "nat", "null"}:
+        return None
+    if not text.lower().startswith(("http://", "https://")):
+        return None
+    return text
 
 
 # -- Proxy parsing -----------------------------------------------------------
@@ -124,8 +138,8 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
     existing = 0
 
     for _, row in df.iterrows():
-        url = str(row.get("job_url", ""))
-        if not url or url == "nan":
+        url = _clean_url(row.get("job_url"))
+        if not url:
             continue
 
         title = str(row.get("title", "")) if str(row.get("title", "")) != "nan" else None
@@ -164,14 +178,16 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
             detail_scraped_at = now
 
         # Extract apply URL if JobSpy provided it
-        apply_url = str(row.get("job_url_direct", "")) if str(row.get("job_url_direct", "")) != "nan" else None
+        apply_url = _clean_url(row.get("job_url_direct"))
+
+        discovered_at = iso_or_none(row.get("date_posted")) or now
 
         try:
             conn.execute(
                 "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at, "
                 "full_description, application_url, detail_scraped_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, title, salary, description, location_str, site_label, strategy, now,
+                (url, title, salary, description, location_str, site_label, strategy, discovered_at,
                  full_description, apply_url, detail_scraped_at),
             )
             new += 1
@@ -195,6 +211,7 @@ def _run_one_search(
     accept_locs: list[str],
     reject_locs: list[str],
     glassdoor_map: dict,
+    search_cfg: dict,
 ) -> dict:
     """Run a single search query and store results in DB."""
     s = search
@@ -215,13 +232,20 @@ def _run_one_search(
             "site_name": other_sites,
             "search_term": s["query"],
             "location": s["location"],
+            "distance": defaults.get("distance", 50),
             "results_wanted": results_per_site,
             "hours_old": hours_old,
             "description_format": "markdown",
             "country_indeed": defaults.get("country_indeed", "usa"),
             "verbose": 0,
         }
-        if s.get("remote"):
+        if "google" in other_sites:
+            freshness = "since yesterday" if hours_old <= 24 else f"posted in the last {hours_old} hours"
+            kwargs["google_search_term"] = s.get(
+                "google_search_term",
+                f"{s['query']} jobs near {s['location']} {freshness}",
+            )
+        if s.get("remote") and not hours_old:
             kwargs["is_remote"] = True
         if proxy_config:
             kwargs["proxies"] = [proxy_config["jobspy"]]
@@ -239,12 +263,13 @@ def _run_one_search(
             "site_name": ["glassdoor"],
             "search_term": s["query"],
             "location": gd_location,
+            "distance": defaults.get("distance", 50),
             "results_wanted": results_per_site,
             "hours_old": hours_old,
             "description_format": "markdown",
             "verbose": 0,
         }
-        if s.get("remote"):
+        if s.get("remote") and not hours_old:
             gd_kwargs["is_remote"] = True
         if proxy_config:
             gd_kwargs["proxies"] = [proxy_config["jobspy"]]
@@ -268,12 +293,35 @@ def _run_one_search(
         log.info("[%s] 0 results", label)
         return {"new": 0, "existing": 0, "errors": 0, "filtered": 0, "total": 0, "label": label}
 
-    # Filter by location before storing
+    # Filter by freshness, title, and location before storing. JobSpy already
+    # receives hours_old, but this second pass protects boards with partial
+    # support and keeps broad search terms from flooding downstream stages.
     before = len(df)
+    if "date_posted" in df.columns:
+        df = df[df.apply(
+            lambda row: is_recent(row.get("date_posted"), hours_old, keep_unknown=True),
+            axis=1,
+        )]
+    freshness_filtered = before - len(df)
+
+    title_before = len(df)
+    include_titles, exclude_titles = build_title_filter(search_cfg, search=s)
+    df = df[df.apply(
+        lambda row: title_matches(
+            str(row.get("title", "")) if str(row.get("title", "")) != "nan" else None,
+            include_titles,
+            exclude_titles,
+        ),
+        axis=1,
+    )]
+    title_filtered = title_before - len(df)
+
+    location_before = len(df)
     df = df[df.apply(lambda row: _location_ok(
         str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None,
         accept_locs, reject_locs,
     ), axis=1)]
+    location_filtered = location_before - len(df)
     filtered = before - len(df)
 
     conn = get_connection()
@@ -281,7 +329,10 @@ def _run_one_search(
 
     msg = f"[{label}] {before} results -> {new} new, {existing} dupes"
     if filtered:
-        msg += f", {filtered} filtered (location)"
+        msg += (
+            f", {filtered} filtered "
+            f"(fresh={freshness_filtered}, title={title_filtered}, location={location_filtered})"
+        )
     log.info(msg)
 
     return {"new": new, "existing": existing, "errors": 0, "filtered": filtered, "total": before, "label": label}
@@ -311,6 +362,7 @@ def search_jobs(
         "site_name": sites,
         "search_term": query,
         "location": location,
+        "distance": 50,
         "results_wanted": results_per_site,
         "hours_old": hours_old,
         "description_format": "markdown",
@@ -318,7 +370,11 @@ def search_jobs(
         "verbose": 2,
     }
 
-    if remote_only:
+    if "google" in sites:
+        freshness = "since yesterday" if hours_old <= 24 else f"posted in the last {hours_old} hours"
+        kwargs["google_search_term"] = f"{query} jobs near {location} {freshness}"
+
+    if remote_only and not hours_old:
         kwargs["is_remote"] = True
 
     if proxy_config:
@@ -418,7 +474,7 @@ def _full_crawl(
                 _run_one_search,
                 s, sites, results_per_site, hours_old,
                 proxy_config, defaults, max_retries,
-                accept_locs, reject_locs, glassdoor_map,
+                accept_locs, reject_locs, glassdoor_map, search_cfg,
             ): s
             for s in searches
         }
@@ -476,7 +532,7 @@ def run_discovery(cfg: dict | None = None) -> dict:
         return {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
 
     proxy = cfg.get("proxy")
-    sites = cfg.get("sites")
+    sites = cfg.get("sites") or cfg.get("boards")
     results_per_site = cfg.get("defaults", {}).get("results_per_site", 100)
     hours_old = cfg.get("defaults", {}).get("hours_old", 72)
     tiers = cfg.get("tiers")

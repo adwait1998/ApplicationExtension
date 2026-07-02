@@ -67,7 +67,9 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
 
     Schema columns by stage:
       - Discovery:  url, title, salary, description, location, site, strategy, discovered_at
-      - Enrichment: full_description, application_url, detail_scraped_at, detail_error
+      - Enrichment: full_description, application_url, detail_scraped_at, detail_error,
+                    application_url_source, application_url_resolved_at,
+                    application_url_error
       - Scoring:    fit_score, score_reasoning, scored_at
       - Tailoring:  tailored_resume_path, tailored_at, tailor_attempts
       - Cover:      cover_letter_path, cover_letter_at, cover_attempts
@@ -104,6 +106,9 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             application_url       TEXT,
             detail_scraped_at     TEXT,
             detail_error          TEXT,
+            application_url_source TEXT,
+            application_url_resolved_at TEXT,
+            application_url_error TEXT,
 
             -- Scoring stage (job_scorer)
             fit_score             INTEGER,
@@ -170,6 +175,9 @@ _ALL_COLUMNS: dict[str, str] = {
     "application_url": "TEXT",
     "detail_scraped_at": "TEXT",
     "detail_error": "TEXT",
+    "application_url_source": "TEXT",
+    "application_url_resolved_at": "TEXT",
+    "application_url_error": "TEXT",
     # Scoring
     "fit_score": "INTEGER",
     "score_reasoning": "TEXT",
@@ -354,15 +362,49 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
         "SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL"
     ).fetchone()[0]
 
-    stats["ready_to_apply"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs "
-        "WHERE fit_score >= 7 "
-        "AND applied_at IS NULL "
-        "AND application_url IS NOT NULL "
-        "AND (apply_status IS NULL OR apply_status = 'failed')"
-    ).fetchone()[0]
+    stats["ready_to_apply"] = _count_applyable_jobs(conn, min_score=7)
 
     return stats
+
+
+_INVALID_URL_TEXT = {"", "none", "nan", "nat", "null"}
+
+
+def _valid_http_url(value) -> str | None:
+    """Return a usable HTTP(S) URL, ignoring common stringified nulls."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in _INVALID_URL_TEXT:
+        return None
+    if not text.lower().startswith(("http://", "https://")):
+        return None
+    return text
+
+
+def _effective_apply_url(row: dict) -> str | None:
+    return _valid_http_url(row.get("application_url")) or _valid_http_url(row.get("url"))
+
+
+def _count_applyable_jobs(conn: sqlite3.Connection, min_score: int = 7) -> int:
+    """Count jobs the apply runner can actually open automatically."""
+    from applypilot import config
+
+    rows = conn.execute(
+        "SELECT url, application_url FROM jobs "
+        "WHERE fit_score >= ? "
+        "AND applied_at IS NULL "
+        "AND (apply_status IS NULL OR apply_status = 'failed') "
+        "AND (apply_attempts IS NULL OR apply_attempts < ?)",
+        (min_score, config.DEFAULTS["max_apply_attempts"]),
+    ).fetchall()
+    ready = 0
+    for row in rows:
+        row_dict = dict(row)
+        apply_url = _effective_apply_url(row_dict)
+        if apply_url and not config.is_manual_ats(apply_url):
+            ready += 1
+    return ready
 
 
 def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
@@ -432,7 +474,6 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         "tailored": "tailored_resume_path IS NOT NULL",
         "pending_apply": (
             "fit_score >= ? AND applied_at IS NULL "
-            "AND application_url IS NOT NULL "
             "AND (apply_status IS NULL OR apply_status = 'failed')"
         ),
         "applied": "applied_at IS NOT NULL",
@@ -460,5 +501,15 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
     # Convert sqlite3.Row objects to dicts
     if rows:
         columns = rows[0].keys()
-        return [dict(zip(columns, row)) for row in rows]
-    return []
+        result = [dict(zip(columns, row)) for row in rows]
+    else:
+        result = []
+
+    if stage == "pending_apply":
+        from applypilot import config
+        result = [
+            row for row in result
+            if (apply_url := _effective_apply_url(row))
+            and not config.is_manual_ats(apply_url)
+        ]
+    return result

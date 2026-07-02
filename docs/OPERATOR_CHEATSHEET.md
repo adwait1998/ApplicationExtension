@@ -25,13 +25,13 @@ Key paths:
 
 ```powershell
 & $PY -m applypilot doctor                 # 1. is the setup healthy?
-& $PY -m applypilot run discover enrich score --source ats_boards   # 2. pull + score FRESH Greenhouse/Lever/Ashby jobs
+& $PY -m applypilot run discover enrich score --quick --target-ready 10  # 2. fast lane for enough fresh jobs to apply
 & $PY -m applypilot status                 # 3. what's in the queue?
 & $PY -m applypilot apply --limit 10 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720 --max-transient-retries 1   # 4. apply (LIVE — real submissions)
 & $PY -m applypilot report                 # 5. how did it go? cost / pass-rate / failure split
 ```
 
-Defaults already set so you don't pass them: `--min-score 8`, `--max-age-hours 48`, dedupe on, timeouts not retried.
+Defaults already set so you don't pass them: `--min-score 8`, `--max-age-hours 24`, dedupe on, timeouts not retried.
 
 ---
 
@@ -51,13 +51,13 @@ Defaults already set so you don't pass them: `--min-score 8`, `--max-age-hours 4
 & $PY -m applypilot report                 # reliability + cost: $/apply, cache hit-rate, A-vs-B failures, pass-rate by ATS/tier
 ```
 
-**What's eligible to apply right now** (score≥8, fresh≤48h, has app URL, not applied):
+**What's eligible to apply right now** (score>=8, fresh<=24h, has app URL, not applied):
 ```powershell
 & $PY -c @"
 from applypilot.database import get_connection, init_db
 from datetime import datetime, timezone, timedelta
 init_db(); c=get_connection()
-cut=(datetime.now(timezone.utc)-timedelta(hours=48)).isoformat()
+cut=(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat()
 q='''SELECT title,site,fit_score FROM jobs WHERE fit_score>=8 AND applied_at IS NULL
  AND application_url IS NOT NULL AND (apply_status IS NULL OR apply_status=\"failed\")
  AND discovered_at>=? ORDER BY fit_score DESC, site'''
@@ -95,6 +95,26 @@ for r in c.execute('SELECT site,title,applied_at FROM jobs WHERE applied_at IS N
 # Greenhouse/Lever/Ashby ONLY (cleanest, applyable forms, no LinkedIn/Workday noise):
 & $PY -m applypilot run discover enrich score --source ats_boards
 
+# TheirStack API ONLY (requires THEIRSTACK_API_KEY; consumes credits per returned job):
+& $PY -m applypilot run discover score --source theirstack
+
+# Expand the direct ATS registry first, then crawl it:
+& $PY -m applypilot discover-ats --query "Product Designer,UX Designer,Senior Product Designer" --search-limit 300
+& $PY -m applypilot run discover enrich score --source ats_boards
+
+# Fast lane for a small apply batch (ATS boards + small LinkedIn/Google crawl,
+# bounded enrichment/scoring, skips slow Workday by default):
+& $PY -m applypilot run discover enrich score --quick --target-ready 10
+
+# Backfill LinkedIn listing pages into direct company/ATS apply URLs.
+# Dry-run first; --write only stores resolved non-Easy-Apply outbound URLs:
+& $PY -m applypilot resolve-linkedin --limit 25 --min-score 8 --dry-run --corpus-report
+& $PY -m applypilot resolve-linkedin --limit 25 --min-score 8 --write
+
+# Fast lane with tailored resumes for the exact top apply-queue jobs:
+$env:LLM_PROVIDER="claude"; $env:LLM_MODEL="sonnet"  # optional: use Claude Code for score/tailor/cover instead of local LLM
+& $PY -m applypilot run discover enrich score tailor pdf --quick --target-ready 10
+
 # Everything (also jobspy LinkedIn/Indeed + Workday):
 & $PY -m applypilot run discover enrich score
 
@@ -102,8 +122,8 @@ for r in c.execute('SELECT site,title,applied_at FROM jobs WHERE applied_at IS N
 & $PY -m applypilot run
 ```
 
-- `--source` values: `ats_boards` (Greenhouse/Lever/Ashby), `jobspy` (LinkedIn/Indeed), `workday`, `smartextract`.
-- Freshness window is `hours_old` in `E:\applypilot-data\searches.yaml` (currently 48).
+- `--source` values: `ats_boards` (Greenhouse/Lever/Ashby), `theirstack` (TheirStack API), `jobspy` (LinkedIn/Indeed), `workday`, `smartextract`.
+- Freshness window is `hours_old` in `E:\applypilot-data\searches.yaml` (currently 24).
 - Companies discovered = the list in `src\applypilot\config\ats_companies.yaml` (56 design-heavy companies). Add a company by its ATS board token under the right ATS.
 - Re-running discover is safe — it dedupes by URL.
 
@@ -117,9 +137,16 @@ Main command + the flags that matter:
 & $PY -m applypilot apply --workers 2 --limit 20 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720 --max-transient-retries 1
 ```
 
+TheirStack-only apply batch:
+
+```powershell
+& $PY -m applypilot apply --site-contains TheirStack --workers 2 --limit 10 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720 --max-transient-retries 1
+```
+
 | Flag | Meaning / recommended |
 |---|---|
 | `--limit N` | Max jobs this run. Start small (10) to validate, then scale. |
+| `--site-contains TEXT` | Restrict apply queue to sources/companies whose `site` contains text, e.g. `TheirStack`. Ignored for explicit `--url`. |
 | `--workers N` | Parallel browsers. 1 = safe/diagnosable; 2 = ~2× faster (per-site lock makes it safe). |
 | `--model` | `claude-haiku-4-5-20251001` (~⅓ cost, has the Greenhouse playbook) or `sonnet` (more robust, exhausts limits fast). |
 | `--job-timeout 720` | Seconds/job. 720 needed for email-verification forms (480 default times out). |
@@ -130,7 +157,9 @@ Main command + the flags that matter:
 | `--continuous` | Keep polling for new jobs forever (instead of `--limit`). |
 | `--url "<job url>"` | Apply to ONE specific job. |
 | `--min-score 9` | Override the default 8 (near-perfect only). |
-| `--max-age-hours 0` | Disable the 48h freshness gate (drain everything, incl. stale). |
+| `--max-age-hours 0` | Disable the 24h freshness gate (drain everything, incl. stale). |
+| `--reset-manual` | Reset jobs marked manual ATS so they can re-enter the apply queue. |
+| `--resolved-only` | With `--reset-manual`, only reset rows whose `application_url` is already a non-LinkedIn outbound URL. |
 
 **Rehearse with no submissions first:**
 ```powershell
@@ -194,6 +223,9 @@ A bad/drifted skill auto-archives and falls back to the LLM — you don't manage
 # Re-try previously failed jobs (clears the failed lock):
 & $PY -m applypilot apply --reset-failed
 
+# Re-try resolved manual links from one source after running the LinkedIn resolver:
+& $PY -m applypilot apply --reset-manual --site-contains TheirStack --resolved-only
+
 # Manually mark a job applied / failed (DB only, no browser):
 & $PY -m applypilot apply --url "<url>" --mark-applied
 & $PY -m applypilot apply --url "<url>" --mark-failed --fail-reason "manual"
@@ -221,7 +253,7 @@ ats_boards  full    fit 1-10                  skill replay  success-page
 (56 cos)    desc   (prefilter kills          OR LLM agent   check → applied
                     PM/PgM/etc for $0)       (Haiku/Sonnet)  / needs_review
 ```
-- Only **score ≥ 8** and **discovered ≤ 48h** jobs are applied to. Dupes (same company+title) collapse to one.
+- Only **score >= 8** and **discovered <= 24h** jobs are applied to. Dupes (same company+title) collapse to one.
 - Apply path: deterministic `prefill` fills ~14 fields + EEO/screening dropdowns (option-aware) → LLM handles custom free-text + verification + submit → verifier confirms.
 - `report` tells you the truth; `status` tells you volume.
 ```

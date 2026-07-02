@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ApplyPilot</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2d333b;
+    --text:#e6edf3; --dim:#8b949e; --accent:#4493f8; --green:#3fb950;
+    --red:#f85149; --yellow:#d29922; --purple:#bc8cff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--border);background:var(--panel)}
+  header h1{font-size:17px;font-weight:600}
+  header h1 span{color:var(--accent)}
+  #last-attempt{color:var(--dim);font-size:12px;margin-left:auto}
+  nav{display:flex;gap:4px;padding:10px 22px 0;border-bottom:1px solid var(--border)}
+  nav button{background:none;border:none;color:var(--dim);padding:8px 14px;cursor:pointer;font-size:14px;border-bottom:2px solid transparent}
+  nav button.active{color:var(--text);border-bottom-color:var(--accent)}
+  nav button:hover{color:var(--text)}
+  main{padding:20px 22px;max-width:1280px;margin:0 auto}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px}
+  .card .num{font-size:26px;font-weight:700}
+  .card .lbl{color:var(--dim);font-size:12px;margin-top:2px}
+  .card.green .num{color:var(--green)} .card.red .num{color:var(--red)}
+  .card.yellow .num{color:var(--yellow)} .card.blue .num{color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:18px}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin-bottom:12px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:900px){.row2{grid-template-columns:1fr}}
+  .bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px}
+  .bar-row .k{width:120px;color:var(--dim);flex-shrink:0;text-align:right}
+  .bar-row .bar{height:14px;border-radius:3px;background:var(--accent);min-width:2px}
+  .bar-row .v{color:var(--dim)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{color:var(--dim);text-align:left;font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+  td{padding:7px 8px;border-bottom:1px solid #21262d;vertical-align:top}
+  tr:hover td{background:var(--panel2)}
+  .score{display:inline-block;min-width:22px;text-align:center;border-radius:4px;font-weight:700;padding:1px 5px}
+  .s9{background:#1a7f37;color:#fff}.s8{background:#2da44e22;color:var(--green)}.s7{background:#d2992222;color:var(--yellow)}
+  .pill{display:inline-block;border-radius:10px;padding:1px 8px;font-size:11px;border:1px solid var(--border);color:var(--dim);white-space:nowrap}
+  .pill.applied{color:var(--green);border-color:var(--green)}
+  .pill.needs_review{color:var(--yellow);border-color:var(--yellow)}
+  .pill.failed,.pill.expired{color:var(--red);border-color:var(--red)}
+  .pill.queued{color:var(--accent);border-color:var(--accent)}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  .actions button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:4px}
+  .actions button:hover{border-color:var(--accent)}
+  .toolbar{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
+  .toolbar input,.toolbar select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px}
+  .toolbar input{flex:1;min-width:180px}
+  .btn{background:var(--accent);border:none;color:#fff;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:500}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.ghost{background:var(--panel2);border:1px solid var(--border);color:var(--text)}
+  .btn.danger{background:var(--red)}
+  #console{background:#010409;border:1px solid var(--border);border-radius:8px;padding:12px;height:420px;overflow-y:auto;font:12px/1.45 ui-monospace,Consolas,monospace;white-space:pre-wrap;color:#c9d1d9}
+  .muted{color:var(--dim);font-size:12px}
+  .err-detail{color:var(--dim);font-size:11px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .safety{background:#d2992215;border:1px solid #d2992250;color:var(--yellow);border-radius:8px;padding:10px 14px;font-size:12.5px;margin-bottom:14px}
+  #toast{position:fixed;bottom:20px;right:20px;background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:10px 16px;display:none;z-index:9}
+</style>
+</head>
+<body>
+<header>
+  <h1>Apply<span>Pilot</span></h1>
+  <span class="muted" id="hdr-eligible"></span>
+  <span id="last-attempt"></span>
+</header>
+<nav>
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="queue">Queue</button>
+  <button data-tab="triage">Triage</button>
+  <button data-tab="applied">Applied</button>
+  <button data-tab="runs">Runs</button>
+</nav>
+<main>
+
+<section id="tab-overview">
+  <div class="cards" id="cards"></div>
+  <div class="row2">
+    <div class="panel"><h2>Eligible queue freshness</h2><div id="freshness"></div>
+      <p class="muted" style="margin-top:10px">Jobs older than ~1 week are likely dead links — run <b>Prune expired</b> from the Runs tab.</p>
+    </div>
+    <div class="panel"><h2>Failure classes — last 100 attempts</h2><div id="failclasses"></div></div>
+  </div>
+  <div class="panel"><h2>Recent attempts</h2><div id="recent-attempts"></div></div>
+</section>
+
+<section id="tab-queue" hidden>
+  <div class="toolbar">
+    <input id="q-search" placeholder="Filter by title / company / location…">
+    <button class="btn ghost" onclick="loadJobs('eligible','q-table','q-search')">Refresh</button>
+  </div>
+  <div class="panel" style="padding:0"><table id="q-table"></table></div>
+</section>
+
+<section id="tab-triage" hidden>
+  <p class="muted" style="margin-bottom:12px">Rows the verifier wasn't sure about. Check the transcript/confirmation email, then <b>Mark applied</b> (it worked) or <b>Reset</b> (retry it) or <b>Park</b> (handle manually).</p>
+  <div class="panel" style="padding:0"><table id="t-table"></table></div>
+</section>
+
+<section id="tab-applied" hidden>
+  <div class="toolbar">
+    <input id="a-search" placeholder="Filter…">
+    <button class="btn ghost" onclick="loadJobs('applied','a-table','a-search')">Refresh</button>
+  </div>
+  <div class="panel" style="padding:0"><table id="a-table"></table></div>
+</section>
+
+<section id="tab-runs" hidden>
+  <div class="safety">Live applies are <b>not launchable from this UI</b> by design — real submissions go out under Nida's name. Run them deliberately from a terminal: <code>applypilot apply --limit N --workers 1</code></div>
+  <div class="toolbar">
+    <button class="btn" id="run-discover">Discover + enrich</button>
+    <select id="run-source">
+      <option value="">all sources</option>
+      <option value="ats_boards">ats_boards (fast)</option>
+      <option value="jobspy">jobspy</option>
+      <option value="workday">workday</option>
+    </select>
+    <button class="btn" id="run-score">Score</button>
+    <button class="btn" id="run-prune">Prune expired links</button>
+    <button class="btn ghost" id="run-dryrun">Dry-run apply ×1</button>
+    <button class="btn danger" id="run-stop" disabled>Stop</button>
+  </div>
+  <div id="console">No run yet.</div>
+</section>
+
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (p, opts) => fetch(p, opts).then(async r => {
+  if(!r.ok){ const t = await r.json().catch(()=>({detail:r.statusText})); throw new Error(t.detail||r.statusText); }
+  return r.json();
+});
+const esc = s => String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg, bad){ const t=$('#toast'); t.textContent=msg; t.style.borderColor= bad?'var(--red)':'var(--accent)'; t.style.display='block'; setTimeout(()=>t.style.display='none', 3500); }
+
+/* ---- tabs ---- */
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
+  document.querySelectorAll('main > section').forEach(s=>s.hidden = s.id !== 'tab-'+b.dataset.tab);
+  if(b.dataset.tab==='overview') loadSummary();
+  if(b.dataset.tab==='queue') loadJobs('eligible','q-table','q-search');
+  if(b.dataset.tab==='triage') loadJobs('needs_review','t-table',null);
+  if(b.dataset.tab==='applied') loadJobs('applied','a-table','a-search');
+});
+
+/* ---- overview ---- */
+function bars(el, obj, color){
+  const entries = Object.entries(obj);
+  const max = Math.max(1, ...entries.map(([,v])=>v));
+  el.innerHTML = entries.length ? entries.map(([k,v]) =>
+    `<div class="bar-row"><span class="k">${esc(k)}</span><div class="bar" style="width:${Math.round(v/max*100)*0.62}%;background:${color}"></div><span class="v">${v}</span></div>`
+  ).join('') : '<span class="muted">nothing here</span>';
+}
+async function loadSummary(){
+  try{
+    const s = await api('/api/summary');
+    const ra = s.recent_attempts;
+    const appliedRecent = (ra.statuses['applied']||0);
+    const card = (n,l,cls)=>`<div class="card ${cls||''}"><div class="num">${n}</div><div class="lbl">${l}</div></div>`;
+    $('#cards').innerHTML =
+      card(s.applied_total,'applications submitted','green') +
+      card(s.eligible_count,'eligible in queue (score ≥8)','blue') +
+      card(s.needs_review,'needs review','yellow') +
+      card(appliedRecent + ' / ' + ra.count,'applied in last '+ra.count+' attempts') +
+      card(s.total_jobs,'jobs discovered');
+    $('#hdr-eligible') .textContent = `${s.eligible_count} eligible · ${s.needs_review} to triage`;
+    $('#last-attempt').textContent = ra.last_ts ? 'last attempt: '+ra.last_ts.slice(0,16).replace('T',' ') : '';
+    const order = ['0-1d','2-3d','4-7d','8-14d','>14d','unknown'];
+    const fr = {}; order.forEach(k=>{ if(s.eligible_freshness[k]) fr[k]=s.eligible_freshness[k]; });
+    bars($('#freshness'), fr, 'var(--accent)');
+    bars($('#failclasses'), ra.failure_classes, 'var(--red)');
+    loadAttempts();
+  }catch(e){ toast('summary failed: '+e.message, true); }
+}
+async function loadAttempts(){
+  const d = await api('/api/attempts?limit=25');
+  $('#recent-attempts').innerHTML = '<table><tr><th>when</th><th>company</th><th>title</th><th>status</th><th>failure class</th><th>$</th></tr>' +
+    d.attempts.map(a=>{
+      const st = String(a.status||'');
+      const cls = st.includes('applied')?'applied':(st.includes('needs_review')?'needs_review':'failed');
+      return `<tr><td class="muted">${esc((a.ts||'').slice(5,16).replace('T',' '))}</td>
+        <td>${esc(a.site||a.company||'')}</td><td>${esc((a.title||'').slice(0,60))}</td>
+        <td><span class="pill ${cls}">${esc(st)}</span></td>
+        <td class="err-detail">${esc(a.last_failure_class||a.failure_class||'')}</td>
+        <td class="muted">${a.cost_usd!=null?('$'+Number(a.cost_usd).toFixed(2)):''}</td></tr>`;
+    }).join('') + '</table>';
+}
+
+/* ---- job tables ---- */
+async function loadJobs(view, tableId, searchId){
+  const q = searchId ? ($('#'+searchId).value||'') : '';
+  const d = await api(`/api/jobs?view=${view}&q=${encodeURIComponent(q)}&limit=300`);
+  const isTriage = view==='needs_review';
+  const rows = d.jobs.map(j=>{
+    const sc = j.fit_score>=9?'s9':(j.fit_score>=8?'s8':'s7');
+    const st = j.apply_status||'queued';
+    const age = j.discovered_at ? Math.max(0, Math.round((Date.now()-Date.parse(j.discovered_at))/86400000)) : '?';
+    const acts = [
+      `<button onclick="jobAction('${encodeURIComponent(j.url)}','park')">Park</button>`,
+      st!=='applied' ? `<button onclick="jobAction('${encodeURIComponent(j.url)}','reset')">Reset</button>` : '',
+      isTriage ? `<button onclick="jobAction('${encodeURIComponent(j.url)}','mark_applied')">Mark applied</button>` : '',
+    ].join('');
+    return `<tr>
+      <td><span class="score ${sc}">${j.fit_score??''}</span></td>
+      <td><a href="${esc(j.application_url||j.url)}" target="_blank">${esc((j.title||'').slice(0,70))}</a></td>
+      <td>${esc(j.site||'')}</td>
+      <td class="muted">${esc((j.location||'').slice(0,32))}</td>
+      <td class="muted">${age}d</td>
+      <td><span class="pill ${esc(st)}">${esc(st)}</span>${j.verification_confidence!=null?` <span class="muted">${Number(j.verification_confidence).toFixed(2)}</span>`:''}</td>
+      <td class="err-detail" title="${esc(j.apply_error||'')}">${esc(j.last_failure_class||j.apply_error||'')}</td>
+      <td class="actions">${acts}</td></tr>`;
+  }).join('');
+  $('#'+tableId).innerHTML =
+    `<tr><th>score</th><th>title (${d.count})</th><th>company</th><th>location</th><th>age</th><th>status</th><th>error</th><th></th></tr>` +
+    (rows || '<tr><td colspan="8" class="muted" style="padding:20px">empty</td></tr>');
+}
+async function jobAction(encUrl, action){
+  const verb = {park:'Park', reset:'Reset for retry', mark_applied:'Mark as APPLIED'}[action];
+  if(!confirm(verb + ' this job?')) return;
+  try{
+    await api('/api/job/action', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url: decodeURIComponent(encUrl), action})});
+    toast(verb+' ✓');
+    ['eligible|q-table|q-search','needs_review|t-table|','applied|a-table|a-search'].forEach(s=>{
+      const [v,t,se]=s.split('|');
+      if(!document.getElementById('tab-'+({eligible:'queue',needs_review:'triage',applied:'applied'}[v])).hidden)
+        loadJobs(v,t,se||null);
+    });
+  }catch(e){ toast(e.message, true); }
+}
+
+/* ---- runs ---- */
+let pollTimer=null;
+async function startRun(kind, params){
+  try{
+    await api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,...params})});
+    pollRun();
+  }catch(e){ toast(e.message,true); }
+}
+async function pollRun(){
+  clearInterval(pollTimer);
+  const tick = async ()=>{
+    const s = await api('/api/run/status');
+    const c = $('#console');
+    c.textContent = s.lines.length? s.lines.join('\n') : 'No run yet.';
+    c.scrollTop = c.scrollHeight;
+    document.querySelectorAll('#tab-runs .btn:not(#run-stop)').forEach(b=>b.disabled=s.running);
+    $('#run-stop').disabled = !s.running;
+    if(!s.running){ clearInterval(pollTimer); loadSummary(); }
+  };
+  await tick();
+  pollTimer = setInterval(tick, 1500);
+}
+$('#run-discover').onclick = ()=>startRun('discover',{source:$('#run-source').value||null});
+$('#run-score').onclick   = ()=>startRun('score',{});
+$('#run-prune').onclick   = ()=>startRun('prune',{min_score:7});
+$('#run-dryrun').onclick  = ()=>startRun('dryrun_apply',{limit:1});
+$('#run-stop').onclick    = ()=>api('/api/run/stop',{method:'POST'}).then(pollRun);
+
+/* ---- boot ---- */
+loadSummary();
+pollRun();
+setInterval(loadSummary, 60000);
+</script>
+</body>
+</html>

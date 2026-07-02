@@ -24,6 +24,7 @@ from applypilot.apply.skill_runner import (
     archive_stale_skill,
     dispatch_apply,
     is_skill_flow_enabled,
+    company_key_for_job,
     normalize_company_key,
     resolve_skill,
     skill_path,
@@ -54,6 +55,28 @@ from applypilot.apply.skill_schema import (
 ])
 def test_normalize_company_key(site, expected):
     assert normalize_company_key(site) == expected
+
+
+@pytest.mark.parametrize("job,expected", [
+    ({
+        "site": "linkedin",
+        "application_url": "https://jobs.ashbyhq.com/gen-digital/397b79db/application",
+    }, "gen_digital"),
+    ({
+        "site": "indeed",
+        "application_url": "https://boards.greenhouse.io/sofi/jobs/6685926003",
+    }, "sofi"),
+    ({
+        "site": "linkedin",
+        "application_url": "https://superhuman.com/company/careers/jobs?ashby_jid=abc",
+    }, "superhuman"),
+    ({
+        "site": "Adobe (TheirStack)",
+        "application_url": "https://careers.adobe.com/us/en/job/ADOBUSR167010EXTERNALENUS/foo",
+    }, "adobe"),
+])
+def test_company_key_for_resolved_outbound_jobs(job, expected):
+    assert company_key_for_job(job) == expected
 
 
 def test_flag_off_by_default(monkeypatch):
@@ -373,6 +396,34 @@ def test_dispatch_records_skill_on_success(job, isolated_skills_dir, monkeypatch
     assert out.exists(), "successful apply with no prior skill must write a new YAML"
     assert prefill.get("skill_used") == "figma.yaml"
     assert prefill.get("recorded_new_skill") is True
+
+
+def test_dispatch_does_not_record_skill_on_dry_run_success(job, isolated_skills_dir, monkeypatch):
+    """Dry-runs skip the real submit click, so their traces are not replay-grade."""
+    monkeypatch.setattr(config, "load_profile", lambda: {"personal": {"first_name": "Nida"}})
+
+    class _DryRunRecordingRunJob:
+        def __call__(self, **kwargs):
+            recorder = kwargs.get("recorder")
+            assert recorder is not None
+            recorder.observe_tool_use("browser_fill_form", {"fields": [
+                {"name": "first_name", "selector": "#first_name", "value": "Nida"},
+            ]})
+            recorder.observe_tool_use("browser_click", {"selector": "#attach_resume"})
+            return "applied", 100, {"ats": "greenhouse"}
+
+    status, dur, prefill = dispatch_apply(
+        job=job, port=9222, worker_id=0,
+        model="haiku", dry_run=True, verify_threshold=0.75,
+        run_job_fn=_DryRunRecordingRunJob(),
+        run_job_kwargs={"model": "haiku", "dry_run": True, "retry_count": 0,
+                        "profile": {"personal": {"first_name": "Nida"}}},
+        flag_fn=lambda: True,
+    )
+
+    assert status == "applied"
+    assert not (isolated_skills_dir / "figma.yaml").exists()
+    assert prefill.get("recorded_new_skill") is None
 
 
 def test_dispatch_discards_recorder_on_failure(job, isolated_skills_dir, monkeypatch):

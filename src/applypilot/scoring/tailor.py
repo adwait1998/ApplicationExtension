@@ -16,8 +16,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from applypilot.config import RESUME_PATH, TAILORED_DIR, load_profile
-from applypilot.database import get_connection, get_jobs_by_stage
+from applypilot.config import DEFAULTS, RESUME_PATH, TAILORED_DIR, load_profile
+from applypilot.database import get_connection
 from applypilot.llm import get_client
 from applypilot.scoring.validator import (
     BANNED_WORDS,
@@ -254,6 +254,10 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
         contact_parts.append(personal["github_url"])
     if personal.get("linkedin_url"):
         contact_parts.append(personal["linkedin_url"])
+    for key in ("portfolio_url", "website_url"):
+        value = str(personal.get(key) or "").strip()
+        if value and value not in contact_parts:
+            contact_parts.append(value)
     if contact_parts:
         lines.append(" | ".join(contact_parts))
     lines.append("")
@@ -456,13 +460,19 @@ def tailor_resume(
 # ── Batch Entry Point ────────────────────────────────────────────────────
 
 def run_tailoring(min_score: int = 7, limit: int = 20,
-                  validation_mode: str = "normal") -> dict:
+                  validation_mode: str = "normal",
+                  job_urls: list[str] | None = None,
+                  site_contains: str | None = None,
+                  applyable_only: bool = False) -> dict:
     """Generate tailored resumes for high-scoring jobs.
 
     Args:
         min_score:       Minimum fit_score to tailor for.
         limit:           Maximum jobs to process.
         validation_mode: "strict", "normal", or "lenient".
+        job_urls:        Optional ordered job URL list to tailor exactly.
+        site_contains:   Optional case-insensitive filter on the jobs.site/source.
+        applyable_only:  If true, skip applied/manual/duplicate/retry-exhausted rows.
 
     Returns:
         {"approved": int, "failed": int, "errors": int, "elapsed": float}
@@ -470,11 +480,51 @@ def run_tailoring(min_score: int = 7, limit: int = 20,
     profile = load_profile()
     resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
+    site_filter = ""
+    site_params: tuple[str, ...] = ()
+    if site_contains:
+        site_filter = " AND LOWER(site) LIKE ?"
+        site_params = (f"%{site_contains.lower()}%",)
+    applyable_filter = ""
+    if applyable_only:
+        applyable_filter = (
+            " AND applied_at IS NULL "
+            "AND (apply_status IS NULL OR apply_status = 'failed') "
+            f"AND (apply_attempts IS NULL OR apply_attempts < {int(DEFAULTS['max_apply_attempts'])}) "
+            "AND application_url IS NOT NULL "
+            "AND LOWER(TRIM(application_url)) NOT IN ('', 'none', 'null', 'nan', 'nat') "
+            "AND (LOWER(TRIM(application_url)) LIKE 'http://%' OR LOWER(TRIM(application_url)) LIKE 'https://%') "
+            "AND LOWER(TRIM(application_url)) NOT LIKE '%linkedin.com/jobs/view%'"
+        )
 
-    jobs = get_jobs_by_stage(conn=conn, stage="pending_tailor", min_score=min_score, limit=limit)
+    if job_urls:
+        placeholders = ",".join("?" for _ in job_urls)
+        rows = conn.execute(
+            f"SELECT * FROM jobs WHERE url IN ({placeholders}) "
+            "AND fit_score >= ? AND full_description IS NOT NULL "
+            "AND tailored_resume_path IS NULL "
+            f"AND COALESCE(tailor_attempts, 0) < 5{site_filter}{applyable_filter}",
+            (*job_urls, min_score, *site_params),
+        ).fetchall()
+        by_url = {row["url"]: dict(row) for row in rows}
+        jobs = [by_url[url] for url in job_urls if url in by_url]
+        if limit and limit > 0:
+            jobs = jobs[:limit]
+    else:
+        rows = conn.execute(
+            "SELECT * FROM jobs "
+            "WHERE fit_score >= ? AND full_description IS NOT NULL "
+            "AND tailored_resume_path IS NULL "
+            f"AND COALESCE(tailor_attempts, 0) < 5{site_filter}{applyable_filter} "
+            "ORDER BY fit_score DESC NULLS LAST, discovered_at DESC "
+            + ("LIMIT ?" if limit and limit > 0 else ""),
+            (min_score, *site_params, *((limit,) if limit and limit > 0 else ())),
+        ).fetchall()
+        jobs = [dict(row) for row in rows]
 
     if not jobs:
-        log.info("No untailored jobs with score >= %d.", min_score)
+        scope = f" matching site '{site_contains}'" if site_contains else ""
+        log.info("No untailored jobs with score >= %d%s.", min_score, scope)
         return {"approved": 0, "failed": 0, "errors": 0, "elapsed": 0.0}
 
     TAILORED_DIR.mkdir(parents=True, exist_ok=True)

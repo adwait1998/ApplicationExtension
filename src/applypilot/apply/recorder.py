@@ -71,6 +71,7 @@ class _Capture:
     inferred_selector: str | None = None
     inferred_value: str | None = None
     inferred_value_source: str | None = None
+    inferred_element_spec: dict[str, Any] = field(default_factory=dict)
 
 
 class SkillRecorder:
@@ -167,7 +168,7 @@ class SkillRecorder:
                 selector=cap.inferred_selector,
                 value_source=cap.inferred_value_source,
                 fallback_selectors=[],
-                extra={},
+                extra={"element_spec": cap.inferred_element_spec} if cap.inferred_element_spec else {},
             ))
 
         # The launcher knows the submit happened (the apply succeeded). We don't
@@ -231,6 +232,10 @@ class SkillRecorder:
                         inferred_kind="fill",
                         inferred_selector=sel,
                         inferred_value=str(val),
+                        inferred_element_spec=self._build_element_spec(
+                            {"selector": sel, "element": f.get("name", ""), "name": f.get("name", "")},
+                            sel,
+                        ),
                     ))
                 continue
             # Single-field tool — annotate kind/selector/value
@@ -246,6 +251,7 @@ class SkillRecorder:
             c.inferred_kind = kind
             c.inferred_selector = sel
             c.inferred_value = val
+            c.inferred_element_spec = self._build_element_spec(c.inputs, sel)
             expanded.append(c)
 
         # Final-state wins: same (kind, selector) — keep latest only
@@ -294,6 +300,108 @@ class SkillRecorder:
                 return stripped
         return None
 
+    def _build_element_spec(self, inputs: dict[str, Any], selector: str | None) -> dict[str, Any]:
+        """Build a semantic healing spec from MCP metadata.
+
+        We do not have a live DOM in the recorder, so this is necessarily
+        metadata-derived. Replay will still prefer exact selectors when they
+        work; the spec is for drift recovery when text/id/class selectors churn.
+        """
+        spec: dict[str, Any] = {}
+        element = inputs.get("element") if isinstance(inputs.get("element"), str) else ""
+        name = inputs.get("name") if isinstance(inputs.get("name"), str) else ""
+
+        role, accessible_name = self._parse_element_role_name(element)
+        if role:
+            spec["role"] = role
+        if accessible_name:
+            spec["name"] = accessible_name
+            spec["text"] = accessible_name
+
+        label = accessible_name or (name.replace("_", " ").replace("-", " ").strip() if name else "") or self._label_from_selector(selector)
+        if label:
+            spec["label"] = label
+
+        if name:
+            spec["name_attr"] = name.strip()
+
+        selector_bits = self._spec_from_selector(selector)
+        spec.update({k: v for k, v in selector_bits.items() if v})
+
+        if spec:
+            fp = {}
+            if spec.get("label"):
+                fp["label_text"] = spec["label"]
+            if spec.get("name_attr"):
+                fp["name_attr"] = spec["name_attr"]
+            if spec.get("text"):
+                fp["text"] = spec["text"]
+            if spec.get("role"):
+                fp["role"] = spec["role"]
+            if spec.get("tag"):
+                fp["tag"] = spec["tag"]
+            if fp:
+                spec["fingerprint"] = fp
+        return spec
+
+    def _parse_element_role_name(self, element: str) -> tuple[str | None, str | None]:
+        m = re.match(r'^\s*(\w+)\s+"([^"]+)"\s*$', element or "")
+        if m:
+            return m.group(1).lower(), self._clean_accessible_name(m.group(2).strip())
+
+        cleaned = self._clean_accessible_name(element)
+        low = (element or "").strip().lower()
+        for suffix, role in (
+            (" job link", "link"),
+            (" link", "link"),
+            (" button", "button"),
+            (" option", "option"),
+        ):
+            if low.endswith(suffix) and cleaned:
+                return role, cleaned
+        if low.startswith("toggle flyout for ") and "dropdown" in low and cleaned:
+            return "combobox", cleaned
+        return None, None
+
+    def _clean_accessible_name(self, text: str) -> str:
+        cleaned = re.sub(r"\s+", " ", (text or "").strip())
+        cleaned = re.sub(r"\s+job link$", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s+(link|button|option)$", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"^toggle flyout for\s+", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s+dropdown$", "", cleaned, flags=re.I)
+        return cleaned.strip()
+
+    def _label_from_selector(self, selector: str | None) -> str | None:
+        if not selector:
+            return None
+        m = re.search(r'\[name=["\']?([^"\']+)["\']?\]', selector)
+        if m:
+            return m.group(1).replace("_", " ").strip()
+        if selector.startswith("#"):
+            return selector[1:].replace("_", " ").replace("-", " ").strip()
+        m = re.match(r'text="([^"]+)"', selector)
+        if m:
+            return m.group(1).strip()
+        return None
+
+    def _spec_from_selector(self, selector: str | None) -> dict[str, Any]:
+        if not selector:
+            return {}
+        out: dict[str, Any] = {}
+        m = re.match(r'text="([^"]+)"', selector)
+        if m:
+            out["text"] = m.group(1).strip()
+            return out
+        m = re.match(r"^([a-zA-Z][\w-]*)", selector)
+        if m:
+            out["tag"] = m.group(1).lower()
+        if selector.startswith("#"):
+            out["elem_id"] = selector[1:].strip()
+        m = re.search(r'\[name=["\']?([^"\']+)["\']?\]', selector)
+        if m:
+            out["name_attr"] = m.group(1).strip()
+        return out
+
     def _element_to_text_selector(self, element: str) -> str | None:
         """Convert a Playwright MCP element description into a text= locator.
 
@@ -305,10 +413,10 @@ class SkillRecorder:
         # Pattern: <role> "<accessible name>"
         m = re.match(r'^\s*\w+\s+"([^"]+)"\s*$', element)
         if m:
-            return f'text="{m.group(1)}"'
+            return f'text="{self._clean_accessible_name(m.group(1))}"'
         # Bare label
         if element and len(element) < 80 and "\n" not in element:
-            return f'text="{element}"'
+            return f'text="{self._clean_accessible_name(element)}"'
         return None
 
     def _normalize_selector(self, sel: Any) -> str | None:
@@ -418,6 +526,28 @@ def _find_profile_path(profile: dict, target: str) -> list[str] | None:
 
     _walk(profile, [])
     if not matches:
-        return None
+        derived = _find_derived_profile_path(profile, target)
+        return derived
     matches.sort(key=lambda p: -len(p))
     return matches[0]
+
+
+def _find_derived_profile_path(profile: dict, target: str) -> list[str] | None:
+    personal = profile.get("personal") if isinstance(profile, dict) else None
+    if not isinstance(personal, dict):
+        return None
+    first, last = _split_full_name(str(personal.get("full_name") or ""))
+    if target == first:
+        return ["personal", "first_name"]
+    if target == last:
+        return ["personal", "last_name"]
+    return None
+
+
+def _split_full_name(full_name: str) -> tuple[str, str]:
+    parts = [p for p in str(full_name or "").strip().split() if p]
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])

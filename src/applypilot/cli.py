@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 import typer
@@ -16,6 +17,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%H:%M:%S",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = typer.Typer(
     name="applypilot",
@@ -32,6 +34,34 @@ VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _preapply_prune(min_score: int, limit: int = 200, check_queue_fn=None) -> None:
+    """Freshness pre-check before an apply batch: park dead links as 'expired'.
+
+    Never blocks the batch — any error is logged and applying proceeds
+    (the per-job flow has its own failure handling). `check_queue_fn` is
+    injectable for tests.
+    """
+    try:
+        from applypilot.config import DB_PATH
+        from applypilot.freshness import check_queue
+        import sqlite3 as _sqlite3
+
+        fn = check_queue_fn or check_queue
+        conn = _sqlite3.connect(DB_PATH)
+        try:
+            res = fn(conn, min_score=min_score, limit=limit)
+        finally:
+            conn.close()
+        if res.checked:
+            console.print(
+                f"  Freshness pre-check: {res.checked} links checked — "
+                f"[green]{res.live} live[/green], [red]{res.expired} expired (parked)[/red], "
+                f"[yellow]{res.unknown} unknown[/yellow]"
+            )
+    except Exception as exc:  # noqa: BLE001 — pre-check must never block applying
+        log.warning("freshness pre-check skipped: %s", exc)
+
 
 def _bootstrap() -> None:
     """Common setup: load env, create dirs, init DB."""
@@ -87,6 +117,19 @@ def run(
     workers: int = typer.Option(1, "--workers", "-w", help="Parallel threads for discovery/enrichment stages."),
     stream: bool = typer.Option(False, "--stream", help="Run stages concurrently (streaming mode)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview stages without executing."),
+    quick: bool = typer.Option(
+        False,
+        "--quick",
+        help=(
+            "Fast lane for small apply batches: use targeted discovery, "
+            "skip slow default sources, and cap enrichment/scoring work."
+        ),
+    ),
+    target_ready: int = typer.Option(
+        10,
+        "--target-ready",
+        help="Fresh ready-to-apply jobs to aim for in --quick mode.",
+    ),
     validation: str = typer.Option(
         "normal",
         "--validation",
@@ -101,10 +144,30 @@ def run(
         None, "--source",
         help=(
             "Comma-separated discovery sub-sources to run within the discover stage. "
-            "Valid: jobspy, workday, ats_boards, smartextract. "
-            "Default: jobspy + workday + ats_boards (smartextract opt-in). "
+            "Valid: jobspy, workday, ats_boards, theirstack, smartextract. "
+            "Default: jobspy + workday + ats_boards (theirstack/smartextract opt-in). "
             "Example: --source ats_boards   (only Greenhouse/Lever/Ashby)"
         ),
+    ),
+    site_contains: Optional[str] = typer.Option(
+        None,
+        "--site-contains",
+        help="Only run source-scoped stages like tailor against jobs whose site/source contains this text.",
+    ),
+    applyable_only: bool = typer.Option(
+        False,
+        "--applyable-only",
+        help="For tailoring, only process jobs that are still eligible for the apply queue.",
+    ),
+    llm_provider: Optional[str] = typer.Option(
+        None,
+        "--llm-provider",
+        help="LLM backend for score/tailor/cover: auto or claude. Auto keeps Gemini/OpenAI/local env detection.",
+    ),
+    llm_model: Optional[str] = typer.Option(
+        None,
+        "--llm-model",
+        help="Model for score/tailor/cover. For Claude: sonnet or claude-haiku-4-5-20251001.",
     ),
 ) -> None:
     """Run pipeline stages: discover, enrich, score, tailor, cover, pdf."""
@@ -113,6 +176,23 @@ def run(
     from applypilot.pipeline import run_pipeline, VALID_SOURCES
 
     stage_list = stages if stages else ["all"]
+
+    if llm_provider:
+        provider = llm_provider.strip().lower()
+        valid_providers = {"auto", "claude", "claude-code", "claude_code"}
+        if provider not in valid_providers:
+            console.print(
+                f"[red]Invalid --llm-provider:[/red] '{llm_provider}'. "
+                f"Choose from: {', '.join(sorted(valid_providers))}"
+            )
+            raise typer.Exit(code=1)
+        if provider == "auto":
+            os.environ.pop("APPLYPILOT_LLM_PROVIDER", None)
+            os.environ.pop("LLM_PROVIDER", None)
+        else:
+            os.environ["APPLYPILOT_LLM_PROVIDER"] = provider
+    if llm_model:
+        os.environ["LLM_MODEL"] = llm_model.strip()
 
     # Parse --source filter
     sources: Optional[list[str]] = None
@@ -150,6 +230,10 @@ def run(
         )
         raise typer.Exit(code=1)
 
+    if target_ready < 1:
+        console.print("[red]--target-ready must be at least 1.[/red]")
+        raise typer.Exit(code=1)
+
     result = run_pipeline(
         stages=stage_list,
         min_score=min_score,
@@ -158,10 +242,208 @@ def run(
         workers=workers,
         validation_mode=validation,
         sources=sources,
+        site_contains=site_contains,
+        applyable_only=applyable_only,
+        quick=quick,
+        target_ready=target_ready,
     )
 
     if result.get("errors"):
         raise typer.Exit(code=1)
+
+
+@app.command("discover-ats")
+def discover_ats(
+    query: Optional[str] = typer.Option(
+        None,
+        "--query",
+        "-q",
+        help="Comma-separated role queries. Defaults to tier 1-2 searches from searches.yaml.",
+    ),
+    search_limit: int = typer.Option(
+        200,
+        "--search-limit",
+        help="Maximum candidate ATS URLs to collect from web search.",
+    ),
+    workers: int = typer.Option(12, "--workers", "-w", help="Parallel API validation workers."),
+    min_matching_jobs: int = typer.Option(
+        1,
+        "--min-matching-jobs",
+        help="Only save boards with at least this many title/location-matching jobs.",
+    ),
+    hours_old: Optional[int] = typer.Option(
+        None,
+        "--hours-old",
+        help="Freshness window for metadata. Defaults to searches.yaml defaults.hours_old.",
+    ),
+    no_db: bool = typer.Option(False, "--no-db", help="Do not mine existing DB URLs for ATS tokens."),
+    no_seeds: bool = typer.Option(False, "--no-seeds", help="Do not probe packaged high-signal company slug seeds."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate and print results without writing registry."),
+) -> None:
+    """Discover more Greenhouse/Lever/Ashby company boards."""
+    _bootstrap()
+
+    if search_limit < 0:
+        console.print("[red]--search-limit cannot be negative.[/red]")
+        raise typer.Exit(code=1)
+    if workers < 1:
+        console.print("[red]--workers must be at least 1.[/red]")
+        raise typer.Exit(code=1)
+    if min_matching_jobs < 0:
+        console.print("[red]--min-matching-jobs cannot be negative.[/red]")
+        raise typer.Exit(code=1)
+
+    queries = [q.strip() for q in query.split(",") if q.strip()] if query else None
+
+    from applypilot.discovery.ats_discovery import discover_ats_boards
+
+    console.print("\n[bold blue]Discovering ATS Boards[/bold blue]")
+    result = discover_ats_boards(
+        queries=queries,
+        search_limit=search_limit,
+        workers=workers,
+        hours_old=hours_old,
+        min_matching_jobs=min_matching_jobs,
+        include_db=not no_db,
+        include_seeds=not no_seeds,
+        write=not dry_run,
+    )
+
+    console.print(
+        f"  Candidates: {result['candidates']} | "
+        f"Validated: {result['validated']} | "
+        f"Added: {result['added']}"
+    )
+    console.print(f"  Registry:   {result['registry_path']}")
+
+    boards = result.get("boards", [])
+    if boards:
+        table = Table(title="Validated ATS Boards", show_header=True, header_style="bold cyan")
+        table.add_column("ATS")
+        table.add_column("Token")
+        table.add_column("Match", justify="right")
+        table.add_column("Fresh", justify="right")
+        table.add_column("Sample Titles")
+        for board in boards[:25]:
+            table.add_row(
+                board.ats,
+                board.token,
+                str(board.matching_jobs),
+                str(board.fresh_matching_jobs),
+                "; ".join(board.sample_titles[:2]),
+            )
+        console.print(table)
+        if len(boards) > 25:
+            console.print(f"[dim]... {len(boards) - 25} more validated boards omitted[/dim]")
+    elif dry_run:
+        console.print("[yellow]No new matching boards validated.[/yellow]")
+
+    if dry_run:
+        console.print("[yellow]Dry run: registry was not updated.[/yellow]")
+
+
+@app.command("resolve-linkedin")
+def resolve_linkedin(
+    limit: int = typer.Option(25, "--limit", "-l", help="Maximum LinkedIn rows to inspect."),
+    min_score: int = typer.Option(7, "--min-score", help="Minimum fit score to include."),
+    write: bool = typer.Option(
+        False,
+        "--write/--dry-run",
+        help="Persist resolved application URLs. Default is dry-run.",
+    ),
+    headless: bool = typer.Option(True, "--headless/--visible", help="Run the resolver browser headless."),
+    login_wait: int = typer.Option(
+        180,
+        "--login-wait",
+        help="Visible mode: seconds to wait while you clear LinkedIn login/CAPTCHA.",
+    ),
+    retry_hours: float = typer.Option(24.0, "--retry-hours", help="Skip rows resolved or failed within this window."),
+    site_contains: Optional[str] = typer.Option(None, "--site-contains", help="Only resolve rows whose site/source contains this text."),
+    max_age_hours: Optional[float] = typer.Option(None, "--max-age-hours", help="Only resolve rows discovered within this many hours."),
+    corpus_report: bool = typer.Option(False, "--corpus-report", help="Print read-only LinkedIn corpus counters first."),
+) -> None:
+    """Resolve LinkedIn job listings to direct company/ATS apply URLs."""
+    _bootstrap()
+
+    if limit < 1:
+        console.print("[red]--limit must be at least 1.[/red]")
+        raise typer.Exit(code=1)
+    if retry_hours < 0:
+        console.print("[red]--retry-hours cannot be negative.[/red]")
+        raise typer.Exit(code=1)
+    if max_age_hours is not None and max_age_hours <= 0:
+        console.print("[red]--max-age-hours must be positive when provided.[/red]")
+        raise typer.Exit(code=1)
+    if login_wait < 0:
+        console.print("[red]--login-wait cannot be negative.[/red]")
+        raise typer.Exit(code=1)
+
+    from applypilot.enrichment.linkedin_outbound import (
+        linkedin_corpus_report,
+        resolve_linkedin_jobs,
+    )
+
+    if corpus_report:
+        report = linkedin_corpus_report()
+        table = Table(title="LinkedIn Corpus", show_header=True, header_style="bold cyan")
+        table.add_column("Metric")
+        table.add_column("Count", justify="right")
+        for key, value in report.items():
+            table.add_row(key, str(value or 0))
+        console.print(table)
+
+    console.print("\n[bold blue]Resolving LinkedIn Outbound Apply URLs[/bold blue]")
+    console.print(f"  Limit:     {limit}")
+    console.print(f"  Min score: {min_score}")
+    if site_contains:
+        console.print(f"  Site:      contains {site_contains}")
+    if max_age_hours:
+        console.print(f"  Freshness: last {max_age_hours:g}h")
+    console.print(f"  Mode:      {'write' if write else 'dry-run'}")
+    console.print(f"  Browser:   {'headless' if headless else 'visible'}")
+    if not headless:
+        console.print(f"  Login wait:{login_wait}s")
+
+    stats = resolve_linkedin_jobs(
+        limit=limit,
+        min_score=min_score,
+        write=write,
+        use_browser=True,
+        headless=headless,
+        manual_unblock_seconds=0 if headless else login_wait,
+        retry_hours=retry_hours,
+        site_contains=site_contains,
+        max_age_hours=max_age_hours,
+    )
+
+    console.print(
+        f"\nProcessed {stats['processed']}/{stats['candidates']} candidates | "
+        f"resolved={stats['resolved']} easy_apply={stats['easy_apply_only']} "
+        f"expired={stats['expired']} login={stats['login_blocked']} "
+        f"captcha={stats['captcha']} unknown={stats['unknown']} error={stats['error']} "
+        f"duplicates={stats['duplicates']}"
+    )
+
+    rows = stats.get("results", [])
+    if rows:
+        table = Table(title="Resolver Results", show_header=True, header_style="bold cyan")
+        table.add_column("Status")
+        table.add_column("LinkedIn URL")
+        table.add_column("Outbound URL")
+        table.add_column("Duplicate")
+        for row in rows[:25]:
+            table.add_row(
+                row["status"],
+                str(row["url"])[:72],
+                str(row.get("outbound_url") or "")[:72],
+                str(row.get("duplicate_url") or "")[:48],
+            )
+        console.print(table)
+        if len(rows) > 25:
+            console.print(f"[dim]... {len(rows) - 25} more rows omitted[/dim]")
+
+    if not write:
+        console.print("[yellow]Dry run: database was not updated. Re-run with --write to persist.[/yellow]")
 
 
 @app.command()
@@ -183,13 +465,17 @@ def apply(
     escalation_mode: str = typer.Option("pause", "--escalation-mode", help="Blocker handling mode: pause or skip."),
     legacy_result_fallback: bool = typer.Option(True, "--legacy-result-fallback/--no-legacy-result-fallback", help="Allow legacy RESULT:* fallback if structured JSON is missing."),
     startup_stagger: float = typer.Option(4.0, "--startup-stagger", help="Seconds to stagger each additional worker startup."),
-    max_age_hours: int = typer.Option(48, "--max-age-hours", help="Only apply to jobs discovered within this many hours (freshness gate; 0 = no limit, drain everything)."),
+    max_age_hours: int = typer.Option(24, "--max-age-hours", help="Only apply to jobs discovered within this many hours (freshness gate; 0 = no limit, drain everything)."),
+    site_contains: Optional[str] = typer.Option(None, "--site-contains", help="Only apply jobs whose site/source contains this text, e.g. TheirStack."),
     url: Optional[str] = typer.Option(None, "--url", help="Apply to a specific job URL."),
     gen: bool = typer.Option(False, "--gen", help="Generate prompt file for manual debugging instead of running."),
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
     mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
     fail_reason: Optional[str] = typer.Option(None, "--fail-reason", help="Reason for --mark-failed."),
     reset_failed: bool = typer.Option(False, "--reset-failed", help="Reset all failed jobs for retry."),
+    reset_manual: bool = typer.Option(False, "--reset-manual", help="Reset jobs marked manual ATS for retry; combine with --site-contains to scope."),
+    resolved_only: bool = typer.Option(False, "--resolved-only", help="With --reset-manual, only reset rows with resolved non-LinkedIn application URLs."),
+    prune: bool = typer.Option(True, "--prune/--no-prune", help="Before applying, HTTP-check queued application links and park dead ones as 'expired' (freshness pre-check)."),
 ) -> None:
     """Launch auto-apply to submit job applications."""
     _bootstrap()
@@ -217,6 +503,18 @@ def apply(
         console.print(f"[green]Reset {count} failed job(s) for retry.[/green]")
         return
 
+    if resolved_only and not reset_manual:
+        console.print("[red]--resolved-only is only valid with --reset-manual.[/red]")
+        raise typer.Exit(code=1)
+
+    if reset_manual:
+        from applypilot.apply.launcher import reset_manual as do_reset_manual
+        count = do_reset_manual(site_contains=site_contains, resolved_only=resolved_only)
+        scope_text = f" matching site '{site_contains}'" if site_contains else ""
+        resolved_text = " with resolved outbound URLs" if resolved_only else ""
+        console.print(f"[green]Reset {count} manual job(s){scope_text}{resolved_text} for retry.[/green]")
+        return
+
     # --- Full apply mode ---
 
     # Check 1: Tier 3 required (Claude Code CLI + Chrome)
@@ -234,15 +532,22 @@ def apply(
     # tailored resume if available, master resume.pdf as fallback)
     if not (gen and url):
         conn = get_connection()
+        site_filter = ""
+        ready_params: list[object] = [min_score]
+        if site_contains and not url:
+            site_filter = "AND LOWER(site) LIKE ?"
+            ready_params.append(f"%{site_contains.lower()}%")
         ready = conn.execute(
             "SELECT COUNT(*) FROM jobs "
             "WHERE fit_score >= ? AND applied_at IS NULL "
-            "AND (apply_status IS NULL OR apply_status = 'failed')",
-            (min_score,),
+            "AND (apply_status IS NULL OR apply_status = 'failed') "
+            f"{site_filter}",
+            ready_params,
         ).fetchone()[0]
         if ready == 0:
+            scope_text = f" matching site '{site_contains}'" if site_contains and not url else ""
             console.print(
-                f"[red]No scored jobs (score >= {min_score}) ready to apply.[/red]\n"
+                f"[red]No scored jobs (score >= {min_score}){scope_text} ready to apply.[/red]\n"
                 "Run [bold]applypilot run score[/bold] first to score discovered jobs."
             )
             raise typer.Exit(code=1)
@@ -267,11 +572,11 @@ def apply(
         )
         return
 
-    from applypilot.apply.launcher import main as apply_main
+    from applypilot.apply.launcher import main as apply_main, preview_apply_queue
 
     effective_limit = limit if limit is not None else (0 if continuous else 1)
     if workers.lower() == "auto":
-        effective_workers = 2 if headless else 1
+        effective_workers = 2
     else:
         try:
             effective_workers = int(workers)
@@ -300,6 +605,31 @@ def apply(
         console.print("[red]--startup-stagger cannot be negative.[/red]")
         raise typer.Exit(code=1)
 
+    fresh_age = max_age_hours if max_age_hours and max_age_hours > 0 else None
+
+    if prune and not url:
+        _preapply_prune(min_score=min_score)
+
+    queue_preview = []
+    if not url:
+        preview_limit = effective_limit if effective_limit and effective_limit > 0 else 10
+        queue_preview = preview_apply_queue(
+            limit=preview_limit,
+            min_score=min_score,
+            max_age_hours=fresh_age,
+            site_contains=site_contains,
+        )
+        if not queue_preview and not continuous:
+            age_text = f" in the last {fresh_age}h" if fresh_age else ""
+            console.print(
+                f"[yellow]No auto-applyable jobs found for score >= {min_score}{age_text}.[/yellow]\n"
+                "The remaining candidates are likely manual-only links (for example LinkedIn listing pages) "
+                "or jobs without a usable apply URL.\n"
+                "Run [bold]applypilot run discover enrich score --quick --target-ready 10[/bold] "
+                "to fetch more direct ATS jobs, or use [bold]--max-age-hours 0[/bold] to drain older jobs."
+            )
+            raise typer.Exit(code=0)
+
     console.print("\n[bold blue]Launching Auto-Apply[/bold blue]")
     console.print(f"  Limit:    {'unlimited' if continuous else effective_limit}")
     console.print(f"  Workers:  {effective_workers}{' (auto)' if workers.lower() == 'auto' else ''}")
@@ -311,6 +641,11 @@ def apply(
     console.print(f"  Verify:   {verify_threshold:.2f}")
     console.print(f"  Retries:  {max_transient_retries}")
     console.print(f"  Escalate: {escalation_mode}")
+    if site_contains and not url:
+        console.print(f"  Site:     contains {site_contains}")
+    if not url:
+        queue_label = "unlimited" if continuous else str(effective_limit)
+        console.print(f"  Queue:    {len(queue_preview)}/{queue_label} auto-applyable now")
     if url:
         console.print(f"  Target:   {url}")
     console.print()
@@ -334,7 +669,8 @@ def apply(
         escalation_mode=escalation_mode,
         legacy_result_fallback=legacy_result_fallback,
         startup_stagger=startup_stagger,
-        max_age_hours=(max_age_hours if max_age_hours and max_age_hours > 0 else None),
+        max_age_hours=fresh_age,
+        site_contains=site_contains if not url else None,
     )
 
 
@@ -381,7 +717,7 @@ def status() -> None:
     summary.add_row("Tailored resumes", str(stats["tailored"]))
     summary.add_row("Pending tailoring (7+)", str(stats["untailored_eligible"]))
     summary.add_row("Cover letters", str(stats["with_cover_letter"]))
-    summary.add_row("Ready to apply", str(stats["ready_to_apply"]))
+    summary.add_row("Auto-applyable (all ages)", str(stats["ready_to_apply"]))
     summary.add_row("Applied", str(stats["applied"]))
     summary.add_row("Apply errors", str(stats["apply_errors"]))
 
@@ -430,6 +766,76 @@ def dashboard() -> None:
     from applypilot.view import open_dashboard
 
     open_dashboard()
+
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address (keep on localhost)."),
+    port: int = typer.Option(8765, "--port", "-p", help="Port for the dashboard."),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the browser automatically."),
+) -> None:
+    """Launch the local web dashboard (queue, triage, runs console).
+
+    Safe by design: the UI can run discovery/scoring/pruning and DRY-RUN
+    applies, but can never start a live apply.
+    """
+    _bootstrap()
+
+    try:
+        import uvicorn  # noqa: F401
+        from applypilot.webui.server import create_app
+    except ImportError:
+        console.print("[red]The web UI needs extra packages:[/red] pip install 'applypilot[ui]'")
+        console.print("(or: pip install fastapi uvicorn)")
+        raise typer.Exit(1)
+
+    url = f"http://{host}:{port}"
+    console.print(f"[bold]ApplyPilot dashboard[/bold] → {url}  (Ctrl+C to stop)")
+    if open_browser:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+
+
+@app.command("prune-expired")
+def prune_expired(
+    min_score: int = typer.Option(7, "--min-score", help="Only check jobs at or above this score."),
+    limit: int = typer.Option(500, "--limit", help="Max queued URLs to check."),
+    workers: int = typer.Option(8, "--workers", "-w", help="Parallel HTTP checks."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report without updating the DB."),
+) -> None:
+    """Check queued application links and park dead ones as 'expired'.
+
+    Run this before an apply batch so attempts aren't wasted on postings
+    that closed since discovery. Conservative: only confident 404/'no longer
+    open' signals park a row; reversible via apply_error LIKE
+    'link_expired_precheck%'.
+    """
+    _bootstrap()
+    import sqlite3 as _sqlite3
+
+    from applypilot.config import DB_PATH
+    from applypilot.freshness import check_queue
+
+    conn = _sqlite3.connect(DB_PATH)
+    try:
+        result = check_queue(conn, min_score=min_score, limit=limit, workers=workers, dry_run=dry_run)
+    finally:
+        conn.close()
+
+    tag = " (dry run — nothing written)" if dry_run else ""
+    console.print(
+        f"Checked [bold]{result.checked}[/bold] queued links{tag}: "
+        f"[green]{result.live} live[/green], "
+        f"[red]{result.expired} expired[/red], "
+        f"[yellow]{result.unknown} unknown (left untouched)[/yellow]"
+    )
+    for u in result.expired_urls[:20]:
+        console.print(f"  [red]expired[/red] {u}")
+    if len(result.expired_urls) > 20:
+        console.print(f"  … and {len(result.expired_urls) - 20} more")
 
 
 @app.command()

@@ -24,6 +24,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import unquote, urlparse
 
 from applypilot import config
 from applypilot.apply import replay as replay_mod
@@ -67,6 +68,49 @@ def normalize_company_key(site: str | None) -> str:
     head = site.split("(")[0].strip().lower()
     slug = re.sub(r"[^a-z0-9]+", "_", head).strip("_")
     return slug
+
+
+def _slugify_company(value: str | None) -> str:
+    if not value:
+        return ""
+    text = unquote(value).strip().lower()
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def _company_from_apply_url(url: str | None) -> str:
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    parts = [unquote(p) for p in parsed.path.split("/") if p]
+
+    if "greenhouse.io" in host and parts:
+        return _slugify_company(parts[0])
+    if "lever.co" in host and parts:
+        return _slugify_company(parts[0])
+    if "ashbyhq.com" in host and parts:
+        return _slugify_company(parts[0])
+    if "myworkdayjobs.com" in host:
+        return _slugify_company(host.split(".", 1)[0])
+    if host.startswith("careers.") and len(host.split(".")) >= 3:
+        return _slugify_company(host.split(".")[1])
+    if host.startswith("jobs.") and len(host.split(".")) >= 3:
+        return _slugify_company(host.split(".")[1])
+    labels = [p for p in host.split(".") if p and p not in {"www", "careers", "jobs", "company"}]
+    return _slugify_company(labels[0]) if labels else ""
+
+
+def company_key_for_job(job: dict) -> str:
+    """Return the skill namespace for a job.
+
+    Source sites like LinkedIn and Indeed are not company identities. When a
+    job has a resolved outbound URL, use that destination company so one
+    LinkedIn-resolved Ashby recording does not apply to unrelated LinkedIn jobs.
+    """
+    site_key = normalize_company_key(job.get("site"))
+    if site_key in {"linkedin", "indeed", "glassdoor", "ziprecruiter", "google"}:
+        return _company_from_apply_url(job.get("application_url")) or site_key
+    return site_key or _company_from_apply_url(job.get("application_url"))
 
 
 def skill_path(company: str) -> Path:
@@ -158,6 +202,7 @@ def run_skill_flow(
     tailored_resume: str = "",
     interaction_timeout_ms: int = 4000,
     patch_timeout_s: int = 180,
+    browser_stream=None,
 ) -> tuple[str, int, dict | None]:
     """Run a saved skill end-to-end via Python Playwright.
 
@@ -268,6 +313,7 @@ def run_skill_flow(
 
         verification = launcher_mod._verify_submission_success(
             port, verify_threshold=verify_threshold, previous_url=apply_url,
+            browser_stream=browser_stream,
         )
         duration_ms = int((time.monotonic() - started) * 1000)
         prefill_status["replay_duration_ms"] = replay_result.duration_ms
@@ -318,6 +364,7 @@ def dispatch_apply(
     skill_flow_fn: Callable[..., tuple[str, int, dict | None]] | None = None,
     resolve_skill_fn: Callable[[str], Skill | None] | None = None,
     flag_fn: Callable[[], bool] | None = None,
+    browser_stream=None,
 ) -> tuple[str, int, dict | None]:
     """Route one job to either the skill flow or legacy run_job.
 
@@ -334,14 +381,17 @@ def dispatch_apply(
     flag = (flag_fn or is_skill_flow_enabled)()
     if not flag:
         # OFF path: byte-for-byte the same call as before Phase 4.
+        passthrough_kwargs = dict(run_job_kwargs)
+        if browser_stream is not None:
+            passthrough_kwargs["browser_stream"] = browser_stream
         status, duration_ms, prefill = run_job_fn(
-            job=job, port=port, worker_id=worker_id, **run_job_kwargs
+            job=job, port=port, worker_id=worker_id, **passthrough_kwargs
         )
         if isinstance(prefill, dict):
             prefill.setdefault("tier_used", "legacy_llm")
         return status, duration_ms, prefill
 
-    company = normalize_company_key(job.get("site"))
+    company = company_key_for_job(job)
     resolver = resolve_skill_fn or resolve_skill
     skill = resolver(company) if company else None
 
@@ -358,6 +408,7 @@ def dispatch_apply(
         status, duration_ms, prefill = runner(
             skill=skill, job=job, port=port, worker_id=worker_id,
             model=model, dry_run=dry_run, verify_threshold=verify_threshold,
+            browser_stream=browser_stream,
         )
         # The skill flow only OWNS the outcome if it cleanly applied OR it
         # actually submitted the form (then the verifier ran). Those are the
@@ -403,6 +454,8 @@ def dispatch_apply(
     )
     kwargs_with_recorder = dict(run_job_kwargs)
     kwargs_with_recorder["recorder"] = recorder
+    if browser_stream is not None:
+        kwargs_with_recorder["browser_stream"] = browser_stream
 
     status, duration_ms, prefill = run_job_fn(
         job=job, port=port, worker_id=worker_id, **kwargs_with_recorder,
@@ -411,7 +464,7 @@ def dispatch_apply(
         # Record mode: LLM-driven apply with a SkillRecorder observing.
         prefill.setdefault("tier_used", "skill_record")
 
-    if status == "applied" and company:
+    if status == "applied" and company and not dry_run:
         try:
             out_path = skill_path(company)
             out_path.parent.mkdir(parents=True, exist_ok=True)

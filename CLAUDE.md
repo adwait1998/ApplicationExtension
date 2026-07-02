@@ -28,6 +28,8 @@ applypilot status                  # DB job counts by stage
 applypilot run discover enrich score [--source ats_boards|jobspy|workday|theirstack|smartextract] [--quick --target-ready N]
 applypilot apply --dry-run --limit 1 --workers 1 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720
 applypilot report                  # reliability + cost summary over logs/review.jsonl
+applypilot ui                      # local web dashboard at http://127.0.0.1:8765 (queue/triage/runs; needs pip install -e ".[ui]"). Safe by design: cannot launch live applies.
+applypilot prune-expired [--dry-run]  # check queued application links, park dead ones as 'expired' (run before apply batches)
 
 # Tests / lint
 pytest tests/ -v                                # all tests

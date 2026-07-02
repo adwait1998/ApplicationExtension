@@ -176,6 +176,52 @@ def test_replay_drift_on_hash_mismatch(page, profile, tmp_resume):
     assert "form_layout_hash" in (result.error or "")
 
 
+def test_replay_heals_action_selectors_before_declaring_drift(page, profile):
+    """A recorded selector can churn if its semantic element spec still resolves."""
+    page.set_content("""
+    <!doctype html><html><body>
+      <label for="first_name_99">First name</label>
+      <input id="first_name_99" name="first_name" type="text">
+      <button id="submit_99" type="button">Submit application</button>
+      <div id="post_submit" style="display:none">Thank you for applying.</div>
+      <script>
+      document.getElementById('submit_99').addEventListener('click', () => {
+        document.getElementById('post_submit').style.display = 'block';
+      });
+      </script>
+    </body></html>
+    """)
+    required = ["#first_name_old", 'text="Submit application"']
+    skill = Skill(
+        version=1,
+        company="synth",
+        ats="custom",
+        recorded_at="",
+        recorded_from_url="",
+        form_layout_hash=form_layout_hash(required),
+        required_selectors=required,
+        actions=[
+            Action(
+                kind="fill",
+                selector="#first_name_old",
+                value_source="profile.personal.first_name",
+                extra={"element_spec": {"role": "textbox", "label": "First name", "name": "First name", "tag": "input"}},
+            ),
+            Action(
+                kind="submit",
+                selector='text="Submit application"',
+                extra={"element_spec": {"role": "button", "name": "Submit application", "text": "Submit application", "tag": "button"}},
+            ),
+        ],
+    )
+
+    result = replay_skill(skill, page, profile)
+
+    assert result.status == STATUS_SUBMITTED, result.error
+    assert page.locator("#first_name_99").input_value() == "Nida"
+    assert page.locator("#post_submit").is_visible()
+
+
 def test_replay_needs_patch_when_unresolved(page, profile, tmp_resume):
     """If skill has unresolved_fields, Tier 1 stops at submit and returns needs_patch."""
     required = ["#first_name", "#last_name", "#email", "#phone",
@@ -214,6 +260,22 @@ def test_resolve_value_paths():
         resolve_value("profile.missing", p)
     with pytest.raises(SkillValidationError):
         resolve_value("unknownprefix:thing", p)
+
+
+def test_resolve_value_derives_first_last_from_full_name():
+    profile = {"personal": {"full_name": "Nida Shah"}}
+    assert resolve_value("profile.personal.first_name", profile) == "Nida"
+    assert resolve_value("profile.personal.last_name", profile) == "Shah"
+
+    explicit_profile = {
+        "personal": {
+            "full_name": "Legal Name",
+            "first_name": "Preferred",
+            "last_name": "Override",
+        }
+    }
+    assert resolve_value("profile.personal.first_name", explicit_profile) == "Preferred"
+    assert resolve_value("profile.personal.last_name", explicit_profile) == "Override"
 
 
 def test_skill_yaml_roundtrip(tmp_path, tmp_resume):

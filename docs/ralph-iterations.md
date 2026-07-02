@@ -1052,3 +1052,233 @@ authorizations do NOT carry over. Loop idles at the live gate.
 Emit RALPH-DONE iff that line shows (A)-fails=0 AND $/apply < ~1.35 AND
 pass-rate ≥ ~60%. gusto 7640344 specifically should now resolve all
 self-ID dropdowns deterministically and submit with zero LLM.
+
+## Iteration 14 - LinkedIn outbound resolver
+
+User goal: convert high-value `linkedin.com/jobs/view/...` listings into
+direct company/ATS `application_url`s while keeping LinkedIn Easy Apply out of
+scope.
+
+Implemented the resolver as a side-effect-free classifier plus a small
+authenticated-browser wrapper:
+- `linkedin_outbound.py` classifies `resolved`, `easy_apply_only`, `expired`,
+  `login_blocked`, `captcha`, `unknown`, and `error`.
+- Resolved rows write a non-LinkedIn/non-manual outbound URL to
+  `jobs.application_url` with `application_url_source`,
+  `application_url_resolved_at`, and `application_url_error` metadata.
+- Previously `manual` rows are restored only for resolver-safe statuses
+  (`manual ATS`, `no apply URL`, or blank error) and only after a direct
+  non-manual outbound URL is found.
+- Duplicate resolved URLs are marked `duplicate` rather than made applyable.
+- Enrichment now runs LinkedIn outbound resolution before generic detail
+  scraping, including rows that already have `detail_scraped_at`.
+- Added `applypilot resolve-linkedin --dry-run/--write` for backfill.
+
+CUA spike: added an isolated `linkedin_cua_probe.py` scaffold that builds a
+Responses API `computer-use-preview` request for resolver-only navigation. It
+is gated behind `APPLYPILOT_ENABLE_CUA_SPIKE=1`, allowlists LinkedIn job URLs,
+and does not execute actions or submit anything.
+
+Tests added in `tests/test_linkedin_outbound.py` cover classification, schema
+migration, enrichment integration, dry-run/write behavior, duplicate handling,
+manual restore safety, CLI dry-run, and the CUA payload guard.
+
+### Iteration 14 follow-up - manual-intervention retry guard
+
+Live LinkedIn-resolved applies exposed two separate issues:
+- Adobe submitted successfully after manual intervention, but the agent did
+  not emit a result line and the worker retried the same role in-run.
+- Dave/Ashby submitted successfully only after manual intervention on soft
+  work-authorization buttons; the recorder captured unstable natural-language
+  text locators in `dave.yaml`.
+
+Fixes:
+- Marked the Adobe LinkedIn row applied after the user confirmed a Workday
+  confirmation email.
+- Archived the manually-assisted `E:\applypilot-data\skills\dave.yaml` so it
+  will not replay a contaminated click sequence.
+- Added `transient_no_result_line` to the non-retryable transient set. Missing
+  result lines now stop at `needs_review` instead of immediately reopening the
+  same role, because a manual/real submit may already have happened.
+- Added deterministic Ashby segmented-button handling for scoped work-auth and
+  sponsorship Yes/No buttons before the LLM gets involved.
+
+Tests: full suite green, `264 passed`.
+
+### Iteration 14 follow-up - LinkedIn skill namespace contamination
+
+A later batch showed `recorder.commit: wrote skill to
+E:\applypilot-data\skills\linkedin.yaml` after applying to LinkedIn-resolved
+outbound jobs. Root cause: the skill dispatcher keyed skills by the source
+`jobs.site`. For native LinkedIn/Indeed rows, that records a generic
+`linkedin.yaml` / `indeed.yaml` even though the actual form belongs to
+Superhuman, Tolan, Gen Digital, etc. This can replay one company's Ashby form
+recipe on unrelated LinkedIn jobs.
+
+Fix:
+- Archived the contaminated `linkedin.yaml` to `_archive`.
+- Added `company_key_for_job()` in `skill_runner.py`: source aggregators
+  (`linkedin`, `indeed`, etc.) now derive the skill key from the outbound
+  `application_url` host/path. Examples: `jobs.ashbyhq.com/gen-digital/...`
+  -> `gen_digital.yaml`, `boards.greenhouse.io/sofi/...` -> `sofi.yaml`,
+  `superhuman.com/...ashby_jid=...` -> `superhuman.yaml`.
+
+Targeted tests green: `73 passed`.
+
+---
+
+## Iteration 15 — feature.md loop: location gate un-neutered, auto-prune, submit confirmation — 2026-06-10
+
+Spec: [feature.md](../feature.md). Three one-hypothesis fixes, each verified
+against the full suite (sandbox subset; browser-binary tests run operator-side).
+
+### F1 — pre-apply location gate was a silent no-op (the 14/100 location waste)
+
+`_preapply_location_reject` had two bugs: (1) an explicitly-passed `{}`
+search_config was falsy → silently loaded disk defaults; (2) accept markers
+were matched by BARE SUBSTRING against title+loc+url+description — defaults
+include "CA"/"US"/"Anywhere", so "ca" matched "appliCAtions" and "anywhere"
+matched "work from anywhere", accepting nearly every job. Fixed: `None`-only
+config fallback + word-boundary marker matching. The previously-failing
+`test_preapply_location_gate_uses_workday_url_location_and_ignores_limited_wfa`
+now passes; the other two gate tests unchanged.
+
+### F2 — freshness pre-check wired into `applypilot apply`
+
+`applypilot apply` now runs `freshness.check_queue` (the prune-expired HTTP
+liveness check) before dispatch; `--no-prune` skips. Fail-open: a broken
+pre-check never blocks the batch. New `cli._preapply_prune` helper + 3 tests
+(`tests/test_cli_preapply_prune.py`). Context: at loop start 170/172 eligible
+queue rows were >14 days old.
+
+### F3 — adapter submit was click-assumed, not confirmed
+
+Live data (2026-05-20..22): `tier=greenhouse_adapter_submit` rows finishing in
+13–73s with verification_confidence 0.10–0.25 (discord, Google DeepMind,
+Capital One-via-LinkedIn landing on a Workday step page). Root cause:
+`submit_greenhouse` returned `submitted=True` on click success alone; the
+launcher then SKIPPED the LLM ("would double-submit"), so a rejected/ignored
+click had zero recovery path. Fixed: post-click confirmation loop (~6s) around
+a pure decision core `_post_submit_verdict` — button gone → submitted; visible
+validation errors → rejected; form still interactive at deadline →
+`submit_unconfirmed` (Tier-2/LLM recovers); button disabled at deadline →
+in-flight, verifier decides. 8 $0 tests (`tests/test_submit_confirmation.py`).
+
+### Suite status
+
+Sandbox-runnable subset: **350 passed, 0 failed** (browser-binary tests
+excluded — Playwright CDN blocked in sandbox; run `pytest tests/` on the
+operator machine for the full set). Live re-validation of F1/F3 remains
+user-gated as always.
+
+---
+
+## Iteration 16 — telemetry hygiene + interruption classification + Workday account gate — 2026-06-10 (overnight loop)
+
+Three more one-hypothesis fixes, suite green after each.
+
+### Iter 4 — successes were logged as failures
+
+Dozens of review.jsonl rows had `status=applied` (and `dry_run:applied`) WITH
+`failure_class=transient_unknown` — a stale value from earlier in the attempt
+loop leaked into the success write. All failure-class analytics (report,
+dashboard) were polluted. Fixed at the single choke point: `write_review_log`
+nulls failure_class for any `*applied` status. 4 tests
+(`tests/test_review_log_hygiene.py`).
+
+### Iter 5 — operator Ctrl+C was classified as agent failure
+
+Transcripts for the `transient_no_result_line` rows (Adapt, Fanatics
+2026-05-21) end with cmd.exe's "Terminate batch job (Y/N)?" — the run was
+interrupted, not broken. Two older cases (2026-05-18) were prompts built with
+a literal "None" URL — already fixed upstream by the no-apply-URL selection
+skip. New pure helper `_classify_no_result(stop_requested, default)` returns
+`transient_interrupted` / `needs_review:interrupted` when `_stop_event` is
+set; wired into both no-result sites in `run_job`. 4 tests
+(`tests/test_no_result_classification.py`).
+
+### Iter 6 — Workday tenants without accounts burned 350-430s each
+
+All 4 `blocker_login_issue` rows (2026-05-20..22) were Workday tenants
+(salesforce pre-account, rakuten, thomsonreuters) or an eQuest redirect —
+each spent 216-432s + LLM cost discovering a login wall that was knowable
+from the URL. New `_workday_account_reject` + combined
+`_preapply_reject_reason` gate at job-selection time (both selection paths);
+tenant allowlist `workday_accounts` added to `E:\applypilot-data\searches.yaml`
+seeded with the 5 proven tenants (motorolasolutions, salesforce, mastercard,
+cisco, adobe — from DB applied rows). No list configured → no-op.
+`workday_account_required` classifies as blocker. 7 tests
+(`tests/test_workday_account_gate.py`).
+
+### Data hygiene (one-time, reversible)
+
+discord "Product Designer, Notifications" — needs_review with confidence 0.9
+and stored evidence "thank you for applying" — reclassified to `applied`
+(`apply_error='reclassified_from_needs_review:...'`). The other 68
+needs_review rows have no strong success evidence and stay queued for triage.
+
+### Suite status
+
+**362 passed, 0 failed** on the sandbox-runnable subset. Browser-binary
+tests still operator-side. Live validation still user-gated; the dashboard
+(`applypilot ui`) Runs tab now covers prune → discover → score → dry-run
+for queue refresh without the CLI.
+
+---
+
+## Iteration 17 — INCIDENT: dry-run submitted a real application; server-side guard shipped — 2026-06-12
+
+### What happened
+
+`scripts/refresh_and_validate.ps1` ran the full safe sequence (user-approved,
+launched via File Explorer): prune → discover (3 new ats_boards jobs, 24h
+window) → score (gemma3:4b, first new job scored 8) → **dry-run apply ×1**.
+The dry-run picked a fresh Twilio Greenhouse job, prefilled 15 fields… and
+then **clicked Submit application for real**. Transcript
+(`claude_20260612_144759_w0_twilio (greenhouse).txt`) ends with the model
+reporting Greenhouse's post-submit security-code screen and `RESULT:APPLIED`.
+A real application for Nida went to Twilio during a dry run (pending
+Greenhouse email verification — the security code was never entered, so
+Twilio may hold it as unverified/incomplete).
+
+### Root cause
+
+`allow_submit` on `stream_execute` is **an argument the model passes**. The
+dry-run prohibition existed only in the prompt; Haiku passed
+`allow_submit=true`, the MCP server complied. The executor's
+`submit_refused_allow_submit_false` guard protects against accidental
+clicks, not against the model deciding to submit. Prompt-level policy is
+not a control.
+
+### Fix (structural, server-side)
+
+- `stream_executor.effective_allow_submit(model_allow, dry_run)` — pure
+  enforcement core: dry-run wins over whatever the model requests.
+- `stream_mcp_server`: `--dry-run` CLI flag → `build_server(..., dry_run)`;
+  `stream_execute` forces `allow_submit=False` and returns a
+  `dry_run_submit_blocked` notice telling the model to report ready-state
+  without submitting.
+- `launcher._make_mcp_config(port, dry_run=...)` adds the flag; `run_job`
+  forwards its real `dry_run`.
+
+7 regression tests (`tests/test_dry_run_submit_guard.py`), incl. the exact
+incident case. Suite: **370 passed / 0 failed** (sandbox subset).
+
+### Residual gap — CLOSED same session (DOM-level blocker)
+
+The raw Playwright MCP server (`browser_click`) had no equivalent guard.
+Added `_inject_dry_run_submit_blocker(port)` in launcher: on dry-run, after
+prefill, a capture-phase submit/click interceptor + neutered
+`HTMLFormElement.submit/requestSubmit` is installed as a context init
+script (survives navigation) and evaluated on open pages. Fail-open; the
+server-side stream guard remains the primary control. 3 more tests → 10 in
+`tests/test_dry_run_submit_guard.py`. Suite: **372 passed / 0 failed**
+(sandbox subset). DOM blocker needs one operator-side dry-run to observe
+live (it's best-effort by design).
+
+### Operator follow-ups
+
+1. Twilio: decide whether to complete the email verification in Nida's
+   inbox (making the accidental application real) or let it lapse.
+2. The 24h discovery window yielded only 3 new jobs after a 3-week idle
+   gap — consider `--hours-old 168` (or equivalent) for the first refill.

@@ -421,7 +421,8 @@ If CapSolver genuinely failed (errorId > 0):
 def build_prompt(job: dict, tailored_resume: str,
                  cover_letter: str | None = None,
                  dry_run: bool = False,
-                 prefill_status: dict | None = None) -> str:
+                 prefill_status: dict | None = None,
+                 browser_observation_summary: str | None = None) -> str:
     """Build the full instruction prompt for the apply agent.
 
     Loads the user profile and search config internally. All personal data
@@ -522,19 +523,19 @@ The page is loaded at the apply URL right now.
 
 HARD RULES (do NOT violate):
 1. DO NOT call browser_navigate to the apply URL. The page is already loaded. Navigating will reload the page and wipe the pre-filled values, costing 30+ extra LLM turns.
-2. YOUR FIRST ACTION MUST be browser_snapshot. NOT browser_navigate.
+2. YOUR FIRST ACTION MUST be mcp__applypilot_stream__stream_latest. NOT browser_navigate. If stream_latest is incomplete or ambiguous and browser_snapshot is unavailable, output RESULT:FAILED:stream_snapshot_needed.
 3. These fields were filled: {fields_csv}.
 {resume_clause}4. Skip {skip_steps} of the STEP-BY-STEP. These have already been done. Start at step 2.
 
-WHAT TO DO ON FIRST SNAPSHOT:
+WHAT TO DO ON FIRST STREAM_LATEST:
 - If the form is visible and the listed fields show values, leave them alone. For resume, verify the UI shows an attached file; if not, upload it using the FILES path. Continue with step 2 (CAPTCHA detect, location, screening, EEO, submit).
-- If clicking Apply is required to reveal the form (Greenhouse landing pages where JD comes first): click Apply ONCE, then snapshot again. The pre-filled values may persist into the revealed form. If a SPECIFIC pre-filled field is now empty, refill ONLY that one field. Do not re-fill fields that still have values.
+- If clicking Apply is required to reveal the form (Greenhouse landing pages where JD comes first): click Apply ONCE, then call mcp__applypilot_stream__stream_wait_for_change or mcp__applypilot_stream__stream_latest again. The pre-filled values may persist into the revealed form. If a SPECIFIC pre-filled field is now empty, refill ONLY that one field. Do not re-fill fields that still have values.
 - If the entire form is empty (all pre-filled fields blank), it means a re-render cleared everything. In that case, fill from scratch — but do this surgically per field, not in bulk.
 
-== STALE-SNAPSHOT WARNING (avoid wasted re-fills) ==
-After you click to open a react-select / custom dropdown, your NEXT browser_snapshot may show previously-filled text fields (first/last name, email, phone, etc.) as empty. This is a stale snapshot — React is mid-render. The values are still in form state and will submit correctly. DO NOT re-fill them. Take ONE more snapshot after a tool interaction settles and trust the second reading.
+== STALE-OBSERVATION WARNING (avoid wasted re-fills) ==
+After you click to open a react-select / custom dropdown, the next observation may show previously-filled text fields (first/last name, email, phone, etc.) as empty. This can be stale React mid-render state. The values may still be in form state and submit correctly. DO NOT re-fill them immediately. Call mcp__applypilot_stream__stream_wait_for_change once, then trust the settled observation.
 
-Same for resume: if you see "resume.pdf" attached in any snapshot, DO NOT upload again. A later snapshot showing the file input "empty" after a re-render is NOT proof that the upload was lost. Move on.
+Same for resume: if you see "resume.pdf" attached in any stream observation or fallback snapshot, DO NOT upload again. A later observation showing the file input "empty" after a re-render is NOT proof that the upload was lost. Move on.
 
 DO NOT bulk-refill if even one of {fields_csv} still has a value. Surgical refills only.
 """
@@ -545,11 +546,21 @@ DO NOT bulk-refill if even one of {fields_csv} still has a value. Surgical refil
     # ONE action, not a conditional. Haiku struggles with mid-step conditionals.
     if prefill_section:
         step1_action = (
-            "browser_snapshot to read the page (already loaded by the prefill "
-            "helper). DO NOT browser_navigate — navigating would wipe pre-filled values."
+            "mcp__applypilot_stream__stream_latest to read the page (already loaded by the prefill "
+            "helper). Prefer mcp__applypilot_stream__stream_execute for known fills/clicks. "
+            "DO NOT browser_navigate -- navigating would wipe pre-filled values."
         )
     else:
-        step1_action = "browser_navigate to the job URL, then browser_snapshot to read the page."
+        step1_action = "browser_navigate to the job URL, then mcp__applypilot_stream__stream_latest to read the page."
+
+    browser_observation_section = ""
+    if browser_observation_summary:
+        browser_observation_section = f"""== CURRENT BROWSER STATE STREAM ==
+This is a compact structured observation captured by the launcher before you started.
+Use it as context. For fresh state, call mcp__applypilot_stream__stream_latest. Use browser_snapshot only on fallback/retry when stream controls are incomplete, ambiguous, or you need Playwright MCP element refs.
+
+{browser_observation_summary}
+"""
 
     # Dry-run: override submit instruction
     if dry_run:
@@ -560,7 +571,7 @@ DO NOT bulk-refill if even one of {fields_csv} still has a value. Surgical refil
             "Do not spend time changing optional fields, voluntary EEO fields, pronouns, or additional information."
         )
     else:
-        submit_instruction = "BEFORE clicking Submit/Apply, take a snapshot and review EVERY field on the page. Verify all data matches the APPLICANT PROFILE and TAILORED RESUME -- name, email, phone, location, work auth, resume uploaded, cover letter if applicable. If anything is wrong or missing, fix it FIRST. Only click Submit after confirming everything is correct."
+        submit_instruction = "BEFORE clicking Submit/Apply, call mcp__applypilot_stream__stream_latest and review required_missing, validation_errors, visible controls, and submit_buttons. Verify all data matches the APPLICANT PROFILE and TAILORED RESUME -- name, email, phone, location, work auth, resume uploaded, cover letter if applicable. If anything is wrong or missing, fix it FIRST with mcp__applypilot_stream__stream_execute. Only submit with allow_submit=true after confirming everything is correct."
 
     prompt = f"""You are an autonomous job application agent. Your ONE mission: get this candidate an interview. You have all the information and tools. Think strategically. Act decisively. Submit the application.
 
@@ -571,6 +582,7 @@ Company: {job.get('site', 'Unknown')}
 Fit Score: {job.get('fit_score', 'N/A')}/10
 
 {prefill_section}
+{browser_observation_section}
 == FILES ==
 Resume PDF (upload this): {pdf_path}
 Cover Letter PDF (upload if asked): {cl_upload_path or "N/A"}
@@ -592,7 +604,16 @@ If something unexpected happens and these instructions don't cover it, figure it
 {hard_rules}
 
 == TOOL LIMITS ==
-Use only browser and Gmail MCP tools. Do not use shell, filesystem, task/planning, web search, or unsafe code execution tools. If an unavailable tool would be needed, continue with the available browser tools or output a RESULT code.
+Use only ApplyPilot stream, browser, and Gmail MCP tools. Do not use shell, filesystem, task/planning, web search, or unsafe code execution tools. If an unavailable tool would be needed, continue with the available browser tools or output a RESULT code.
+
+== APPLYPILOT STREAM TOOLS (MANDATORY FAST PATH) ==
+- First inspect with mcp__applypilot_stream__stream_latest. It returns structured controls with control_id, labels, values, required/missing state, validation errors, and submit buttons.
+- If a needed control appears in stream_latest, you MUST use mcp__applypilot_stream__stream_execute for that fill/select/upload/check/click/type/press. Do not use browser_snapshot or browser_fill_form for stream-visible controls.
+- Batch related actions in ONE mcp__applypilot_stream__stream_execute call whenever possible, for example multiple fill/select/upload actions.
+- Pass allow_submit=false for normal fills and navigation clicks. Pass allow_submit=true only for a final Submit/Apply action after you have checked required_missing and validation_errors.
+- After a stream_execute call, use its returned observation or call mcp__applypilot_stream__stream_wait_for_change. Do NOT call browser_snapshot after every stream action.
+- browser_snapshot is fallback only. Before using browser_snapshot, state the exact blocker in one sentence: "STREAM FALLBACK: <missing/ambiguous/control-needs-ref/captcha/visual-confirmation>". Then call browser_snapshot once.
+- If browser_snapshot is unavailable and stream tools cannot complete the form, stop with RESULT:FAILED:stream_snapshot_needed. The launcher will retry once with snapshot fallback enabled.
 
 == NEVER DO THESE (immediate RESULT:FAILED if encountered) ==
 - NEVER grant camera, microphone, screen sharing, or location permissions. If a site requests them -> RESULT:FAILED:unsafe_permissions
@@ -603,6 +624,7 @@ Use only browser and Gmail MCP tools. Do not use shell, filesystem, task/plannin
 - NEVER enter payment info, bank details, or SSN/SIN.
 - NEVER click "Allow" on any browser permission popup. Always deny/block.
 - If the site is NOT a job application form (it's a profile builder, skills marketplace, talent network signup, coding assessment platform) -> RESULT:FAILED:not_a_job_application
+- A candidate profile, talent community, job alert signup, "Introduce Yourself", "Candidate Home", or "Your information has been submitted" profile confirmation is NOT a completed job application. Continue to the job-specific application. If you cannot reach the job-specific apply flow after only submitting a profile, output RESULT:FAILED:candidate_profile_only, never RESULT:APPLIED.
 
 {location_check}
 
@@ -612,12 +634,13 @@ Use only browser and Gmail MCP tools. Do not use shell, filesystem, task/plannin
 
 == STEP-BY-STEP ==
 1. {step1_action}
-2. browser_snapshot to read the page. Then run CAPTCHA DETECT (see CAPTCHA section). If a CAPTCHA is found, solve it before continuing.
+2. Use mcp__applypilot_stream__stream_latest to read the page. Then run CAPTCHA DETECT (see CAPTCHA section). If a CAPTCHA is found, solve it before continuing.
 3. LOCATION CHECK. Read the page for location info. If not eligible, output RESULT and stop.
 4. Find and click the Apply button. If email-only (page says "email resume to X"):
    - send_email with subject "Application for {job['title']} -- {display_name}", body = 2-3 sentence pitch + contact info, attach resume PDF: ["{pdf_path}"]
    - Output RESULT:APPLIED. Done.
-   After clicking Apply: browser_snapshot. Run CAPTCHA DETECT -- many sites trigger CAPTCHAs right after the Apply click. If found, solve before continuing.
+   If stream_latest shows no form controls and no Apply/Continue/Submit button after the loaded job URL plus ONE obvious direct apply click/navigation, do NOT invent URL patterns or try random Greenhouse/ATS URLs. Output RESULT:FAILED:apply_button_not_found.
+   After clicking Apply: mcp__applypilot_stream__stream_wait_for_change or mcp__applypilot_stream__stream_latest. Run CAPTCHA DETECT -- many sites trigger CAPTCHAs right after the Apply click. If found, solve before continuing.
 5. Login wall?
    5a. FIRST: check the URL. If you landed on {', '.join(blocked_sso)}, or any SSO/OAuth page -> STOP. Output RESULT:FAILED:sso_required. Do NOT try to sign in to Google/Microsoft/SSO.
    5b. Check for popups. Run browser_tabs action "list". If a new tab/window appeared (login popup), switch to it with browser_tabs action "select". Check the URL there too -- if it's SSO -> RESULT:FAILED:sso_required.
@@ -634,7 +657,7 @@ Use only browser and Gmail MCP tools. Do not use shell, filesystem, task/plannin
    - Compare every other field to the APPLICANT PROFILE. Fix mismatches. Fill empty fields.
 9. Answer screening questions using the rules above.
 10. {submit_instruction}
-11. If this is a dry run, skip this step. Otherwise after submit: browser_snapshot. Run CAPTCHA DETECT -- submit buttons often trigger invisible CAPTCHAs. If found, solve it (the form will auto-submit once the token clears, or you may need to click Submit again). Then check for new tabs (browser_tabs action: "list"). Switch to newest, close old. Snapshot to confirm submission. Look for "thank you" or "application received".
+11. If this is a dry run, skip this step. Otherwise after submit: mcp__applypilot_stream__stream_wait_for_change or mcp__applypilot_stream__stream_latest first. Run CAPTCHA DETECT -- submit buttons often trigger invisible CAPTCHAs. If found, solve it (the form will auto-submit once the token clears, or you may need to click Submit again). Then check for new tabs (browser_tabs action: "list"). Switch to newest, close old. Use mcp__applypilot_stream__stream_latest to confirm submission; fallback to browser_snapshot if confirmation text is unclear. Look for "thank you" or "application received".
 12. Output exactly ONE final line of the form `RESULT:<code>` (see RESULT CODES below). That single line is what the launcher reads. Optionally also emit a one-line `APPLYPILOT_RESULT_JSON:{{...}}` earlier in your output for telemetry, but it is NOT required and the RESULT: line is authoritative.
 
 == STRUCTURED RESULT (OPTIONAL TELEMETRY) ==
@@ -651,56 +674,65 @@ RESULT:FAILED:not_eligible_location -- onsite outside acceptable area, no remote
 RESULT:FAILED:not_eligible_work_auth -- requires unauthorized work location
 RESULT:FAILED:email_verification_required -- email code required but Gmail MCP code retrieval unavailable
 RESULT:FAILED:phone_country_validation -- phone country dropdown could not be accepted by the ATS
+RESULT:FAILED:stream_snapshot_needed -- stream tools could not target the required control and browser_snapshot was unavailable
+RESULT:FAILED:apply_button_not_found -- no job-specific application form or apply control could be reached from the loaded job URL
+RESULT:FAILED:candidate_profile_only -- only a candidate profile/talent community/Introduce Yourself flow was submitted; no job-specific application was completed
 RESULT:FAILED:<reason> -- any other terminal failure where you cannot proceed (use a short snake_case reason). Do NOT emit this when you simply could not solve a screening question or a single field — submit the form anyway and let the verifier classify the outcome.
 
 == GREENHOUSE FAST PATH ==
-Greenhouse (boards.greenhouse.io, job-boards.greenhouse.io, embedded greenhouse forms) is the most common ATS here. A deterministic helper has ALREADY filled name, email, phone, phone-country, location, LinkedIn/portfolio, resume, AND the standard dropdowns (work authorization, sponsorship, "previously worked here", 18+, and EEO gender/race/veteran/disability) before you started. Follow this exact sequence — it is proven and fast:
+Greenhouse (boards.greenhouse.io, job-boards.greenhouse.io, embedded greenhouse forms) is the most common ATS here. A deterministic helper has ALREADY filled name, email, phone, phone-country, location, LinkedIn/portfolio, resume, AND the standard dropdowns (work authorization, sponsorship, "previously worked here", 18+, and EEO gender/race/veteran/disability) before you started. Follow this exact stream-first sequence:
 
-1. ONE browser_snapshot of the whole page. Greenhouse is a SINGLE page — do NOT page-scroll hunting for fields and do NOT screenshot-loop. If you find yourself pressing PageDown/PageUp repeatedly, STOP — that is the #1 time-waster and it fails. Use the snapshot's element refs to jump directly.
-2. TRUST THE PRE-FILL. The fields listed in the PRE-FILLED section are done, including the EEO/screening dropdowns. Do NOT re-open or re-select them — re-touching a Greenhouse react-select DESYNCS it (the option looks selected but the value silently clears, blocking Submit). Only touch a dropdown if the snapshot shows it still says "Select...".
-3. For any dropdown you DO still need to set (custom screening question), use the KEYBOARD, never a bare option-click: browser_click the control to focus it → type the answer text → press ArrowDown → press Enter. A synthetic click on the portal option visually selects but does NOT commit react-select state. Keyboard commits it. Verify with a snapshot that the control now shows the chosen value, not "Select...".
+1. ONE mcp__applypilot_stream__stream_latest of the whole page. Greenhouse is a SINGLE page; do NOT page-scroll hunting for fields and do NOT screenshot-loop. Use stream control_id/selector targets through mcp__applypilot_stream__stream_execute.
+2. TRUST THE PRE-FILL. The fields listed in the PRE-FILLED section are done, including the EEO/screening dropdowns. Do NOT re-open or re-select them; re-touching a Greenhouse react-select can desync it. Only touch a dropdown if stream_latest shows it still says "Select...".
+3. For any dropdown you DO still need to set (custom screening question), use mcp__applypilot_stream__stream_execute with action=select. If stream_execute cannot commit the value, fallback to browser_click focus, short browser_type query, ArrowDown, Enter. Verify with stream_latest that the control now shows the chosen value, not "Select...".
 4. Custom free-text screening questions: answer in 1-3 concise sentences from the profile/resume. Don't agonize. A brief honest answer beats a perfect one that costs 10 turns.
-5. Email verification (Greenhouse "we sent a code"): Gmail MCP only — search_emails (query the sender/subject), read_email, extract the 8-char code, type it into the code field(s), then click Submit application again. Never open mail in the browser.
-6. Submit by CLICKING the actual "Submit application" button. NEVER use JavaScript `form.submit()`, `.submit()`, `HTMLFormElement.submit()`, `.requestSubmit()`, `form.dispatchEvent(...)`, or any browser_evaluate that calls a submission method on the form element directly. Greenhouse is a React app — native form.submit() BYPASSES React's submit handler, which resets all field state without actually submitting. This produces a falsely-positive "form cleared" signal that is NOT success.
+5. Email verification (Greenhouse "we sent a code"): Gmail MCP only -- search_emails (query the sender/subject), read_email, extract the 8-char code, type it into the code field(s), then click Submit application again. Never open mail in the browser.
+6. Submit with mcp__applypilot_stream__stream_execute and allow_submit=true after required_missing and validation_errors are clear. This must click the actual "Submit application" button. NEVER use JavaScript `form.submit()`, `.submit()`, `HTMLFormElement.submit()`, `.requestSubmit()`, `form.dispatchEvent(...)`, or any browser_evaluate that calls a submission method on the form element directly. Greenhouse is a React app -- native form.submit() bypasses React's submit handler, resets field state, and can look like a false submission.
 7. If the submit button click does not appear to work (no confirmation text within 5-10s):
-   7a. Scroll the button into view (browser_evaluate `document.querySelector('button[type=submit]')?.scrollIntoView({{block:'center'}})`), wait 1s, click it again.
-   7b. If still nothing, take a snapshot — check for inline validation errors (red text near fields). Fix any errors, then click submit again.
+   7a. Scroll the button into view, wait 1s, and click it again through mcp__applypilot_stream__stream_execute when possible.
+   7b. If still nothing, use stream_latest first; take one snapshot only if inline validation is visually ambiguous. Fix any errors, then click submit again.
    7c. After 3 honest submit-button-click attempts with no confirmation text and no validation errors visible, output RESULT:FAILED:submit_button_unresponsive. Do NOT fall back to JS form submission.
-8. After a click that appears to have worked: snapshot once. **Real success requires POSITIVE confirmation**:
+8. After a click that appears to have worked: call stream_wait_for_change or stream_latest once; fallback to browser_snapshot only if confirmation text is unclear. **Real success requires POSITIVE confirmation**:
    - Page text contains one of: "thank you for your interest", "thank you for applying", "your application has been received", "we will review your application", "we'll be in touch", "application has been sent", "sign in to mygreenhouse" (Greenhouse confirmation fallback).
-   - OR the URL navigated to a distinct success path (e.g. /thank-you, /confirmation, /applied). A query-parameter change on the SAME job URL is NOT a redirect — it's a state update, not confirmation.
+   - OR the URL navigated to a distinct success path (e.g. /thank-you, /confirmation, /applied). A query-parameter change on the SAME job URL is NOT a redirect -- it's a state update, not confirmation.
    ONLY then: RESULT:APPLIED.
 9. **Empty-form-state is NOT success.** If the form's input fields appear empty/cleared after submit-click but you see NO confirmation text and NO success redirect, this is the React-stomp failure mode (the form re-rendered, state lost, submission did not go through). Output RESULT:NEEDS_REVIEW:submit_no_confirmation. Do NOT output RESULT:APPLIED on this evidence.
 
-Total Greenhouse budget target: ~150-250s. If you are past 400s still filling fields, you are scroll-looping or re-filling pre-filled fields — stop, go straight to Submit.
+Total Greenhouse budget target: ~150-250s. If you are past 400s still filling fields, you are scroll-looping or re-filling pre-filled fields -- stop, go straight to Submit.
+
+GREENHOUSE SNAPSHOT RULE: browser_snapshot is not part of the normal Greenhouse path. It is fallback only after a STREAM FALLBACK reason, or on the retry pass when stream_snapshot_needed was returned.
 
 == WORKDAY FAST PATH ==
 Workday is 60-70% of total apply time. Follow this strict sequence:
 
-1. CLICK "Autofill with Resume" if visible — saves 5+ steps. Upload the PDF path: {pdf_path}
-2. After autofill completes, take ONE snapshot of the entire form.
-3. SCAN the snapshot top-to-bottom: list ALL fields whose values disagree with profile data. Build the full correction list mentally before doing anything.
-4. Fix ALL discrepancies in a SINGLE browser_fill_form call. Do not snapshot between fixes. Do not fix one field, snapshot, fix the next.
-5. Click Next. Repeat 2-4 for each subsequent page.
+0. Workday often shows two separate flows: a candidate profile/Introduce Yourself flow and the real job application. Profile submission is not success. Stay on or return to the URL/path for the specific job application until you reach the stepper with job-specific sections like My Information, My Experience, Application Questions, Voluntary Disclosures, Self Identify, Review, and final Submit.
+1. CLICK "Autofill with Resume" if visible -- saves 5+ steps. Upload the PDF path: {pdf_path}
+2. After autofill completes, call mcp__applypilot_stream__stream_latest for the entire form. Use browser_snapshot only on fallback/retry if stream state misses controls you need.
+3. SCAN the stream observation top-to-bottom: list ALL fields whose values disagree with profile data. Build the full correction list mentally before doing anything.
+4. Fix ALL stream-visible discrepancies in ONE mcp__applypilot_stream__stream_execute call. Do not re-read between fixes. Do not fix one field, re-read, fix the next.
+5. Click Next with stream_execute. Repeat 2-4 for each subsequent page.
 6. On the final review page, only do dry_run check or click Submit per dry_run flag.
 
-DO NOT field-by-field correct. DO NOT take screenshots between fills. The autofill+correct loop is what makes Workday slow — replace it with one snapshot, batch correction, one fill call per page.
+DO NOT field-by-field correct. DO NOT take screenshots between fills. The autofill+correct loop is what makes Workday slow -- replace it with one stream observation, one batched stream_execute per page.
 
 == BROWSER EFFICIENCY ==
-- browser_snapshot ONCE per page to understand it. Then use browser_take_screenshot to check results (10x less memory).
-- Only snapshot again when you need element refs to click/fill.
-- Multi-page forms (Workday, Taleo, iCIMS): snapshot each new page, fill all fields, click Next/Continue. Repeat until final review page.
-- Fill ALL fields in ONE browser_fill_form call. Not one at a time.
+- Prefer mcp__applypilot_stream__stream_latest to understand each page and mcp__applypilot_stream__stream_execute for fills/clicks. Use browser_snapshot only when stream controls are incomplete or ambiguous.
+- MANDATORY: if stream_latest shows the target control, use mcp__applypilot_stream__stream_execute. Do not call browser_snapshot for routine review or routine form actions.
+- Before any browser_snapshot fallback, write exactly: STREAM FALLBACK: <why stream cannot handle this target>.
+- browser_snapshot is not the normal page-read path. It is fallback only after a STREAM FALLBACK reason.
+- Do not snapshot for element refs if stream_execute can act on the control_id/selector.
+- Multi-page forms (Workday, Taleo, iCIMS): use stream_latest on each new page, fill all stream-visible fields with one stream_execute call, click Next/Continue with stream_execute. Repeat until final review page.
+- Fill ALL stream-visible fields in ONE mcp__applypilot_stream__stream_execute call. Not one at a time.
 - NEVER use browser_type to enter a text-field value. browser_type emits
   one keystroke at a time — typing an email/phone/name that way burns
   whole minutes and has timed out entire applies (sofi, PayPal). Plain
   text inputs, textareas, name/email/phone, screening free-text: ALWAYS
-  browser_fill_form (it sets the value in one shot). browser_type is
+  mcp__applypilot_stream__stream_execute first, or browser_fill_form only on snapshot fallback (it sets the value in one shot). browser_type is
   ONLY allowed for react-select / combobox "search-as-you-type" filtering
   (1 short query), never for filling a field's final value.
 - Budget tripwire: if you are past ~120s and still entering basic text
   fields, you are keystroke-typing — stop and re-do them via one
-  browser_fill_form call.
+  stream_execute call.
 - Keep your thinking SHORT. Don't repeat page structure back.
 - CAPTCHA AWARENESS: After any navigation, Apply/Submit/Login click, or when a page feels stuck -- run CAPTCHA DETECT (see CAPTCHA section). Invisible CAPTCHAs (Turnstile, reCAPTCHA v3) show NO visual widget but block form submissions silently. The detect script finds them even when invisible.
 
@@ -713,7 +745,7 @@ DO NOT field-by-field correct. DO NOT take screenshots between fills. The autofi
 - Phone field with country prefix: just type digits {phone_digits}
 - Phone country prefix dropdown: select United States/+1 using normal click/type/keyboard interactions. Do not use unsafe DOM code. If the page still rejects the country after two normal attempts, output RESULT:FAILED:phone_country_validation.
 - Date fields: {datetime.now().strftime('%m/%d/%Y')}
-- Validation errors after submit? Take BOTH snapshot AND screenshot. Snapshot shows text errors, screenshot shows red-highlighted fields. Fix all, retry.
+- Validation errors after submit? Use stream_latest for text errors and take a screenshot only if visual red-highlight evidence is needed. Fix all, retry.
 - Honeypot fields (hidden, "leave blank"): skip them.
 - Format-sensitive fields: read the placeholder text, match it exactly.
 
@@ -721,6 +753,7 @@ DO NOT field-by-field correct. DO NOT take screenshots between fills. The autofi
 
 == WHEN TO GIVE UP ==
 - Same page after 3 attempts with no progress -> RESULT:FAILED:stuck
+- No application form and no Apply/Continue/Submit control after one obvious direct apply attempt -> RESULT:FAILED:apply_button_not_found
 - Job is closed/expired/page says "no longer accepting" -> RESULT:EXPIRED
 - Page is broken/500 error/blank -> RESULT:FAILED:page_error
 Stop immediately. Output your RESULT code. Do not loop."""

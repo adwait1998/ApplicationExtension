@@ -252,6 +252,9 @@ def resolve_value(value_source: str | None, profile: dict) -> str | None:
         cur: Any = profile
         for p in parts:
             if not isinstance(cur, dict) or p not in cur:
+                derived = _resolve_derived_profile_value(parts, profile)
+                if derived is not None:
+                    return derived
                 raise SkillValidationError(
                     f"value_source {value_source!r} unresolvable at segment {p!r}"
                 )
@@ -265,3 +268,23 @@ def resolve_value(value_source: str | None, profile: dict) -> str | None:
         f"Unknown value_source prefix: {value_source!r}. "
         "Use 'profile.', 'literal:', or 'file:'."
     )
+
+
+def _resolve_derived_profile_value(parts: list[str], profile: dict) -> str | None:
+    """Resolve virtual profile paths derived from canonical profile fields."""
+    if parts == ["personal", "first_name"]:
+        first, _last = _split_full_name(str((profile.get("personal") or {}).get("full_name") or ""))
+        return first or None
+    if parts == ["personal", "last_name"]:
+        _first, last = _split_full_name(str((profile.get("personal") or {}).get("full_name") or ""))
+        return last or None
+    return None
+
+
+def _split_full_name(full_name: str) -> tuple[str, str]:
+    parts = [p for p in str(full_name or "").strip().split() if p]
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])

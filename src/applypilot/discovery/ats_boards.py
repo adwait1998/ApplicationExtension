@@ -1,8 +1,8 @@
 """Direct ATS job board scraper: Greenhouse, Lever, Ashby.
 
 Hits the public JSON APIs of company-specific job boards. Each company
-posts on one of the three major modern ATSes; this module reads
-config/ats_companies.yaml to know which boards to crawl.
+posts on one of the three major modern ATSes; this module reads the package
+registry plus the user's discovered ats_companies.yaml overlay.
 
 Why direct APIs vs HTML scraping:
   - 10-50x faster (single JSON request vs full page render)
@@ -17,11 +17,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import httpx
-import yaml
-
-from applypilot.config import CONFIG_DIR
-from applypilot.database import get_connection, init_db, store_jobs
+from applypilot import config
+from applypilot.database import get_connection, init_db
+from applypilot.discovery.ats_discovery import load_ats_registry
+from applypilot.discovery.freshness import iso_or_none, is_recent
 from applypilot.discovery.location_filter import load_location_filter, location_ok
+from applypilot.discovery.title_filter import build_title_filter, title_matches
 
 log = logging.getLogger(__name__)
 
@@ -30,18 +31,7 @@ _USER_AGENT = "Mozilla/5.0 (compatible; ApplyPilotBot/1.0)"
 
 
 def _load_config() -> dict:
-    path = CONFIG_DIR / "ats_companies.yaml"
-    if not path.exists():
-        log.warning("ats_companies.yaml not found at %s", path)
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-
-def _title_matches(title: str, keywords: list[str]) -> bool:
-    if not keywords:
-        return True
-    t = title.lower()
-    return any(k.lower() in t for k in keywords)
+    return load_ats_registry()
 
 
 # Module-level cache so the filter lists are loaded once per process, not
@@ -57,7 +47,13 @@ def _get_location_filter() -> tuple[list[str], list[str]]:
     return _LOCATION_FILTER_CACHE
 
 
-def _fetch_greenhouse(company: str, keywords: list[str]) -> list[dict]:
+def _fetch_greenhouse(
+    company: str,
+    title_include: list[str],
+    title_exclude: list[str],
+    hours_old: int | None,
+    keep_unknown_posted_at: bool,
+) -> list[dict]:
     """Return job dicts from boards-api.greenhouse.io/v1/boards/{token}/jobs."""
     url = f"https://boards-api.greenhouse.io/v1/boards/{company}/jobs?content=true"
     try:
@@ -72,7 +68,10 @@ def _fetch_greenhouse(company: str, keywords: list[str]) -> list[dict]:
     jobs: list[dict] = []
     for j in data.get("jobs", []):
         title = j.get("title", "")
-        if not _title_matches(title, keywords):
+        if not title_matches(title, title_include, title_exclude):
+            continue
+        posted_at = j.get("first_published") or j.get("updated_at")
+        if not is_recent(posted_at, hours_old, keep_unknown=keep_unknown_posted_at):
             continue
         loc = (j.get("location") or {}).get("name", "")
         if not location_ok(loc, accept, reject):
@@ -87,11 +86,18 @@ def _fetch_greenhouse(company: str, keywords: list[str]) -> list[dict]:
             "location": loc,
             "description": desc,
             "salary": None,
+            "posted_at": iso_or_none(posted_at),
         })
     return jobs
 
 
-def _fetch_lever(company: str, keywords: list[str]) -> list[dict]:
+def _fetch_lever(
+    company: str,
+    title_include: list[str],
+    title_exclude: list[str],
+    hours_old: int | None,
+    keep_unknown_posted_at: bool,
+) -> list[dict]:
     """Return job dicts from api.lever.co/v0/postings/{company}?mode=json."""
     url = f"https://api.lever.co/v0/postings/{company}?mode=json"
     try:
@@ -106,7 +112,10 @@ def _fetch_lever(company: str, keywords: list[str]) -> list[dict]:
     jobs: list[dict] = []
     for j in data:
         title = j.get("text", "")
-        if not _title_matches(title, keywords):
+        if not title_matches(title, title_include, title_exclude):
+            continue
+        posted_at = j.get("createdAt")
+        if not is_recent(posted_at, hours_old, keep_unknown=keep_unknown_posted_at):
             continue
         cats = j.get("categories", {}) or {}
         loc = cats.get("location", "")
@@ -119,11 +128,18 @@ def _fetch_lever(company: str, keywords: list[str]) -> list[dict]:
             "location": loc,
             "description": desc,
             "salary": None,
+            "posted_at": iso_or_none(posted_at),
         })
     return jobs
 
 
-def _fetch_ashby(company: str, keywords: list[str]) -> list[dict]:
+def _fetch_ashby(
+    company: str,
+    title_include: list[str],
+    title_exclude: list[str],
+    hours_old: int | None,
+    keep_unknown_posted_at: bool,
+) -> list[dict]:
     """Return job dicts from api.ashbyhq.com/posting-api/job-board/{org}."""
     url = f"https://api.ashbyhq.com/posting-api/job-board/{company}?includeCompensation=true"
     try:
@@ -138,7 +154,10 @@ def _fetch_ashby(company: str, keywords: list[str]) -> list[dict]:
     jobs: list[dict] = []
     for j in data.get("jobs", []):
         title = j.get("title", "")
-        if not _title_matches(title, keywords):
+        if not title_matches(title, title_include, title_exclude):
+            continue
+        posted_at = j.get("publishedAt")
+        if not is_recent(posted_at, hours_old, keep_unknown=keep_unknown_posted_at):
             continue
         loc = j.get("location", "") or ""
         if not location_ok(loc, accept, reject):
@@ -150,6 +169,7 @@ def _fetch_ashby(company: str, keywords: list[str]) -> list[dict]:
             "location": loc,
             "description": desc,
             "salary": None,
+            "posted_at": iso_or_none(posted_at),
         })
     return jobs
 
@@ -161,14 +181,18 @@ _FETCHERS = {
 }
 
 
-def run_ats_boards_discovery(workers: int = 4) -> dict:
+def run_ats_boards_discovery(workers: int = 4, hours_old: int | None = None) -> dict:
     """Crawl all configured ATS company boards and store matching jobs."""
     init_db()
     # Reload location filter so edits to searches.yaml take effect each run.
     global _LOCATION_FILTER_CACHE
     _LOCATION_FILTER_CACHE = None
     cfg = _load_config()
-    keywords = cfg.get("title_keywords", [])
+    search_cfg = config.load_search_config() or {}
+    if hours_old is None:
+        hours_old = search_cfg.get("defaults", {}).get("hours_old", 72)
+    title_include, title_exclude = build_title_filter(search_cfg, local_cfg=cfg)
+    keep_unknown_posted_at = bool(cfg.get("keep_unknown_posted_at", True))
 
     work: list[tuple[str, str]] = []  # (ats, company)
     for ats in _FETCHERS:
@@ -179,13 +203,23 @@ def run_ats_boards_discovery(workers: int = 4) -> dict:
         log.info("No ATS companies configured.")
         return {"total": 0, "new": 0}
 
-    log.info("Crawling %d ATS company boards (Greenhouse/Lever/Ashby)...", len(work))
+    log.info(
+        "Crawling %d ATS company boards (Greenhouse/Lever/Ashby), hours_old=%s...",
+        len(work), hours_old,
+    )
     t0 = time.time()
     all_jobs: list[tuple[str, str, list[dict]]] = []  # (ats, company, jobs)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(_FETCHERS[ats], company, keywords): (ats, company)
+            pool.submit(
+                _FETCHERS[ats],
+                company,
+                title_include,
+                title_exclude,
+                hours_old,
+                keep_unknown_posted_at,
+            ): (ats, company)
             for ats, company in work
         }
         for fut in as_completed(futures):
@@ -226,7 +260,7 @@ def run_ats_boards_discovery(workers: int = 4) -> dict:
                         j.get("description"), j.get("description"),
                         url,  # application_url = job URL (apply on same page)
                         j.get("location"), site_label, strategy,
-                        now, now,
+                        j.get("posted_at") or now, now,
                     ),
                 )
                 total_new += 1

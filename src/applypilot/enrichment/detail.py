@@ -25,6 +25,7 @@ from playwright.sync_api import sync_playwright
 from applypilot import config
 from applypilot.config import DB_PATH
 from applypilot.database import get_connection, init_db, ensure_columns
+from applypilot.enrichment.linkedin_outbound import resolve_linkedin_jobs
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
@@ -692,6 +693,7 @@ def _run_detail_scraper(
     conn: sqlite3.Connection,
     sites: list[str] | None = None,
     max_per_site: int | None = None,
+    max_total: int | None = None,
     workers: int = 1,
 ) -> dict:
     """Groups pending jobs by site and processes each batch.
@@ -705,8 +707,11 @@ def _run_detail_scraper(
     skip_filter = " AND ".join(f"site != '{s}'" for s in SKIP_DETAIL_SITES)
     where = f"WHERE detail_scraped_at IS NULL AND {skip_filter}"
     rows = conn.execute(
-        f"SELECT url, title, site FROM jobs {where} ORDER BY site"
+        f"SELECT url, title, site FROM jobs {where} "
+        "ORDER BY discovered_at DESC NULLS LAST, site"
     ).fetchall()
+    if max_total and max_total > 0:
+        rows = rows[:max_total]
 
     if not rows:
         log.info("No pending jobs to scrape.")
@@ -783,6 +788,59 @@ def _run_detail_scraper(
     return total_stats
 
 
+def _run_linkedin_outbound_resolver(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 25,
+    min_score: int = 0,
+) -> dict:
+    """Resolve LinkedIn job pages before generic detail scraping.
+
+    JobSpy can already populate `full_description` and `detail_scraped_at`
+    for LinkedIn while leaving `application_url` empty. This pass intentionally
+    selects by missing/manual application URL, not by detail scrape state.
+    """
+    try:
+        stats = resolve_linkedin_jobs(
+            conn,
+            limit=limit,
+            min_score=min_score,
+            write=True,
+            use_browser=True,
+            headless=True,
+            manual_unblock_seconds=0,
+        )
+        if stats["processed"]:
+            log.info(
+                "LinkedIn outbound resolver: %d/%d resolved | easy=%d expired=%d login=%d captcha=%d unknown=%d error=%d",
+                stats["resolved"],
+                stats["processed"],
+                stats["easy_apply_only"],
+                stats["expired"],
+                stats["login_blocked"],
+                stats["captcha"],
+                stats["unknown"],
+                stats["error"],
+            )
+        return stats
+    except Exception as exc:
+        log.warning("LinkedIn outbound resolver skipped after error: %s", exc)
+        return {
+            "candidates": 0,
+            "processed": 0,
+            "resolved": 0,
+            "easy_apply_only": 0,
+            "expired": 0,
+            "login_blocked": 0,
+            "captcha": 0,
+            "unknown": 0,
+            "error": 1,
+            "duplicates": 0,
+            "write": True,
+            "results": [],
+        }
+
+
 # -- Streaming detail scraper (for sequential pipeline) ----------------------
 
 def stream_detail(
@@ -855,7 +913,14 @@ def stream_detail(
 
 # -- Public entry point ------------------------------------------------------
 
-def run_enrichment(limit: int = 100, workers: int = 1) -> dict:
+def run_enrichment(
+    limit: int = 100,
+    workers: int = 1,
+    max_total: int | None = None,
+    resolve_linkedin: bool = True,
+    linkedin_limit: int = 25,
+    linkedin_min_score: int = 7,
+) -> dict:
     """Main entry point for detail page enrichment.
 
     Fetches pending jobs from the database (those without full_description),
@@ -865,6 +930,10 @@ def run_enrichment(limit: int = 100, workers: int = 1) -> dict:
     Args:
         limit: Maximum number of jobs per site to process.
         workers: Number of parallel threads for site batch processing. Default 1 (sequential).
+        max_total: Optional total cap across all sites, newest pending jobs first.
+        resolve_linkedin: Resolve LinkedIn outbound apply URLs before detail scraping.
+        linkedin_limit: Maximum LinkedIn rows to try in one enrichment run.
+        linkedin_min_score: Minimum score for LinkedIn resolution.
 
     Returns:
         Dict with stats: processed, ok, partial, error, tiers.
@@ -888,7 +957,17 @@ def run_enrichment(limit: int = 100, workers: int = 1) -> dict:
             updated = resolve_wttj_urls(conn)
             log.info("WTTJ: %d URLs updated", updated)
 
+    linkedin_stats = None
+    if resolve_linkedin and linkedin_limit > 0:
+        linkedin_stats = _run_linkedin_outbound_resolver(
+            conn,
+            limit=linkedin_limit,
+            min_score=linkedin_min_score,
+        )
+
     # Run the detail scraper
-    stats = _run_detail_scraper(conn, max_per_site=limit, workers=workers)
+    stats = _run_detail_scraper(conn, max_per_site=limit, max_total=max_total, workers=workers)
+    if linkedin_stats is not None:
+        stats["linkedin_outbound"] = linkedin_stats
 
     return stats

@@ -2,6 +2,8 @@
 Unified LLM client for ApplyPilot.
 
 Auto-detects provider from environment:
+  LLM_PROVIDER=claude or APPLYPILOT_LLM_PROVIDER=claude
+                  -> Claude Code CLI (default: sonnet)
   GEMINI_API_KEY  -> Google Gemini (default: gemini-2.0-flash)
   OPENAI_API_KEY  -> OpenAI (default: gpt-4o-mini)
   LLM_URL         -> Local llama.cpp / Ollama compatible endpoint
@@ -11,6 +13,7 @@ LLM_MODEL env var overrides the model name for any provider.
 
 import logging
 import os
+import subprocess
 import time
 
 import httpx
@@ -31,6 +34,18 @@ def _detect_provider() -> tuple[str, str, str]:
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     local_url = os.environ.get("LLM_URL", "")
     model_override = os.environ.get("LLM_MODEL", "")
+    provider_override = (
+        os.environ.get("APPLYPILOT_LLM_PROVIDER")
+        or os.environ.get("LLM_PROVIDER")
+        or ""
+    ).strip().lower()
+
+    if provider_override in {"claude", "claude-code", "claude_code"}:
+        return (
+            "claude-code",
+            model_override or os.environ.get("CLAUDE_MODEL", "") or "sonnet",
+            "",
+        )
 
     if gemini_key and not local_url:
         return (
@@ -55,7 +70,8 @@ def _detect_provider() -> tuple[str, str, str]:
 
     raise RuntimeError(
         "No LLM provider configured. "
-        "Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL in your environment."
+        "Set GEMINI_API_KEY, OPENAI_API_KEY, LLM_URL, or LLM_PROVIDER=claude "
+        "in your environment."
     )
 
 
@@ -282,6 +298,84 @@ class LLMClient:
         self._client.close()
 
 
+class ClaudeCodeClient:
+    """LLM client backed by the Claude Code CLI.
+
+    This is useful for tailoring/scoring when you want the same Claude account
+    used by auto-apply, without running a local model server. It is intentionally
+    non-agentic here: no browser MCP, no tools, one prompt in and one text
+    response out.
+    """
+
+    def __init__(self, model: str) -> None:
+        from applypilot.config import find_claude_binary
+
+        claude_bin = find_claude_binary()
+        if not claude_bin:
+            raise RuntimeError(
+                "LLM_PROVIDER=claude was requested, but Claude Code CLI was not found. "
+                "Install Claude Code or set CLAUDE_BIN."
+            )
+        self.claude_bin = claude_bin
+        self.model = model
+
+    @staticmethod
+    def _format_messages(messages: list[dict]) -> str:
+        parts: list[str] = []
+        for msg in messages:
+            role = msg.get("role", "user").upper()
+            content = str(msg.get("content", "")).strip()
+            if not content:
+                continue
+            if role == "SYSTEM":
+                parts.append(f"SYSTEM INSTRUCTIONS:\n{content}")
+            elif role == "ASSISTANT":
+                parts.append(f"ASSISTANT CONTEXT:\n{content}")
+            else:
+                parts.append(f"USER REQUEST:\n{content}")
+        return "\n\n---\n\n".join(parts)
+
+    def chat(
+        self,
+        messages: list[dict],
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+    ) -> str:
+        prompt = self._format_messages(messages)
+        cmd = [
+            self.claude_bin,
+            "--model", self.model,
+            "-p",
+            "--output-format", "text",
+            "--disable-slash-commands",
+            "--no-session-persistence",
+            "-",
+        ]
+        env = os.environ.copy()
+        env["APPLYPILOT_LLM_TEMPERATURE"] = str(temperature)
+        env["APPLYPILOT_LLM_MAX_TOKENS"] = str(max_tokens)
+        proc = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(_TIMEOUT, int(os.environ.get("CLAUDE_LLM_TIMEOUT", "180"))),
+            env=env,
+        )
+        if proc.returncode != 0:
+            output = (proc.stderr or proc.stdout or "").strip()
+            raise RuntimeError(f"Claude Code LLM call failed ({proc.returncode}): {output[:500]}")
+        return proc.stdout.strip()
+
+    def ask(self, prompt: str, **kwargs) -> str:
+        return self.chat([{"role": "user", "content": prompt}], **kwargs)
+
+    def close(self) -> None:
+        return None
+
+
 class _GeminiCompatForbidden(Exception):
     """Sentinel: Gemini OpenAI-compat returned 403. Switch to native API."""
     def __init__(self, response: httpx.Response) -> None:
@@ -293,14 +387,17 @@ class _GeminiCompatForbidden(Exception):
 # Singleton
 # ---------------------------------------------------------------------------
 
-_instance: LLMClient | None = None
+_instance: LLMClient | ClaudeCodeClient | None = None
 
 
-def get_client() -> LLMClient:
+def get_client() -> LLMClient | ClaudeCodeClient:
     """Return (or create) the module-level LLMClient singleton."""
     global _instance
     if _instance is None:
         base_url, model, api_key = _detect_provider()
         log.info("LLM provider: %s  model: %s", base_url, model)
-        _instance = LLMClient(base_url, model, api_key)
+        if base_url == "claude-code":
+            _instance = ClaudeCodeClient(model)
+        else:
+            _instance = LLMClient(base_url, model, api_key)
     return _instance

@@ -81,7 +81,7 @@ def replay_skill(
     actions_run = 0
 
     # Drift check #1: required_selectors must be present.
-    missing = _missing_required(page, skill.required_selectors, interaction_timeout_ms)
+    missing = _missing_required(page, skill.required_selectors, skill.actions, interaction_timeout_ms)
     if missing:
         return ReplayResult(
             status=STATUS_DRIFT_DETECTED,
@@ -322,6 +322,10 @@ def _resolve_locator(page: "Page", action: Action) -> "Locator":
 
     Returns the first locator that exists (count() > 0). Raises if none work.
     """
+    healed = _resolve_healing_locator(page, action)
+    if healed is not None:
+        return healed
+
     if action.selector is None:
         raise SkillValidationError(f"action {action.kind} has no selector")
     candidates = [action.selector, *action.fallback_selectors]
@@ -335,15 +339,42 @@ def _resolve_locator(page: "Page", action: Action) -> "Locator":
     raise RuntimeError(f"no selector matched: {candidates!r}")
 
 
-def _missing_required(page: "Page", required: list[str], timeout_ms: int) -> list[str]:
+def _resolve_healing_locator(page: "Page", action: Action):
+    raw = action.extra.get("element_spec") if isinstance(action.extra, dict) else None
+    if not isinstance(raw, dict) or not raw:
+        return None
+    try:
+        from applypilot.apply.healing import ElementSpec, heal
+
+        allowed = {
+            "role", "name", "label", "testid", "elem_id", "name_attr",
+            "placeholder", "aria_label", "css_class_fragment", "text",
+            "tag", "fingerprint", "css_fallbacks",
+        }
+        spec_kwargs = {k: v for k, v in raw.items() if k in allowed}
+        spec = ElementSpec(**spec_kwargs)
+        loc, _tier = heal(page, spec, timeout_ms=800)
+        if loc is not None and loc.count() > 0:
+            return loc
+    except Exception:
+        return None
+    return None
+
+
+def _missing_required(page: "Page", required: list[str], actions: list[Action] | None, timeout_ms: int) -> list[str]:
     """Return the subset of required_selectors NOT present on the page."""
     missing = []
+    by_selector = {a.selector: a for a in actions or [] if a.selector}
     for sel in required:
         try:
             if page.locator(sel).first.count() <= 0:
-                missing.append(sel)
+                action = by_selector.get(sel)
+                if action is None or _resolve_healing_locator(page, action) is None:
+                    missing.append(sel)
         except Exception:
-            missing.append(sel)
+            action = by_selector.get(sel)
+            if action is None or _resolve_healing_locator(page, action) is None:
+                missing.append(sel)
     return missing
 
 

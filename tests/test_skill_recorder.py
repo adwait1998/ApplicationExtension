@@ -82,6 +82,8 @@ def test_recorder_basic_capture_commit_yaml(tmp_path, profile, resume_path):
     # Value sources resolved to profile paths
     by_sel = {a.selector: a for a in loaded.actions}
     assert by_sel["#first_name"].value_source == "profile.personal.first_name"
+    assert by_sel["#first_name"].extra["element_spec"]["elem_id"] == "first_name"
+    assert by_sel["#first_name"].extra["element_spec"]["label"] == "first name"
     assert by_sel["#email"].value_source == "profile.personal.email"
     assert by_sel["#why_join"].value_source == "profile.responses.why_join"
     # Profile match wins over literal: fallback when the value IS in the profile.
@@ -97,6 +99,31 @@ def test_recorder_basic_capture_commit_yaml(tmp_path, profile, resume_path):
 
     # form_layout_hash is populated
     assert loaded.form_layout_hash.startswith("sha256:")
+
+
+def test_recorder_derives_first_last_from_full_name(tmp_path, resume_path):
+    out = tmp_path / "derived-name.yaml"
+    profile = {
+        "personal": {
+            "full_name": "Nida Shah",
+            "email": "nidashah1409@gmail.com",
+        }
+    }
+    r = SkillRecorder("derived", "greenhouse", "https://example.com", profile, resume_path)
+    r.observe_tool_use("browser_fill_form", {"fields": [
+        {"name": "first_name", "selector": "#first_name", "value": "Nida"},
+        {"name": "last_name", "selector": "#last_name", "value": "Shah"},
+        {"name": "email", "selector": "#email", "value": "nidashah1409@gmail.com"},
+    ]})
+    r.observe_tool_use("browser_click", {"selector": "#submit"})
+
+    skill = r.commit(out)
+
+    by_sel = {a.selector: a for a in skill.actions}
+    assert by_sel["#first_name"].value_source == "profile.personal.first_name"
+    assert by_sel["#last_name"].value_source == "profile.personal.last_name"
+    assert by_sel["#email"].value_source == "profile.personal.email"
+    assert not skill.unresolved_fields
 
 
 def test_recorder_literal_fallback_for_canonical_answers(tmp_path, resume_path):
@@ -181,6 +208,24 @@ def test_recorder_extracts_text_locator_from_element_description(tmp_path, profi
     # Promoted to submit (only/last action)
     assert skill.actions[0].kind == "submit"
     assert skill.actions[0].selector == 'text="Submit application"'
+    assert skill.actions[0].extra["element_spec"]["role"] == "button"
+    assert skill.actions[0].extra["element_spec"]["name"] == "Submit application"
+
+
+def test_recorder_cleans_mcp_narration_suffixes(tmp_path, profile, resume_path):
+    """MCP element strings often append role nouns that are not visible text."""
+    out = tmp_path / "suffixes.yaml"
+    r = SkillRecorder("buttons", "custom", "https://example.com", profile, resume_path)
+    r.observe_tool_use("browser_click", {
+        "ref": "e10",
+        "element": "Senior Product Designer, CoreUX - Weights & Biases job link",
+    })
+
+    skill = r.commit(out)
+
+    assert skill.actions[0].selector == 'text="Senior Product Designer, CoreUX - Weights & Biases"'
+    assert skill.actions[0].extra["element_spec"]["role"] == "link"
+    assert skill.actions[0].extra["element_spec"]["name"] == "Senior Product Designer, CoreUX - Weights & Biases"
 
 
 def test_recorder_extracts_name_attribute_from_fill_form(tmp_path, profile, resume_path):
@@ -199,6 +244,8 @@ def test_recorder_extracts_name_attribute_from_fill_form(tmp_path, profile, resu
     selectors = [a.selector for a in skill.actions]
     assert '[name="first_name"]' in selectors
     assert '[name="email"]' in selectors
+    by_sel = {a.selector: a for a in skill.actions}
+    assert by_sel['[name="email"]'].extra["element_spec"]["name_attr"] == "email"
     # Submit button text-locator captured
     assert any(s == 'text="Submit"' for s in selectors)
 

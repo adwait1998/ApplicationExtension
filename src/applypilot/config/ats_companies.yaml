@@ -12,14 +12,43 @@
 # substrings (case-insensitive) are stored. Tune to your target role.
 
 title_keywords:
-  - designer
-  - design
-  - "ux"
-  - "ui"
-  - user experience
-  - user research
-  - researcher
-  - product
+  - product designer
+  - product design
+  - ux designer
+  - ui designer
+  - ui/ux designer
+  - ui ux designer
+  - interaction designer
+  - experience designer
+  - visual designer
+  - design systems designer
+  - ux researcher
+  - user researcher
+
+exclude_titles:
+  - product manager
+  - program manager
+  - project manager
+  - product owner
+  - content designer
+  - ux writer
+  - content strategist
+  - design manager
+  - product design manager
+  - director
+  - head of
+  - vp
+  - vice president
+  - intern
+  - internship
+  - apprentice
+  - fellowship
+  - new grad
+  - co-op
+  - data scientist
+  - research scientist
+  - research engineer
+  - engineer
 
 greenhouse:
   - figma

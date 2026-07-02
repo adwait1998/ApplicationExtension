@@ -1019,6 +1019,107 @@ def _company_from_apply_url(apply_url: str) -> str:
     return re.sub(r"\s+", " ", raw).title() or "the company"
 
 
+def _click_segmented_button_by_label(root, label_needles: tuple[str, ...], preferred: tuple[str, ...]) -> bool:
+    """Click a Yes/No segmented button near a question label.
+
+    Ashby commonly renders work authorization questions as soft buttons rather
+    than real inputs. The LLM can click these visually but lose track of which
+    question it is answering. This helper scopes the choice to the question
+    text, then clicks the matching option and verifies an active/selected state.
+    """
+    token = f"applypilot-segment-{int(time.time() * 1000000)}"
+    try:
+        found = bool(root.evaluate(
+            """({labelNeedles, preferred, token}) => {
+              const needles = labelNeedles.map(s => s.toLowerCase()).filter(Boolean);
+              const prefs = preferred.map(s => s.toLowerCase()).filter(Boolean);
+              const norm = s => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+              const visible = el => {
+                if (!el) return false;
+                const box = el.getBoundingClientRect();
+                const style = getComputedStyle(el);
+                return box.width > 0 && box.height > 0 &&
+                  style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const optionText = el => norm([
+                el.innerText || el.textContent || '',
+                el.getAttribute('aria-label') || '',
+                el.getAttribute('value') || ''
+              ].join(' '));
+              const matchesOption = el => {
+                const text = optionText(el);
+                if (!text) return false;
+                return prefs.some(p => text === p || text.includes(p) || p.includes(text));
+              };
+              const hasQuestion = el => {
+                const text = norm(el.innerText || el.textContent);
+                return text && needles.some(n => text.includes(n));
+              };
+              const candidateContainers = [];
+              for (const el of Array.from(document.querySelectorAll('label, legend, p, div, span'))) {
+                if (!visible(el) || !hasQuestion(el)) continue;
+                let cur = el;
+                for (let i = 0; cur && i < 7; i += 1, cur = cur.parentElement) {
+                  const choices = Array.from(cur.querySelectorAll(
+                    'button, [role="button"], label, input[type="radio"], input[type="checkbox"]'
+                  )).filter(visible);
+                  const choiceText = choices.map(optionText).join(' ');
+                  if (choices.length >= 2 && prefs.some(p => choiceText.includes(p))) {
+                    candidateContainers.push(cur);
+                    break;
+                  }
+                }
+              }
+              for (const container of candidateContainers) {
+                const choices = Array.from(container.querySelectorAll(
+                  'button, [role="button"], label, input[type="radio"], input[type="checkbox"]'
+                )).filter(visible);
+                const choice = choices.find(matchesOption);
+                if (!choice) continue;
+                choice.setAttribute('data-applypilot-segmented-choice', token);
+                return true;
+              }
+              return false;
+            }""",
+            {"labelNeedles": list(label_needles), "preferred": list(preferred), "token": token},
+        ))
+        if not found:
+            return False
+        loc = root.locator(f'[data-applypilot-segmented-choice="{token}"]').first
+        loc.scroll_into_view_if_needed(timeout=1200)
+        loc.click(timeout=1600)
+        time.sleep(0.2)
+        return bool(root.evaluate(
+            """({token}) => {
+              const el = document.querySelector(`[data-applypilot-segmented-choice="${token}"]`);
+              if (!el) return false;
+              const active = node => {
+                if (!node) return false;
+                if (node.checked) return true;
+                const ariaPressed = (node.getAttribute('aria-pressed') || '').toLowerCase();
+                const ariaChecked = (node.getAttribute('aria-checked') || '').toLowerCase();
+                const dataState = (node.getAttribute('data-state') || '').toLowerCase();
+                const cls = (node.className || '').toString().toLowerCase();
+                return ariaPressed === 'true' || ariaChecked === 'true' ||
+                  ['checked', 'selected', 'active', 'on'].includes(dataState) ||
+                  /\\b(active|selected|checked)\\b/.test(cls);
+              };
+              if (active(el)) return true;
+              const input = el.matches('input') ? el : el.querySelector('input[type="radio"], input[type="checkbox"]');
+              if (active(input)) return true;
+              let cur = el.parentElement;
+              for (let i = 0; cur && i < 4; i += 1, cur = cur.parentElement) {
+                if (active(cur)) return true;
+              }
+              return false;
+            }""",
+            {"token": token},
+        ))
+    except Exception as e:
+        logger.debug("prefill: segmented button click failed: %s", e)
+        return False
+
+
 def _prefill_basic_adapter_fields(root, profile: dict, resume_pdf_path: str, result: dict) -> None:
     """Best-effort non-Greenhouse prefill for Ashby/Workday/custom forms."""
     personal = (profile or {}).get("personal", {}) or {}
@@ -1057,6 +1158,35 @@ def _prefill_basic_adapter_fields(root, profile: dict, resume_pdf_path: str, res
                 _remember(result, short)
         except Exception as e:
             logger.debug("prefill: %s adapter fill failed for %s: %s", result.get("ats"), short, e)
+
+    if result.get("ats") == "ashby":
+        work_auth = (profile or {}).get("work_authorization", {}) or {}
+        auth_value = str(work_auth.get("legally_authorized_to_work", "")).lower()
+        needs_sponsorship = str(work_auth.get("require_sponsorship", "")).lower()
+        try:
+            # "Permanently authorized ... without sponsorship?" means No when
+            # the profile requires sponsorship, even if legally authorized.
+            permanent_without_sponsorship = (
+                "yes" if ("yes" in auth_value or "true" in auth_value)
+                and not ("yes" in needs_sponsorship or "true" in needs_sponsorship)
+                else "no"
+            )
+            if _click_segmented_button_by_label(
+                root,
+                ("permanently authorized", "without visa sponsorship", "without sponsorship"),
+                (permanent_without_sponsorship,),
+            ):
+                _remember(result, "ashby_work_authorization")
+            if needs_sponsorship:
+                sponsorship_value = "yes" if "yes" in needs_sponsorship or "true" in needs_sponsorship else "no"
+                if _click_segmented_button_by_label(
+                    root,
+                    ("require sponsorship", "will you require sponsorship", "authorization to work"),
+                    (sponsorship_value,),
+                ):
+                    _remember(result, "ashby_sponsorship")
+        except Exception as e:
+            logger.debug("prefill: ashby segmented work auth failed: %s", e)
 
     # Resume upload (best effort): works for Ashby and many Workday/custom forms.
     try:
@@ -1102,6 +1232,7 @@ def prefill_application(
         "fields_filled": [],
         "error": None,
         "duration_ms": 0,
+        "resolved_url": apply_url,
     }
 
     ats = _detect_ats(apply_url)
@@ -1115,6 +1246,7 @@ def prefill_application(
     # form behind iframes/buttons and cause _find_form_root timeouts.
     if ats == "greenhouse":
         apply_url = _canonicalize_greenhouse_url(apply_url)
+        result["resolved_url"] = apply_url
 
     if ats in {"ashby", "workday"}:
         pw = None

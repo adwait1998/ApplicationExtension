@@ -1,0 +1,130 @@
+# Candidate company slugs to probe for Greenhouse/Lever/Ashby boards.
+# These are NOT crawled directly and are NOT trusted. discover-ats validates
+# each slug through the public ATS JSON APIs and saves only boards with
+# matching Product/UX roles.
+
+generic:
+  - adobe
+  - airtable
+  - algolia
+  - amplitude
+  - anduril
+  - anysphere
+  - benchling
+  - box
+  - canva
+  - character
+  - clearbit
+  - coursera
+  - datadog
+  - deel
+  - descript
+  - doordash
+  - elevenlabs
+  - envoy
+  - expensify
+  - fivetran
+  - glean
+  - grammarly
+  - gusto
+  - headway
+  - hinge-health
+  - huggingface
+  - loom
+  - lyft
+  - mercury
+  - miro
+  - mixpanel
+  - navan
+  - nextdoor
+  - okta
+  - opendoor
+  - patreon
+  - rippling
+  - scaleai
+  - segment
+  - sentry
+  - slack
+  - snap
+  - sourcegraph
+  - squarespace
+  - supabase
+  - thumbtack
+  - tinder
+  - typeform
+  - vanta
+  - zapier
+
+greenhouse:
+  - 1password
+  - 2k
+  - afterpay
+  - alltrails
+  - appfolio
+  - appian
+  - bimodal
+  - chainlink-labs
+  - circle
+  - coursera
+  - docker
+  - eventbrite
+  - gemini
+  - grammarly
+  - hingehealth
+  - hubspot
+  - lyft
+  - niantic
+  - nianticlabs
+  - okta
+  - patreon
+  - qualtrics
+  - reddit
+  - samsara
+  - sentry
+  - servicenow
+  - slack
+  - snap
+  - tinder
+  - vanta
+  - yelp
+  - zapier
+
+lever:
+  - anduril
+  - benchling
+  - canva
+  - coursera
+  - docker
+  - figma
+  - navan
+  - niantic
+  - reddit
+  - scaleai
+  - segment
+  - sourcegraph
+  - vanta
+  - zapier
+
+ashby:
+  - anyscale
+  - anysphere
+  - cartesia
+  - deepgram
+  - descript
+  - elevenlabs
+  - glean
+  - headway
+  - langchain
+  - medal
+  - mercury
+  - n8n
+  - notion
+  - poolside
+  - replicate
+  - serval
+  - supabase
+  - tessera-labs
+  - together
+  - vanta
+  - windsor
+  - windsurf

@@ -168,27 +168,33 @@ def build_html(resume: dict) -> str:
             rows += f'<div class="skill-row"><span class="skill-cat">{cat}:</span> {val}</div>\n'
         skills_html = f'<div class="section"><div class="section-title">Technical Skills</div>{rows}</div>'
 
+    def render_entry(e: dict) -> str:
+        bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
+        subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
+        return f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
+
+    def render_entries_section(title: str, entries: list[dict], class_name: str) -> str:
+        if not entries:
+            return ""
+        first = render_entry(entries[0])
+        rest = "".join(render_entry(e) for e in entries[1:])
+        # Keep the section heading with its first entry so headings do not sit
+        # alone at the bottom of a PDF page.
+        return (
+            f'<div class="section {class_name}">'
+            f'<div class="section-lead"><div class="section-title">{title}</div>{first}</div>'
+            f"{rest}</div>"
+        )
+
     # Experience
     exp_html = ""
     if "EXPERIENCE" in sections:
-        entries = parse_entries(sections["EXPERIENCE"])
-        items = ""
-        for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
-            subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
-            items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
-        exp_html = f'<div class="section"><div class="section-title">Experience</div>{items}</div>'
+        exp_html = render_entries_section("Experience", parse_entries(sections["EXPERIENCE"]), "experience")
 
     # Projects
     proj_html = ""
     if "PROJECTS" in sections:
-        entries = parse_entries(sections["PROJECTS"])
-        items = ""
-        for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
-            subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
-            items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
-        proj_html = f'<div class="section"><div class="section-title">Projects</div>{items}</div>'
+        proj_html = render_entries_section("Projects", parse_entries(sections["PROJECTS"]), "projects")
 
     # Education
     edu_html = ""
@@ -254,6 +260,7 @@ body {{
     font-size: 9pt;
     color: #444;
     margin-top: 1px;
+    overflow-wrap: anywhere;
 }}
 .contact a {{
     color: #2c3e50;
@@ -271,6 +278,8 @@ body {{
     border-bottom: 1.5px solid #2a7ab5;
     padding-bottom: 1px;
     margin-bottom: 3px;
+    break-after: avoid;
+    page-break-after: avoid;
 }}
 .summary {{
     font-size: 9.5pt;
@@ -289,6 +298,11 @@ body {{
 .entry {{
     margin-bottom: 4px;
     break-inside: avoid;
+    page-break-inside: avoid;
+}}
+.section-lead {{
+    break-inside: avoid;
+    page-break-inside: avoid;
 }}
 .entry-title {{
     font-weight: 600;
