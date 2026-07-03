@@ -26,7 +26,12 @@ def _conn():
             apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0,
             apply_error TEXT,
-            discovered_at TEXT
+            discovered_at TEXT,
+            -- Task 12: ready_to_apply (via _count_applyable_jobs) and the
+            -- "pending_apply" stage both route through queue_policy(), which
+            -- requires gate_result='eligible' AND automatability='auto'. Seed
+            -- rows are gated-eligible so the automatable-URL intent is tested.
+            gate_result TEXT, automatability TEXT, gated_at TEXT
         )
     """)
     rows = [
@@ -36,8 +41,8 @@ def _conn():
     ]
     for url, title, site, app, score in rows:
         conn.execute(
-            "INSERT INTO jobs(url,title,site,application_url,full_description,detail_scraped_at,fit_score,apply_status,apply_attempts)"
-            " VALUES (?,?,?,?, 'desc', 'now', ?, NULL, 0)",
+            "INSERT INTO jobs(url,title,site,application_url,full_description,detail_scraped_at,fit_score,apply_status,apply_attempts,gate_result,automatability,gated_at)"
+            " VALUES (?,?,?,?, 'desc', 'now', ?, NULL, 0, 'eligible', 'auto', 't')",
             (url, title, site, app, score),
         )
     conn.commit()

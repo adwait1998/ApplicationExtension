@@ -460,17 +460,48 @@ def _effective_apply_url(row: dict) -> str | None:
     return _valid_http_url(row.get("application_url")) or _valid_http_url(row.get("url"))
 
 
+def queue_policy(*, min_score: int = 8, max_age_hours: int | None = None,
+                 include_attempt_cap: bool = True) -> tuple[str, list]:
+    """The single SQL predicate for 'may this job be applied to'. Returns a
+    WHERE-fragment + ordered params for callers to embed in their own SELECT.
+    v2 rule: only gated-eligible + auto-automatable rows are ever queue-visible.
+
+    NOTE: Python-level filters (config.is_manual_ats on resolved URLs, live
+    location re-check) stay in the callers — this covers the SQL-expressible
+    predicate only. Param order is documented and load-bearing: min_score,
+    [max_apply_attempts], [age cutoff]."""
+    from applypilot import config
+    parts = [
+        "fit_score >= ?",
+        "applied_at IS NULL",
+        "(apply_status IS NULL OR apply_status = 'failed')",
+        "gate_result = 'eligible'",
+        "automatability = 'auto'",
+    ]
+    params: list = [min_score]
+    if include_attempt_cap:
+        parts.append("(apply_attempts IS NULL OR apply_attempts < ?)")
+        params.append(int(config.DEFAULTS["max_apply_attempts"]))
+    if max_age_hours and max_age_hours > 0:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+        parts.append("discovered_at IS NOT NULL AND discovered_at >= ?")
+        params.append(cutoff)
+    return " AND ".join(parts), params
+
+
 def _count_applyable_jobs(conn: sqlite3.Connection, min_score: int = 7) -> int:
-    """Count jobs the apply runner can actually open automatically."""
+    """Count jobs the apply runner can actually open automatically.
+
+    Routed through queue_policy() (Task 12) so the count reflects the SAME
+    gated-eligible + auto + attempt-cap predicate the launcher acquires by;
+    the Python is_manual_ats pass then removes rows whose resolved URL is a
+    manual ATS (that filter is not SQL-expressible)."""
     from applypilot import config
 
+    frag, params = queue_policy(min_score=min_score)
     rows = conn.execute(
-        "SELECT url, application_url FROM jobs "
-        "WHERE fit_score >= ? "
-        "AND applied_at IS NULL "
-        "AND (apply_status IS NULL OR apply_status = 'failed') "
-        "AND (apply_attempts IS NULL OR apply_attempts < ?)",
-        (min_score, config.DEFAULTS["max_apply_attempts"]),
+        f"SELECT url, application_url FROM jobs WHERE {frag}", params
     ).fetchall()
     ready = 0
     for row in rows:
@@ -588,41 +619,46 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
     if conn is None:
         conn = get_connection()
 
-    conditions = {
-        "discovered": "1=1",
-        "pending_detail": "detail_scraped_at IS NULL",
-        "enriched": "full_description IS NOT NULL",
-        # Ungated OR gated before enrichment finished (thin->full description):
-        # the gate stage re-gates so sponsorship/location verdicts use the full text.
-        "pending_gate": (
-            "(gated_at IS NULL "
-            "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at))"
-        ),
-        "pending_score": (
-            "full_description IS NOT NULL AND fit_score IS NULL "
-            "AND gated_at IS NOT NULL AND gate_result = 'eligible' "
-            "AND (detail_scraped_at IS NULL OR gated_at >= detail_scraped_at)"
-        ),
-        "scored": "fit_score IS NOT NULL",
-        "pending_tailor": (
-            "fit_score >= ? AND full_description IS NOT NULL "
-            "AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5"
-        ),
-        "tailored": "tailored_resume_path IS NOT NULL",
-        "pending_apply": (
-            "fit_score >= ? AND applied_at IS NULL "
-            "AND (apply_status IS NULL OR apply_status = 'failed')"
-        ),
-        "applied": "applied_at IS NOT NULL",
-    }
+    # "pending_apply" is a queue-visibility (may-apply) stage — route it
+    # through the single queue_policy() predicate (Task 12) so it enforces the
+    # SAME gated-eligible + auto + attempt-cap rule as acquire_job, instead of
+    # the old fit_score-only WHERE that overstated the queue. queue_policy
+    # returns its own ordered params, so pending_apply skips the generic
+    # min_score/`?` handling below and injects them directly.
+    if stage == "pending_apply":
+        where, params = queue_policy(min_score=min_score if min_score is not None else 7)
+    else:
+        conditions = {
+            "discovered": "1=1",
+            "pending_detail": "detail_scraped_at IS NULL",
+            "enriched": "full_description IS NOT NULL",
+            # Ungated OR gated before enrichment finished (thin->full description):
+            # the gate stage re-gates so sponsorship/location verdicts use the full text.
+            "pending_gate": (
+                "(gated_at IS NULL "
+                "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at))"
+            ),
+            "pending_score": (
+                "full_description IS NOT NULL AND fit_score IS NULL "
+                "AND gated_at IS NOT NULL AND gate_result = 'eligible' "
+                "AND (detail_scraped_at IS NULL OR gated_at >= detail_scraped_at)"
+            ),
+            "scored": "fit_score IS NOT NULL",
+            "pending_tailor": (
+                "fit_score >= ? AND full_description IS NOT NULL "
+                "AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5"
+            ),
+            "tailored": "tailored_resume_path IS NOT NULL",
+            "applied": "applied_at IS NOT NULL",
+        }
 
-    where = conditions.get(stage, "1=1")
-    params: list = []
+        where = conditions.get(stage, "1=1")
+        params = []
 
-    if "?" in where and min_score is not None:
-        params.append(min_score)
-    elif "?" in where:
-        params.append(7)  # default min_score
+        if "?" in where and min_score is not None:
+            params.append(min_score)
+        elif "?" in where:
+            params.append(7)  # default min_score
 
     if min_score is not None and "fit_score" not in where and stage in ("scored", "tailored", "applied"):
         where += " AND fit_score >= ?"

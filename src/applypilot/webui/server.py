@@ -223,13 +223,17 @@ def create_app(db_path: Path | None = None, app_dir: Path | None = None) -> Fast
                     "SELECT fit_score, COUNT(*) FROM jobs WHERE fit_score >= 7 GROUP BY 1"
                 ).fetchall()
             )
+            # Route the "eligible" count through the single queue_policy()
+            # predicate (Task 12) so the dashboard number no longer OVERSTATES
+            # what acquire_job actually picks: previously fit_score>=8 only, with
+            # no gate/automatability/attempt-cap. application_url IS NOT NULL is
+            # a webui-only extra (the summary reads only rows with a resolved URL).
+            from applypilot.database import queue_policy
+            _frag, _params = queue_policy(min_score=8)
             eligible = conn.execute(
-                """
-                SELECT discovered_at FROM jobs
-                WHERE fit_score >= 8 AND application_url IS NOT NULL
-                  AND (apply_status IS NULL OR apply_status='failed')
-                  AND applied_at IS NULL
-                """
+                f"SELECT discovered_at FROM jobs "
+                f"WHERE {_frag} AND application_url IS NOT NULL",
+                _params,
             ).fetchall()
             freshness = Counter(_age_bucket(r[0], now) for r in eligible)
             applied_total = by_status.get("applied", 0)
@@ -289,20 +293,26 @@ def create_app(db_path: Path | None = None, app_dir: Path | None = None) -> Fast
     @app.get("/api/jobs")
     def jobs(view: str = "eligible", q: str = "", limit: int = 200) -> JSONResponse:
         limit = max(1, min(limit, 1000))
-        where = {
-            "eligible": (
-                "fit_score >= 8 AND application_url IS NOT NULL "
-                "AND (apply_status IS NULL OR apply_status='failed') AND applied_at IS NULL"
-            ),
-            "needs_review": "apply_status = 'needs_review'",
-            "applied": "apply_status = 'applied'",
-            "failed": "apply_status IN ('failed','expired')",
-            "all": "1=1",
-        }.get(view)
-        if where is None:
+        # "eligible" is the queue-visible view — route it through the single
+        # queue_policy() predicate (Task 12) so the UI shows exactly the
+        # gated-eligible + auto + attempt-cap rows acquire_job would pick, not
+        # the old fit_score>=8-only set that overstated the queue. Its params
+        # must lead `params` (they sit where {where} is in the SELECT).
+        from applypilot.database import queue_policy
+        _elig_frag, _elig_params = queue_policy(min_score=8)
+        where_specs: dict[str, tuple[str, list]] = {
+            "eligible": (f"{_elig_frag} AND application_url IS NOT NULL", _elig_params),
+            "needs_review": ("apply_status = 'needs_review'", []),
+            "applied": ("apply_status = 'applied'", []),
+            "failed": ("apply_status IN ('failed','expired')", []),
+            "all": ("1=1", []),
+        }
+        spec = where_specs.get(view)
+        if spec is None:
             raise HTTPException(400, "invalid view")
+        where, where_params = spec
         sql = f"SELECT {_JOB_COLS} FROM jobs WHERE {where}"
-        params: list = []
+        params: list = list(where_params)
         if q:
             sql += " AND (title LIKE ? OR site LIKE ? OR location LIKE ?)"
             like = f"%{q}%"

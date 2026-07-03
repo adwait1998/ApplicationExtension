@@ -529,19 +529,21 @@ def apply(
         raise typer.Exit(code=1)
 
     # Check 3: At least one scored job that hasn't been applied to (uses
-    # tailored resume if available, master resume.pdf as fallback)
+    # tailored resume if available, master resume.pdf as fallback).
+    # Route through the single queue_policy() predicate (Task 12) so this
+    # preflight counts the SAME gated-eligible + auto + attempt-cap rows the
+    # apply worker would pick, not the old fit_score-only set that overstated
+    # readiness. site_contains is a CLI-only extra queue_policy doesn't own.
     if not (gen and url):
+        from applypilot.database import queue_policy
         conn = get_connection()
+        _frag, ready_params = queue_policy(min_score=min_score)
         site_filter = ""
-        ready_params: list[object] = [min_score]
         if site_contains and not url:
             site_filter = "AND LOWER(site) LIKE ?"
             ready_params.append(f"%{site_contains.lower()}%")
         ready = conn.execute(
-            "SELECT COUNT(*) FROM jobs "
-            "WHERE fit_score >= ? AND applied_at IS NULL "
-            "AND (apply_status IS NULL OR apply_status = 'failed') "
-            f"{site_filter}",
+            f"SELECT COUNT(*) FROM jobs WHERE {_frag} {site_filter}",
             ready_params,
         ).fetchone()[0]
         if ready == 0:

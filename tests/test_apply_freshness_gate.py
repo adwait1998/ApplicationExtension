@@ -24,7 +24,11 @@ def _conn_with_jobs():
             tailored_resume_path TEXT, fit_score INTEGER, location TEXT,
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
-            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT
+            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
+            -- Task 12: acquire_job now filters through queue_policy(), which
+            -- requires gate_result='eligible' AND automatability='auto'. Rows
+            -- are seeded gated-eligible so the freshness/dedup intent is tested.
+            gate_result TEXT, automatability TEXT, gated_at TEXT
         )
     """)
     now = datetime.now(timezone.utc)
@@ -36,8 +40,8 @@ def _conn_with_jobs():
     ]
     for url, title, site, app, score, loc, fd, disc in rows:
         conn.execute(
-            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts)"
-            " VALUES (?,?,?,?,?,?,?,?,NULL,0)",
+            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts,gate_result,automatability,gated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,NULL,0,'eligible','auto','t')",
             (url, title, site, app, score, loc, fd, disc),
         )
     conn.commit()
@@ -104,7 +108,8 @@ def _conn_with_hybrid_queue():
             tailored_resume_path TEXT, fit_score INTEGER, location TEXT,
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
-            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT
+            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
+            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
         )
     """)
     now = datetime.now(timezone.utc)
@@ -117,8 +122,8 @@ def _conn_with_hybrid_queue():
     ]
     for url, title, site, app, score, disc in rows:
         conn.execute(
-            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts)"
-            " VALUES (?,?,?,?,?,'Remote','d',?,NULL,0)",
+            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts,gate_result,automatability,gated_at)"
+            " VALUES (?,?,?,?,?,'Remote','d',?,NULL,0,'eligible','auto','t')",
             (url, title, site, app, score, disc.isoformat()),
         )
     conn.commit()
@@ -202,7 +207,8 @@ def _conn_with_string_null_apply_urls():
             tailored_resume_path TEXT, fit_score INTEGER, location TEXT,
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, apply_error TEXT, agent_id TEXT,
-            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT
+            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
+            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
         )
     """)
     disc = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -224,8 +230,8 @@ def _conn_with_string_null_apply_urls():
     ]
     for url, title, site, app, score in rows:
         conn.execute(
-            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts)"
-            " VALUES (?,?,?,?,?,'Remote','d',?,NULL,0)",
+            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts,gate_result,automatability,gated_at)"
+            " VALUES (?,?,?,?,?,'Remote','d',?,NULL,0,'eligible','auto','t')",
             (url, title, site, app, score, disc),
         )
     conn.commit()
@@ -275,7 +281,8 @@ def _conn_with_dupes():
             tailored_resume_path TEXT, fit_score INTEGER, location TEXT,
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
-            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT
+            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
+            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
         )
     """)
     now = datetime.now(timezone.utc)
@@ -293,8 +300,8 @@ def _conn_with_dupes():
     ]
     for url, title, site, app, score, disc in rows:
         conn.execute(
-            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts)"
-            " VALUES (?,?,?,?,?,'Remote','d',?,NULL,0)",
+            "INSERT INTO jobs(url,title,site,application_url,fit_score,location,full_description,discovered_at,apply_status,apply_attempts,gate_result,automatability,gated_at)"
+            " VALUES (?,?,?,?,?,'Remote','d',?,NULL,0,'eligible','auto','t')",
             (url, title, site, app, score, disc),
         )
     conn.commit()
@@ -339,23 +346,25 @@ def test_dedup_durable_even_when_first_twin_failed(monkeypatch):
             tailored_resume_path TEXT, fit_score INTEGER, location TEXT,
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
-            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT
+            last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
+            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
         )
     """)
     disc = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
     # Twin A already attempted and ended needs_review. Twin B (different url,
     # same site+title) is still untried. Plus a distinct role as a control.
+    # Trailing 'eligible','auto','t' = gate cols (Task 12); positional VALUES.
     conn.execute("INSERT INTO jobs VALUES "
         "('https://www.brex.com/careers/1?gh_jid=1','Staff Product Designer','brex (greenhouse)',"
-        "'https://www.brex.com/careers/1?gh_jid=1',NULL,8,'Remote','d',NULL,'needs_review',1,NULL,?,NULL,?)",
+        "'https://www.brex.com/careers/1?gh_jid=1',NULL,8,'Remote','d',NULL,'needs_review',1,NULL,?,NULL,?,'eligible','auto','t')",
         (None, disc))
     conn.execute("INSERT INTO jobs VALUES "
         "('https://www.brex.com/careers/2?gh_jid=2','Staff Product Designer','brex (greenhouse)',"
-        "'https://www.brex.com/careers/2?gh_jid=2',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?)",
+        "'https://www.brex.com/careers/2?gh_jid=2',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?,'eligible','auto','t')",
         (None, disc))
     conn.execute("INSERT INTO jobs VALUES "
         "('https://boards.greenhouse.io/brex/jobs/9','Senior Designer, Brand','brex (greenhouse)',"
-        "'https://boards.greenhouse.io/brex/jobs/9',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?)",
+        "'https://boards.greenhouse.io/brex/jobs/9',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?,'eligible','auto','t')",
         (None, disc))
     conn.commit()
     monkeypatch.setattr(launcher, "get_connection", lambda: conn)

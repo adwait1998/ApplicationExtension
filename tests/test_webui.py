@@ -28,7 +28,11 @@ _SCHEMA_COLS = (
     "url TEXT PRIMARY KEY, title TEXT, site TEXT, location TEXT, fit_score INTEGER, "
     "apply_status TEXT, apply_error TEXT, last_failure_class TEXT, discovered_at TEXT, "
     "applied_at TEXT, application_url TEXT, verification_confidence REAL, "
-    "apply_attempts INTEGER, skill_used TEXT, score_reasoning TEXT"
+    "apply_attempts INTEGER, skill_used TEXT, score_reasoning TEXT, "
+    # Task 12: the "eligible" view/count now flows through queue_policy(), which
+    # requires gate_result='eligible' AND automatability='auto'. Fixture rows
+    # are gated-eligible+auto so they reflect a real queue-visible row.
+    "gate_result TEXT, automatability TEXT, gated_at TEXT"
 )
 
 
@@ -51,7 +55,9 @@ def client(tmp_path):
     ]
     conn.executemany(
         "INSERT INTO jobs (url,title,site,location,fit_score,apply_status,apply_error,"
-        "last_failure_class,discovered_at,applied_at,application_url) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "last_failure_class,discovered_at,applied_at,application_url,"
+        "gate_result,automatability,gated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,'eligible','auto','2026-06-01T00:00:00')",
         jobs,
     )
     conn.commit()

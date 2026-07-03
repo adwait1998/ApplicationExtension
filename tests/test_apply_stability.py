@@ -35,18 +35,25 @@ def _make_jobs_conn():
             submit_attempt_count INTEGER DEFAULT 0,
             checkpoint_json TEXT,
             last_failure_class TEXT,
-            discovered_at TEXT
+            discovered_at TEXT,
+            -- Task 12: queue_policy() (used by acquire_job) requires
+            -- gate_result='eligible' AND automatability='auto', so the fixture
+            -- schema + seed row must carry a gated-eligible verdict.
+            gate_result TEXT,
+            automatability TEXT,
+            gated_at TEXT
         )
     """)
     conn.execute("""
         INSERT INTO jobs (
             url, title, site, application_url, tailored_resume_path,
             fit_score, location, full_description, cover_letter_path,
-            apply_status, apply_attempts
+            apply_status, apply_attempts, gate_result, automatability, gated_at
         ) VALUES (
             'https://example.com/job', 'Designer', 'greenhouse',
             'https://boards.greenhouse.io/example/jobs/1',
-            NULL, 9, 'Remote', 'Role description', NULL, NULL, 0
+            NULL, 9, 'Remote', 'Role description', NULL, NULL, 0,
+            'eligible', 'auto', '2026-06-01T00:00:00'
         )
     """)
     conn.commit()

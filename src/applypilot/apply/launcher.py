@@ -1520,13 +1520,16 @@ def _fetch_apply_candidates(
     limit: int = 50,
 ) -> list:
     """Fetch apply-eligible candidates in deterministic queue order."""
+    from applypilot.database import queue_policy
+
     blocked_sites, blocked_patterns = _load_blocked()
-    params: list = [min_score]
-    age_clause = ""
-    if max_age_hours and max_age_hours > 0:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
-        age_clause = "AND discovered_at IS NOT NULL AND discovered_at >= ?"
-        params.append(cutoff)
+    # Base eligibility (fit_score / apply_status / applied_at / attempt cap /
+    # freshness / gate) comes from the single queue_policy() predicate (Task
+    # 12) so the launcher can never select an ineligible/ungated/non-auto row.
+    # The dedup / per-site lock / windowing / blocked clauses below are NOT
+    # owned by queue_policy and stay inline. Param order: policy params first
+    # (min_score, [max_apply_attempts], [age cutoff]), then blocked/site_contains.
+    policy_frag, params = queue_policy(min_score=min_score, max_age_hours=max_age_hours)
     site_clause = ""
     if blocked_sites:
         placeholders = ",".join("?" * len(blocked_sites))
@@ -1571,10 +1574,7 @@ def _fetch_apply_candidates(
                              discovered_at DESC
                        ) AS dup_rn
                 FROM jobs
-                WHERE (apply_status IS NULL OR apply_status = 'failed')
-                  AND (apply_attempts IS NULL OR apply_attempts < ?)
-                  AND fit_score >= ?
-                  {age_clause}
+                WHERE {policy_frag}
                   AND site NOT IN (SELECT site FROM jobs WHERE apply_status = 'in_progress')
                   AND NOT EXISTS (
                       SELECT 1 FROM jobs d
@@ -1592,7 +1592,7 @@ def _fetch_apply_candidates(
         )
         ORDER BY fit_score DESC, site_idx ASC, discovered_at DESC, RANDOM()
         LIMIT ?
-    """, [config.DEFAULTS["max_apply_attempts"]] + params + [limit]).fetchall()
+    """, params + [limit]).fetchall()
 
 
 def _first_applyable_from_rows(rows, *, mutate_manual: bool, use_run_seen: bool):
@@ -1775,15 +1775,17 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                 LIMIT 10
             """, (target_url, target_url, like, like)).fetchall()
         else:
+            from applypilot.database import queue_policy
+
             blocked_sites, blocked_patterns = _load_blocked()
-            params: list = [min_score]
-            # Non-destructive freshness gate. Param order must stay:
-            # fit_score>=? then discovered_at>=? (matches WHERE clause order).
-            age_clause = ""
-            if max_age_hours and max_age_hours > 0:
-                cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
-                age_clause = "AND discovered_at IS NOT NULL AND discovered_at >= ?"
-                params.append(cutoff)
+            # Base eligibility (fit_score / apply_status / applied_at / attempt
+            # cap / freshness / gate) comes from the single queue_policy()
+            # predicate (Task 12) — the launcher can never acquire an
+            # ineligible/ungated/non-auto row. queue_policy owns the
+            # non-destructive freshness gate too; its param order is
+            # (min_score, [max_apply_attempts], [age cutoff]), and the
+            # blocked/site_contains params below append after it.
+            policy_frag, params = queue_policy(min_score=min_score, max_age_hours=max_age_hours)
             site_clause = ""
             if blocked_sites:
                 placeholders = ",".join("?" * len(blocked_sites))
@@ -1848,10 +1850,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                                      discovered_at DESC
                                ) AS dup_rn
                         FROM jobs
-                        WHERE (apply_status IS NULL OR apply_status = 'failed')
-                          AND (apply_attempts IS NULL OR apply_attempts < ?)
-                          AND fit_score >= ?
-                          {age_clause}
+                        WHERE {policy_frag}
                           AND site NOT IN (SELECT site FROM jobs WHERE apply_status = 'in_progress')
                           -- Durable de-dup: one application per (company,
                           -- title). If ANY OTHER listing (different url) of
@@ -1879,7 +1878,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                 )
                 ORDER BY fit_score DESC, site_idx ASC, discovered_at DESC, RANDOM()
                 LIMIT 50
-            """, [config.DEFAULTS["max_apply_attempts"]] + params).fetchall()
+            """, params).fetchall()
 
         # Walk the batch score-tier by score-tier: prefer an unseen site within
         # the tier, then fall back to a seen site before dropping to a lower
