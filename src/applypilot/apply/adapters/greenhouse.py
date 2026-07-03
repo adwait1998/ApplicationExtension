@@ -512,10 +512,35 @@ def fill_greenhouse(page: "Page", profile: dict, resume_pdf_path: str, *,
     # subprocess. Resolved questions are filled and dropped from
     # `unresolved`; the adapter never blind-guesses (cache decides).
     if answer_cache is not None and res.unresolved:
+        from applypilot.apply.canary import is_canary, resolve_canary
         ctx = _answer_context(profile)
         still: list[dict] = []
         for u in res.unresolved:
             lab = u["label"]
+            # Canary-first: work-auth / sponsorship / citizenship / EEO / etc.
+            # are answered ONLY by the deterministic resolver — never fuzzy-
+            # served or LLM-guessed. An unresolvable canary MUST stay in
+            # `unresolved` so the submit="auto" interlock blocks a live submit
+            # with a guessed legal attestation.
+            if is_canary(lab):
+                det = resolve_canary(lab, profile)
+                if det:
+                    loc = None
+                    for tag in ("textarea", "input"):
+                        loc, _, _ = _heal_any(page, [lab], None, tag, "", timeout_ms=900)
+                        if loc is not None:
+                            break
+                    if loc is not None:
+                        try:
+                            loc.fill(det, timeout=interaction_ms)
+                            res.fields_filled.append(f"canary:{lab[:24]}")
+                        except Exception:
+                            still.append(u)
+                    else:
+                        still.append(u)
+                else:
+                    still.append(u)  # unresolvable canary stays UNRESOLVED
+                continue
             loc = None
             for tag in ("textarea", "input"):
                 loc, _, _ = _heal_any(page, [lab], None, tag, "", timeout_ms=900)

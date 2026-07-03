@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from applypilot.apply.canary import is_canary, resolve_canary
+
 _DIM = 256
 _STOP = {
     "the", "a", "an", "to", "of", "for", "in", "on", "at", "is", "are", "do",
@@ -129,6 +131,10 @@ class AnswerCache:
                         self._entries.append({"q": e["q"], "a": e["a"], "source": "cache"})
             except Exception:
                 pass
+        # Scrub any canary entries (seed or persisted) BEFORE embeddings are
+        # built: a canary answer must only ever come from resolve_canary, never
+        # a fuzzy bank hit — this de-poisons a bank written by an older build.
+        self._entries = [e for e in self._entries if not is_canary(e.get("q", ""))]
         for e in self._entries:
             e["_vec"] = embed(e["q"])
             e["_mk"] = _markers(e["q"])
@@ -145,7 +151,10 @@ class AnswerCache:
             # Intent-key channel: same canonical marker set + minimal lexical
             # agreement → strong hit even when filler words differ
             # ("eligible to work in the US" ≈ "legally authorized to work").
-            if qmk and e.get("_mk") == qmk and s >= 0.30 and s > mk_best_s:
+            # `not is_canary(q)`: belt-and-suspenders — the force-hit must NEVER
+            # fire for a canary (already blocked at answer()'s top guard, but
+            # _nearest could be called directly).
+            if not is_canary(q) and qmk and e.get("_mk") == qmk and s >= 0.30 and s > mk_best_s:
                 mk_best, mk_best_s = e, s
         if mk_best is not None:
             # Report a confident similarity so it clears the threshold gate.
@@ -172,6 +181,13 @@ class AnswerCache:
                llm_fn: Callable[[str, str], str] | None = None) -> AnswerResult:
         """Return an answer for `question`. Cache/seed hit → 0 LLM. Miss →
         one llm_fn call, then persisted so the next ask is a hit."""
+        if is_canary(question):
+            det = resolve_canary(question, self.profile)
+            # canary: deterministic profile answer only — never cache, never
+            # persist, never LLM. None -> "" so the caller keeps it UNRESOLVED.
+            return AnswerResult(det if det is not None else "",
+                                "profile" if det else "unresolved",
+                                1.0 if det else 0.0, False, None)
         entry, sim = self._nearest(question)
         if entry is not None and sim >= self.threshold:
             return AnswerResult(entry["a"], entry.get("source", "cache"),

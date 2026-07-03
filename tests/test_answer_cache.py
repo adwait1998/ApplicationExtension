@@ -37,8 +37,10 @@ def test_seeded_question_zero_llm():
     c = AnswerCache(PROFILE)
     r = c.answer("Are you legally authorized to work in the US?", llm_fn=llm)
     assert r.llm_called is False
-    assert r.source == "seed"
-    assert r.answer == "Yes"
+    # canary supersedes the seed path: work-auth is a canary now → served by
+    # the deterministic resolver (source "profile"), never fuzzy-seeded.
+    assert r.source == "profile"
+    assert r.answer == "Yes"  # profile legally_authorized_to_work=True
     assert llm.calls == []
 
 
