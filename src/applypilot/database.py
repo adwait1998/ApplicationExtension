@@ -159,6 +159,27 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             patch_duration_ms     INTEGER
         )
     """)
+
+    # Durable two-phase submission ledger (Phase 1 Task 10A). SECOND table:
+    # ensure_columns/_ALL_COLUMNS only migrate the jobs table, so this must be
+    # created here. init_db runs CREATE TABLE IF NOT EXISTS and is called on
+    # every apply invocation (cli._bootstrap -> init_db), so live DBs get it.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS submission_ledger (
+            identity_id  TEXT NOT NULL,
+            state        TEXT NOT NULL,          -- 'intent' | 'confirmed' | 'failed'
+            worker_id    INTEGER,
+            reason       TEXT,
+            confidence   REAL,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL,
+            PRIMARY KEY (identity_id, created_at)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sub_ledger_identity "
+        "ON submission_ledger(identity_id, state)"
+    )
     conn.commit()
 
     # Run migrations for any columns added after initial schema

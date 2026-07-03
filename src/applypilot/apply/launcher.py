@@ -29,6 +29,8 @@ from rich.live import Live
 
 from applypilot import config
 from applypilot.database import get_connection
+from applypilot.identity import parse_ats_url
+from applypilot.submission_ledger import SubmissionLedger
 from applypilot.apply import prompt as prompt_mod
 from applypilot.apply.browser_stream import (
     BrowserObservation,
@@ -1349,6 +1351,27 @@ def _verify_submission_success(cdp_port: int, verify_threshold: float = 0.75,
                 pass
 
 
+def _resolve_ledger_intent(ledger, identity_id, verification, job_meta) -> None:
+    """Transition an open INTENT to CONFIRMED (verified) or FAILED (unverified).
+
+    Called at every post-submit verify site. Idempotent by ledger design: the
+    UPDATE only touches rows still in state='intent', so a second call is a
+    no-op. No-op when there's no ledger/identity (legacy/test callers). Any
+    submit path that returns WITHOUT reaching a verify site leaves the INTENT
+    open on purpose — a dangling INTENT that the next run blocks on rather than
+    blindly re-applying (the double-submit guard)."""
+    if ledger is None or not identity_id:
+        return
+    try:
+        if verification.get("verified"):
+            ledger.confirm(identity_id, confidence=float(verification.get("confidence") or 0.0))
+        else:
+            reason = (job_meta.get("failure_class") if isinstance(job_meta, dict) else None) or "unverified"
+            ledger.fail(identity_id, reason=reason)
+    except Exception as e:  # never let ledger bookkeeping break the apply path
+        logger.warning("submission ledger resolve failed (intent left open): %s", e)
+
+
 def _extract_result_code(output: str) -> str | None:
     """Return the final anchored RESULT code, avoiding quoted/instructional mentions."""
     for line in reversed(output.splitlines()):
@@ -2316,6 +2339,38 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         )
         job_meta["checkpoint_stage"] = CHECKPOINT_SUBMIT_ATTEMPTED
         return "needs_review:possible_duplicate_guard", int((time.time() - run_started) * 1000), None
+
+    # SUBMIT-CRITICAL: Phase 3 watchdog must grant +15s grace here so a kill
+    # can't strand a dangling INTENT.
+    # Durable two-phase submission ledger (Task 10A). Runs whenever an identity
+    # is known (identity_id is None only for legacy/test callers, which keep the
+    # old behavior). Blocks re-apply across runs BEFORE any submit is attempted.
+    ledger = None
+    if identity_id:
+        ledger = SubmissionLedger(get_connection())
+        # (1) hard re-apply block across runs: prior CONFIRMED submission to
+        #     this identity.
+        if ledger.has_confirmed(identity_id):
+            job_meta["failure_class"] = "verification_already_applied_identity"
+            _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
+            return "needs_review:already_applied_identity", int((time.time() - run_started) * 1000), None
+        # (2) dangling-INTENT block: a prior run died mid-submit for this
+        #     identity — never blindly re-apply over an unreconciled intent
+        #     (the double-submit guard).
+        if ledger.has_open_intent(identity_id):
+            job_meta["failure_class"] = "verification_dangling_submission_intent"
+            _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
+            return "needs_review:dangling_submission_intent", int((time.time() - run_started) * 1000), None
+        # (3) company cooldown: >=N confirmed applies to this board within window.
+        _ref = parse_ats_url(_effective_apply_url(job) or "")
+        if _ref and _ref.token:
+            _since = (datetime.now(timezone.utc)
+                      - timedelta(days=config.DEFAULTS["company_cooldown_days"])).isoformat()
+            if ledger.confirmed_count_for_token(_ref.token, _since) >= config.DEFAULTS["company_cooldown_max"]:
+                job_meta["failure_class"] = "verification_company_cooldown"
+                _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
+                return "needs_review:company_cooldown", int((time.time() - run_started) * 1000), None
+
     # Read resume text â€” fall back to master resume if no tailored version
     resume_path = job.get("tailored_resume_path") or str(config.RESUME_PDF_PATH)
     txt_path = Path(resume_path).with_suffix(".txt")
@@ -2335,6 +2390,13 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     # fails closed and no submit POST can leave the browser. broker=None (e.g.
     # legacy/test callers) simply skips issue/gate — backward-compatible.
     broker_file = None
+    if identity_id and ledger is not None and not dry_run:
+        # INTENT before any submit. Gated on not-dry_run to mirror the broker
+        # (dry-run never submits, so it must not strand an intent). A crash
+        # between here and confirm/fail leaves a dangling INTENT that the NEXT
+        # run blocks on (see block (2) above) — safe by design: better a
+        # needs_review than a silent double-submit.
+        ledger.record_intent(identity_id, worker_id=worker_id)
     if broker is not None and identity_id:
         try:
             broker.issue(identity_id)
@@ -2419,6 +2481,9 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             )
             add_event(f"[W{worker_id}] Greenhouse no form/apply controls; skipping LLM")
             update_state(worker_id, status="failed", last_action=reason)
+            # Bailed before any submit POST — clear the open intent so this job
+            # stays retryable (no CONFIRMED exists; not a dangling crash).
+            _resolve_ledger_intent(ledger, identity_id, {"verified": False}, job_meta)
             return f"failed:{reason}", duration_ms, prefill_status
     if "resume" in (prefill_status.get("fields_filled") or []):
         _write_job_runtime_metadata(
@@ -2471,6 +2536,8 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         add_event(f"[W{worker_id}] needs_human: {_blocker} (no LLM spent)")
         update_state(worker_id, status="needs_review",
                      last_action=f"needs_human: {_blocker}")
+        # Bailed at a hard blocker before any submit POST — clear the open intent.
+        _resolve_ledger_intent(ledger, identity_id, {"verified": False}, job_meta)
         return f"needs_review:needs_human_{_blocker}", duration_ms, prefill_status
 
     # Reliability-v2 Phase C: deterministic Greenhouse adapter pass.
@@ -2531,6 +2598,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                                         "error": f"verify_exc:{ve}"}
                     job_meta["verification_confidence"] = verification.get("confidence")
                     job_meta["verification_evidence"] = verification
+                    _resolve_ledger_intent(ledger, identity_id, verification, job_meta)
                     if verification.get("verified"):
                         _write_job_runtime_metadata(
                             job["url"], apply_result_json={"status": "applied",
@@ -2905,6 +2973,9 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             add_event(f"[W{worker_id}] Stream strict pass needs snapshot fallback ({elapsed}s)")
             update_state(worker_id, status="needs_review",
                          last_action=f"stream snapshot fallback ({elapsed}s)")
+            # Strict pass blocked on tooling before any submit — clear the open
+            # intent so the snapshot-enabled retry isn't blocked as dangling.
+            _resolve_ledger_intent(ledger, identity_id, {"verified": False}, job_meta)
             return "needs_review:stream_snapshot_needed", duration_ms, prefill_status
         elif not result_code:
             fc, status_code = _classify_no_result(
@@ -2936,6 +3007,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                 )
                 job_meta["verification_confidence"] = verification.get("confidence")
                 job_meta["verification_evidence"] = verification
+                _resolve_ledger_intent(ledger, identity_id, verification, job_meta)
                 if not verification.get("verified"):
                     verify_log = config.LOG_DIR / f"verify_{ts}_w{worker_id}_{job.get('site', 'unknown')[:20]}.json"
                     verify_log.write_text(json.dumps(verification, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2976,12 +3048,18 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                     apply_result_json=structured_result,
                     last_failure_class=job_meta["failure_class"],
                 )
+                # expired/captcha/login_issue: no confirmed submit — clear the
+                # open intent so the identity isn't blocked as dangling.
+                _resolve_ledger_intent(ledger, identity_id, {"verified": False}, job_meta)
             return result_code, duration_ms, prefill_status
 
         if result_code and result_code.startswith("failed:"):
             reason = result_code.split(":", 1)[1] or "unknown"
             failure_class = _classify_failure_class(result_code, reason, job_meta.get("failure_class"))
             job_meta["failure_class"] = failure_class
+            # Agent reported a clean FAILED (no confirmed submit) — clear the
+            # open intent so the job stays retryable.
+            _resolve_ledger_intent(ledger, identity_id, {"verified": False}, job_meta)
             PROMOTE_TO_STATUS = {"captcha", "expired", "login_issue"}
             if reason in PROMOTE_TO_STATUS:
                 add_event(f"[W{worker_id}] {reason.upper()} ({elapsed}s): {job['title'][:30]}")

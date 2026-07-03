@@ -178,6 +178,10 @@ DEFAULTS = {
     "assert_timeout": 15,
     "escalation_mode": "pause",
     "allow_legacy_result_fallback": True,
+    # Company cooldown: cap confirmed applies per board token within a window
+    # (durable submission ledger, Phase 1 Task 10A).
+    "company_cooldown_max": 2,
+    "company_cooldown_days": 30,
 }
 
 
