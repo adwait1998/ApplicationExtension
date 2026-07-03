@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from applypilot.apply import launcher
+from applypilot.apply.browser_stream import should_block_request
 from applypilot.apply.stream_executor import effective_allow_submit
 from applypilot.apply.stream_mcp_server import main as stream_main
 
@@ -67,7 +68,7 @@ def test_dom_blocker_js_guards_all_three_paths():
 def test_stream_server_argparse_accepts_dry_run(monkeypatch):
     captured = {}
 
-    def fake_build_server(port, dry_run=False):
+    def fake_build_server(port, dry_run=False, broker_file=None, job_identity=None):
         captured["port"] = port
         captured["dry_run"] = dry_run
 
@@ -81,3 +82,13 @@ def test_stream_server_argparse_accepts_dry_run(monkeypatch):
     assert captured == {"port": 9223, "dry_run": True}
     stream_main(["--cdp-port", "9224"])
     assert captured == {"port": 9224, "dry_run": False}
+
+
+# --- network-layer containment: dry-run fails closed on every ATS mutation ---
+
+def test_dry_run_network_layer_blocks_all_ats_mutations():
+    for url in ("https://boards.greenhouse.io/x/jobs/1",
+                "https://jobs.lever.co/x/uuid/apply",
+                "https://jobs.ashbyhq.com/api/non-user-graphql",
+                "https://sap.wd3.myworkdayjobs.com/x/apply"):
+        assert should_block_request("POST", url, ticket_open=True, dry_run=True) is True

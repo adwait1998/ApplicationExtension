@@ -105,13 +105,20 @@ if platform.system() != "Windows":
 # MCP config
 # ---------------------------------------------------------------------------
 
-def _make_mcp_config(cdp_port: int, dry_run: bool = False) -> dict:
+def _make_mcp_config(cdp_port: int, dry_run: bool = False,
+                     broker_file: str | None = None,
+                     job_identity: str | None = None) -> dict:
     """Build MCP config dict for a specific CDP port.
 
     `dry_run` is forwarded to the applypilot_stream server so final submits
     are refused SERVER-SIDE — the prompt-only dry-run guard failed live
     (Twilio, 2026-06-12: the model passed allow_submit=true during a dry run
     and a real application was submitted).
+
+    `broker_file`/`job_identity` add a SECONDARY submit gate to the separate
+    stream-MCP process: it refuses final submits unless a broker ticket is
+    open. The PRIMARY always-on containment is the CDP network route in the
+    launcher process (BrowserStateStream), which holds the live broker.
     """
     stream_args = [
         "-m",
@@ -121,6 +128,10 @@ def _make_mcp_config(cdp_port: int, dry_run: bool = False) -> dict:
     ]
     if dry_run:
         stream_args.append("--dry-run")
+    if broker_file:
+        stream_args += ["--broker-file", str(broker_file)]
+    if job_identity:
+        stream_args += ["--job-identity", str(job_identity)]
     return {
         "mcpServers": {
             "playwright": {
@@ -1194,7 +1205,8 @@ def _scan_frames_for_success(page) -> dict:
 
 def _greenhouse_adapter_pass(cdp_port: int, profile: dict,
                              resume_pdf_path: str,
-                             allow_submit: bool = False) -> dict | None:
+                             allow_submit: bool = False,
+                             broker=None, identity_id: str | None = None) -> dict | None:
     """Connect to the live Chrome and run the deterministic Greenhouse
     adapter (zero Claude-Code LLM, self-healing locators, answer-cache for
     free-text). submit="auto" when allow_submit: the adapter submits
@@ -1216,9 +1228,16 @@ def _greenhouse_adapter_pass(cdp_port: int, profile: dict,
         if page is None:
             return None
         ac = AnswerCache(profile, bank_path=config.APP_DIR / "answer_bank.json")
+        # Gate deterministic submit on an open broker ticket. Even with
+        # allow_submit True, do not let the adapter drive fill_greenhouse's
+        # submit path unless a ticket is open for this identity — the network
+        # route consumes it on the actual POST. broker=None keeps prior behavior.
+        do_submit = allow_submit
+        if broker is not None and identity_id and not broker.ticket_open(identity_id):
+            do_submit = False
         res = fill_greenhouse(
             page, profile, resume_pdf_path,
-            submit=("auto" if allow_submit else False), answer_cache=ac)
+            submit=("auto" if do_submit else False), answer_cache=ac)
         return {"fields_filled": res.fields_filled,
                 "unresolved": res.unresolved,
                 "submitted": bool(res.submitted)}
@@ -2198,7 +2217,9 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             retry_count: int = 0,
             recorder=None,
             browser_stream=None,
-            visual_trace=None) -> tuple[str, int, dict | None]:
+            visual_trace=None,
+            broker=None,
+            identity_id: str | None = None) -> tuple[str, int, dict | None]:
     """Spawn a Claude Code session for one job application.
 
     Returns:
@@ -2308,9 +2329,26 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     worker_dir = reset_worker_dir(worker_id)
     job["_upload_dir"] = str(worker_dir)
 
+    # Submit broker: issue the one-shot ticket for THIS identity now that both
+    # duplicate-guard short-circuits above have passed. In dry-run issue() is a
+    # no-op (SubmitBroker never opens a ticket in dry-run) so the network route
+    # fails closed and no submit POST can leave the browser. broker=None (e.g.
+    # legacy/test callers) simply skips issue/gate — backward-compatible.
+    broker_file = None
+    if broker is not None and identity_id:
+        try:
+            broker.issue(identity_id)
+            broker_file = str(getattr(broker, "path", "") or "") or None
+        except Exception as e:
+            logger.warning("submit broker issue failed (submits will fail closed): %s", e)
+
     # Write per-worker MCP config (dry_run forwarded → server-side submit block)
     mcp_config_path = config.APP_DIR / f".mcp-apply-{worker_id}.json"
-    mcp_config_path.write_text(json.dumps(_make_mcp_config(port, dry_run=dry_run)), encoding="utf-8")
+    mcp_config_path.write_text(
+        json.dumps(_make_mcp_config(port, dry_run=dry_run,
+                                    broker_file=broker_file, job_identity=identity_id)),
+        encoding="utf-8",
+    )
 
     # --- Deterministic pre-fill (Greenhouse v1) ---
     # Fills 4 standard fields + resume directly via CDP, BEFORE Claude spawns.
@@ -2452,7 +2490,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                 and not prefill_status.get("error")):
             adapter_res = _greenhouse_adapter_pass(
                 port, profile, str(Path(resume_path).with_suffix(".pdf")),
-                allow_submit=not dry_run)
+                allow_submit=not dry_run, broker=broker, identity_id=identity_id)
             if adapter_res:
                 ff = prefill_status.setdefault("fields_filled", [])
                 for k in adapter_res.get("fields_filled", []):
@@ -3164,6 +3202,16 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                     "APPLYPILOT_STREAM_TELEMETRY",
                     "0",
                 ).strip().lower() in {"1", "true", "yes", "on"}
+                # Submit broker + job identity for CDP network containment. The
+                # broker is owned by worker_loop, keyed by identity_id, and lives
+                # in the stream so its context route can block ATS submit POSTs
+                # (dry-run fails closed) and consume the one-shot ticket on submit.
+                from applypilot.apply.submit_broker import SubmitBroker
+                from applypilot.identity import identity_id as _identity_id
+                ident = _identity_id(job["url"], company=job.get("site"),
+                                     title=job.get("title"), location=job.get("location"))
+                broker = SubmitBroker(
+                    config.APP_DIR / f".submit-ticket-{worker_id}.json", dry_run=dry_run)
                 browser_stream = BrowserStateStream(
                     port,
                     poll_interval_s=0.75,
@@ -3172,6 +3220,9 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                         if stream_telemetry_enabled
                         else None
                     ),
+                    broker=broker,
+                    identity_id=ident,
+                    dry_run=dry_run,
                 ).start()
                 visual_trace_enabled = os.environ.get(
                     "APPLYPILOT_VISUAL_TRACE",
@@ -3207,6 +3258,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                         "legacy_result_fallback": legacy_result_fallback,
                         "retry_count": attempt,
                         "visual_trace": visual_trace,
+                        "broker": broker,
+                        "identity_id": ident,
                     },
                     browser_stream=browser_stream,
                 )

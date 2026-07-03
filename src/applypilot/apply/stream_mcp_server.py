@@ -26,14 +26,28 @@ from applypilot.apply.stream_executor import (
 )
 
 
-def build_server(cdp_port: int, dry_run: bool = False):
+def build_server(cdp_port: int, dry_run: bool = False,
+                 broker_file: str | None = None, job_identity: str | None = None):
     """Build the FastMCP server. Import mcp lazily for testability.
 
     When `dry_run` is True, final submits are refused server-side no matter
     what `allow_submit` value the model passes (see
     stream_executor.effective_allow_submit — the prompt-only guard failed
     live on 2026-06-12 and submitted a real application during a dry run).
+
+    `broker_file`/`job_identity` are a SECONDARY gate for this separate-process
+    MCP path: the executor refuses final submits unless a broker ticket is open
+    for `job_identity`. The PRIMARY always-on containment is the CDP network
+    route installed by BrowserStateStream in the launcher process (which owns
+    the live broker); this gate defends the raw @playwright/mcp escape path.
     """
+    broker = None
+    if broker_file:
+        try:
+            from applypilot.apply.submit_broker import SubmitBroker
+            broker = SubmitBroker(broker_file, dry_run=dry_run)
+        except Exception:
+            broker = None
     try:
         from mcp.server.fastmcp import FastMCP
     except ModuleNotFoundError as e:
@@ -45,7 +59,7 @@ def build_server(cdp_port: int, dry_run: bool = False):
     server = FastMCP("applypilot_stream")
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"applypilot-stream-mcp-{cdp_port}")
     stream = BrowserStateStream(cdp_port, poll_interval_s=0.35, debounce_s=0.1).start()
-    session = _PersistentCDPSession(cdp_port)
+    session = _PersistentCDPSession(cdp_port, broker=broker, identity_id=job_identity)
     atexit.register(session.close)
     atexit.register(stream.close)
 
@@ -132,8 +146,10 @@ def _latest_or_observe(
 class _PersistentCDPSession:
     """Single-thread-owned Playwright/CDP connection for MCP tool calls."""
 
-    def __init__(self, cdp_port: int) -> None:
+    def __init__(self, cdp_port: int, *, broker=None, identity_id: str | None = None) -> None:
         self.cdp_port = cdp_port
+        self.broker = broker
+        self.identity_id = identity_id
         self._pw = None
         self._browser = None
 
@@ -210,6 +226,8 @@ class _PersistentCDPSession:
                 timeout_ms=timeout_ms,
                 tabs=tabs,
                 started=started,
+                broker=self.broker,
+                identity_id=self.identity_id,
             )
         except Exception as e:
             self.close()
@@ -272,8 +290,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--cdp-port", type=int, required=True)
     parser.add_argument("--dry-run", action="store_true",
                         help="Refuse final submits server-side regardless of allow_submit.")
+    parser.add_argument("--broker-file", default=None,
+                        help="Path to the submit-ticket file; gates final submits on an open broker ticket.")
+    parser.add_argument("--job-identity", default=None,
+                        help="identity_id this job's broker ticket is keyed by.")
     args = parser.parse_args(argv)
-    build_server(args.cdp_port, dry_run=args.dry_run).run()
+    build_server(args.cdp_port, dry_run=args.dry_run,
+                 broker_file=args.broker_file, job_identity=args.job_identity).run()
 
 
 if __name__ == "__main__":

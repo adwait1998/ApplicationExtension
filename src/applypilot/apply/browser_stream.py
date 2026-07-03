@@ -8,14 +8,50 @@ from __future__ import annotations
 
 import json
 import logging
+import re as _re
 import threading
 import time
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
+
+
+_ATS_HOST_RE = _re.compile(r"(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com)$", _re.I)
+_MUTATION_METHODS = {"POST", "PUT", "PATCH"}
+# Mutating requests to these hosts are always safe (page assets/analytics/CDN).
+# Kept deliberately small; anything else is subject to the dry-run fail-closed rule.
+_SAFE_MUTATION_HOSTS = _re.compile(
+    r"(google-analytics\.com|googletagmanager\.com|doubleclick\.net|"
+    r"segment\.(io|com)|sentry\.io|datadoghq\.com|cloudflareinsights\.com|"
+    r"fullstory\.com|hotjar\.com|fonts\.googleapis\.com|gstatic\.com)$", _re.I)
+
+
+def _request_host(url: str) -> str:
+    """Netloc lowercased with any port stripped."""
+    host = urlparse(url or "").netloc.lower()
+    return host.split(":", 1)[0]
+
+
+def should_block_request(method: str, url: str, *, ticket_open: bool, dry_run: bool) -> bool:
+    """Pure route decision.
+    LIVE: block mutating requests to known ATS hosts unless a submit ticket is open;
+          leave everything else alone (minimal interference).
+    DRY-RUN: fail closed - block EVERY mutating request except an explicit safe-host
+          allowlist, so a vanity/embedded/unknown ATS submit cannot POST. GET/HEAD/OPTIONS allowed."""
+    if (method or "").upper() not in _MUTATION_METHODS:
+        return False
+    host = _request_host(url)
+    if _SAFE_MUTATION_HOSTS.search(host):
+        return False
+    if dry_run:
+        return True   # fail closed: any non-safe mutation is blocked in dry-run
+    if not _ATS_HOST_RE.search(host):
+        return False
+    return not ticket_open
 
 
 @dataclass
@@ -558,11 +594,21 @@ class BrowserStateStream:
         poll_interval_s: float = 0.5,
         debounce_s: float = 0.25,
         telemetry_path: str | Path | None = None,
+        broker=None,
+        identity_id: str | None = None,
+        dry_run: bool = False,
     ) -> None:
         self.cdp_port = cdp_port
         self.poll_interval_s = max(0.1, poll_interval_s)
         self.debounce_s = max(0.0, debounce_s)
         self.telemetry_path = Path(telemetry_path) if telemetry_path else None
+        # Network containment: block ATS submit POSTs unless a broker ticket is
+        # open (dry-run fails closed at the network layer — a submit POST cannot
+        # leave the browser). broker=None disables the guard (backward-compat).
+        self.broker = broker
+        self.identity_id = identity_id
+        self.dry_run = dry_run
+        self.route_install_failed = False
         self._lock = threading.Lock()
         self._latest: BrowserObservation | None = None
         self._stop = threading.Event()
@@ -610,8 +656,55 @@ class BrowserStateStream:
             browser = pw.chromium.connect_over_cdp(
                 f"http://127.0.0.1:{self.cdp_port}", timeout=5000
             )
+
+            # --- CDP network containment (the always-on submit chokepoint) ---
+            # This is the ONLY session-lifetime CDP connection, so a context
+            # route installed here sees every request from every tab for the
+            # whole apply. It makes a dry-run submit physically impossible and
+            # gates real submits on an open broker ticket — including the raw
+            # @playwright/mcp path that has no Python-side gate.
+            def _guard(route):
+                req = route.request
+                open_ = bool(self.broker and self.identity_id and self.broker.ticket_open(self.identity_id))
+                if should_block_request(req.method, req.url, ticket_open=open_, dry_run=self.dry_run):
+                    self._publish(BrowserObservation(observed_at=time.time(),
+                                                     error=f"BLOCKED_SUBMIT {req.method} {req.url}"))
+                    route.abort()
+                    return
+                # consume the one-shot ticket on the actual submit POST (single
+                # submit flow per identity, so the consume TOCTOU flagged in
+                # Task 9 is benign).
+                if (open_ and (req.method or "").upper() in _MUTATION_METHODS
+                        and _ATS_HOST_RE.search(_request_host(req.url))):
+                    self.broker.consume(self.identity_id)
+                route.continue_()
+
+            _routed: set[int] = set()
+
+            def _ensure_routes():
+                for ctx in browser.contexts:
+                    if id(ctx) not in _routed:
+                        try:
+                            ctx.route("**/*", _guard)
+                            _routed.add(id(ctx))
+                        except Exception:
+                            # Fail-closed in LIVE mode: if we cannot install the
+                            # route we cannot guarantee submits are gated. Flag it
+                            # so the worker can downgrade to needs_review rather
+                            # than proceed unguarded. (dry-run has the DOM blocker
+                            # + server-side guards as backstops.)
+                            if not self.dry_run:
+                                self.route_install_failed = True
+                                self._publish(BrowserObservation(
+                                    observed_at=time.time(),
+                                    error="ROUTE_INSTALL_FAILED context guard not installed"))
+                            log.warning("browser stream route install failed", exc_info=True)
+
+            _ensure_routes()
+
             while not self._stop.is_set():
                 try:
+                    _ensure_routes()  # cover contexts opened mid-session
                     page, tabs = _active_page_and_tabs(browser)
                     if page is not None:
                         self._publish(collect_browser_observation(page, tabs=tabs))

@@ -66,6 +66,8 @@ def execute_stream_actions_cdp(
     *,
     allow_submit: bool = False,
     timeout_ms: int = 4000,
+    broker=None,
+    identity_id: str | None = None,
 ) -> dict[str, Any]:
     """Connect to an existing Chrome CDP port, run actions, and disconnect."""
     pw = browser = None
@@ -93,6 +95,8 @@ def execute_stream_actions_cdp(
             timeout_ms=timeout_ms,
             tabs=tabs,
             started=started,
+            broker=broker,
+            identity_id=identity_id,
         )
     except Exception as e:
         return {
@@ -123,12 +127,15 @@ def execute_stream_actions_on_page(
     timeout_ms: int = 4000,
     tabs: list[dict[str, Any]] | None = None,
     started: float | None = None,
+    broker=None,
+    identity_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a batch of stream actions against an already-open Playwright page."""
     started = started or time.monotonic()
     results: list[StreamActionResult] = []
     for raw in actions or []:
-        result = _execute_one(page, raw, allow_submit=allow_submit, timeout_ms=timeout_ms, tabs=tabs)
+        result = _execute_one(page, raw, allow_submit=allow_submit, timeout_ms=timeout_ms,
+                              tabs=tabs, broker=broker, identity_id=identity_id)
         results.append(result)
         if not result.ok:
             break
@@ -201,7 +208,8 @@ def wait_for_stream_change_cdp(
             pass
 
 
-def _execute_one(page, raw: dict[str, Any], *, allow_submit: bool, timeout_ms: int, tabs) -> StreamActionResult:
+def _execute_one(page, raw: dict[str, Any], *, allow_submit: bool, timeout_ms: int, tabs,
+                 broker=None, identity_id: str | None = None) -> StreamActionResult:
     action = _action_kind(raw)
     target = _target_dict(raw)
     if action == "press" and not target:
@@ -221,6 +229,8 @@ def _execute_one(page, raw: dict[str, Any], *, allow_submit: bool, timeout_ms: i
     if is_final_submit:
         if not allow_submit:
             return StreamActionResult(False, action, target, "submit_refused_allow_submit_false", control_id=control.control_id)
+        if broker is not None and identity_id and not broker.ticket_open(identity_id):
+            return StreamActionResult(False, action, target, "submit_refused_no_broker_ticket", control_id=control.control_id)
         guard = _submission_guard(obs, control)
         if guard:
             return StreamActionResult(False, action, target, guard, control_id=control.control_id)
