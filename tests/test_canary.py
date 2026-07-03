@@ -1,0 +1,71 @@
+from applypilot.apply.canary import is_canary, resolve_canary
+
+PROFILE = {
+    "work_authorization": {"legally_authorized_to_work": False, "require_sponsorship": True,
+                           "work_permit_type": "F-1 OPT"},
+    "compensation": {"salary_expectation": "150000", "salary_currency": "USD"},
+    "eeo_voluntary": {"gender": "Female", "race_ethnicity": "Decline to self-identify",
+                      "veteran_status": "I am not a veteran", "disability_status": "No"},
+    "personal": {"address": "1 Main St", "city": "San Jose", "province_state": "CA",
+                 "country": "USA", "postal_code": "95110", "password": "SECRET"},
+    "availability": {"earliest_start_date": "2 weeks"},
+}
+
+
+def test_sponsorship_is_canary():
+    assert is_canary("Will you now or in the future require visa sponsorship?")
+    assert is_canary("Are you legally authorized to work in the US?")
+    assert is_canary("What is your expected salary?")
+    assert is_canary("What is your gender?")
+    assert is_canary("What is your date of birth?")
+
+
+def test_non_canary():
+    assert not is_canary("Describe a product you shipped that you're proud of")
+    assert not is_canary("Why do you want to work here?")
+
+
+def test_resolve_sponsorship_polarity_positive():
+    # require_sponsorship=True -> "require sponsorship?" answers Yes
+    assert resolve_canary("Will you require sponsorship?", PROFILE) in ("Yes", "yes")
+
+
+def test_resolve_sponsorship_polarity_negated():
+    # "work WITHOUT sponsorship?" with require_sponsorship=True -> No
+    assert resolve_canary("Can you work without sponsorship?", PROFILE) in ("No", "no")
+
+
+def test_resolve_workauth():
+    # legally_authorized_to_work=False -> "are you authorized?" -> No
+    assert resolve_canary("Are you legally authorized to work in the United States?", PROFILE) in ("No", "no")
+
+
+def test_resolve_salary():
+    assert "150000" in (resolve_canary("What is your expected salary?", PROFILE) or "")
+
+
+def test_resolve_eeo_fields_distinct():
+    assert resolve_canary("What is your gender?", PROFILE) == "Female"
+    assert resolve_canary("What is your veteran status?", PROFILE) == "I am not a veteran"
+    assert resolve_canary("Do you have a disability?", PROFILE) == "No"
+
+
+def test_resolve_dob_is_none():
+    # profile has NO date-of-birth field -> never guess
+    assert resolve_canary("What is your date of birth?", PROFILE) is None
+
+
+def test_resolve_never_leaks_password():
+    for q in ("What is your address?", "What is your password?"):
+        ans = resolve_canary(q, PROFILE) or ""
+        assert "SECRET" not in ans
+
+
+def test_ambiguous_polarity_returns_none():
+    # if we can't confidently determine polarity, refuse (park, don't guess)
+    assert resolve_canary("Sponsorship?", PROFILE) is None
+
+
+def test_citizenship_refused():
+    # profile has no citizenship field -> never answer citizenship questions
+    assert resolve_canary("Are you a US citizen?", PROFILE) is None
