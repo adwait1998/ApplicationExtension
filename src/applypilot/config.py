@@ -21,6 +21,9 @@ TAILORED_DIR = APP_DIR / "tailored_resumes"
 COVER_LETTER_DIR = APP_DIR / "cover_letters"
 LOG_DIR = APP_DIR / "logs"
 
+# Spend ledger (metered LLM client)
+SPEND_LEDGER_PATH = LOG_DIR / "spend_ledger.jsonl"
+
 # Chrome worker isolation
 CHROME_WORKER_DIR = APP_DIR / "chrome-workers"
 APPLY_WORKER_DIR = APP_DIR / "apply-workers"
@@ -182,6 +185,9 @@ DEFAULTS = {
     # (durable submission ledger, Phase 1 Task 10A).
     "company_cooldown_max": 2,
     "company_cooldown_days": 30,
+    # Spend caps (metered LLM client). Over-cap pauses the engine (Task 11b).
+    "daily_budget_usd": 5.0,
+    "monthly_budget_usd": 50.0,
 }
 
 

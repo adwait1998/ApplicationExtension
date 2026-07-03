@@ -400,4 +400,11 @@ def get_client() -> LLMClient | ClaudeCodeClient:
             _instance = ClaudeCodeClient(model)
         else:
             _instance = LLMClient(base_url, model, api_key)
+        # meter every logical call (transparent chat/ask/close pass-through)
+        from applypilot.spend_ledger import SpendLedger, MeteredClient
+        from applypilot import config
+        _led = SpendLedger(config.SPEND_LEDGER_PATH,
+                           daily_cap_usd=config.DEFAULTS.get("daily_budget_usd"),
+                           monthly_cap_usd=config.DEFAULTS.get("monthly_budget_usd"))
+        _instance = MeteredClient(_instance, _led, model=model, stage="llm")
     return _instance

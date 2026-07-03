@@ -872,6 +872,17 @@ def gate_cmd(
     console.print(f"Gated [bold]{n}[/bold] jobs at version {GATE_VERSION}.")
 
 
+@app.command("resume")
+def resume_cmd() -> None:
+    """Clear a budget/manual pause so the engine can dispatch again."""
+    _bootstrap()
+    from applypilot import database as db
+    conn = db.get_connection()
+    prior = db.paused_reason(conn)
+    db.set_paused(conn, None)
+    console.print(f"Resumed (was: {prior or 'not paused'}).")
+
+
 @app.command()
 def doctor() -> None:
     """Check your setup and diagnose missing requirements."""

@@ -3238,6 +3238,19 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         if not continuous and jobs_done >= limit:
             break
 
+        # Single spend enforcement point: pause + stop dispatch when over cap.
+        # Resume path (`applypilot resume`) clears engine_control.paused.
+        from applypilot import database as db
+        from applypilot.spend_ledger import SpendLedger
+        _led = SpendLedger(config.SPEND_LEDGER_PATH,
+                           daily_cap_usd=config.DEFAULTS["daily_budget_usd"],
+                           monthly_cap_usd=config.DEFAULTS["monthly_budget_usd"])
+        if _led.over_cap():
+            db.set_paused(db.get_connection(), "budget")
+            logger.warning("Paused: spend cap reached (today=$%.2f, month=$%.2f). Raise the cap or resume.",
+                           _led.spent_today(), _led.spent_month())
+            break   # stop dispatching this worker; resume path clears engine_control.paused
+
         update_state(worker_id, status="idle", job_title="", company="",
                      last_action="waiting for job", actions=0)
 

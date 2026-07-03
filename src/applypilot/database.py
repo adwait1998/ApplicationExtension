@@ -180,6 +180,14 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS idx_sub_ledger_identity "
         "ON submission_ledger(identity_id, state)"
     )
+
+    # Engine control kv (Phase 1 Task 11b): single pause flag consumed by the
+    # worker loop. Also a SECOND table (not in the jobs migration path), so
+    # created here alongside submission_ledger.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS engine_control "
+        "(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+    )
     conn.commit()
 
     # Run migrations for any columns added after initial schema
@@ -187,6 +195,30 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     ensure_indexes(conn)
 
     return conn
+
+
+# ---------------------------------------------------------------------------
+# Engine control (Phase 1 Task 11b): single pause flag. The worker loop checks
+# paused_reason before dispatch; `applypilot resume` clears it.
+# ---------------------------------------------------------------------------
+
+def set_paused(conn, reason: str | None) -> None:
+    """Set or clear the engine pause flag. reason=None clears it."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    if reason is None:
+        conn.execute("DELETE FROM engine_control WHERE key='paused'")
+    else:
+        conn.execute(
+            "INSERT INTO engine_control (key, value, updated_at) VALUES ('paused', ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (reason, now))
+    conn.commit()
+
+
+def paused_reason(conn) -> str | None:
+    row = conn.execute("SELECT value FROM engine_control WHERE key='paused'").fetchone()
+    return row[0] if row else None
 
 
 # Complete column registry: column_name -> SQL type with optional default.

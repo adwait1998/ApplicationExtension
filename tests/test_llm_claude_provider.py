@@ -31,8 +31,11 @@ def test_claude_provider_override_uses_claude_code_client(monkeypatch):
 
     client = llm.get_client()
 
-    assert isinstance(client, llm.ClaudeCodeClient)
-    assert client.model == "sonnet"
+    # get_client wraps the provider client in a MeteredClient (Task 11b);
+    # unwrap via ._inner to assert on the real provider.
+    inner = getattr(client, "_inner", client)
+    assert isinstance(inner, llm.ClaudeCodeClient)
+    assert inner.model == "sonnet"
 
 
 def test_claude_code_client_invokes_cli_with_plain_prompt(monkeypatch):
