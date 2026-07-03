@@ -80,3 +80,23 @@ def test_pending_gate_includes_ungated_and_stale_gated(tmp_path):
     conn.commit()
     urls = {r["url"] for r in db.get_jobs_by_stage(conn, "pending_gate")}
     assert urls == {"a", "b"}
+
+
+def test_launcher_ident_matches_gate_identity_for_aggregator_rows():
+    """Important-3 regression: the launcher's runtime identity must key off the
+    EFFECTIVE apply URL (application_url or url), matching gate_job's stored
+    identity_id — so aggregator rows (url != application_url) fold consistently
+    across the broker/ledger/gate. For ats_boards (url == application_url) both
+    already agree; this locks the aggregator case."""
+    from applypilot.identity import identity_id
+    from applypilot.gate.engine import gate_job
+    # aggregator listing url differs from the resolved greenhouse application_url
+    job = {"url": "https://www.linkedin.com/jobs/view/999",
+           "application_url": "https://boards.greenhouse.io/chime/jobs/8141068002",
+           "title": "Senior Product Designer", "location": "Remote - US", "site": "Chime"}
+    gate = gate_job(job, PROFILE)
+    # gate stores identity from application_url; launcher now computes the same basis
+    effective = job.get("application_url") or job["url"]
+    launcher_ident = identity_id(effective, company=job.get("site"),
+                                 title=job.get("title"), location=job.get("location"))
+    assert gate["identity_id"] == launcher_ident == "greenhouse:chime:8141068002"

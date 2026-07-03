@@ -3298,8 +3298,14 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 # (dry-run fails closed) and consume the one-shot ticket on submit.
                 from applypilot.apply.submit_broker import SubmitBroker
                 from applypilot.identity import identity_id as _identity_id
-                ident = _identity_id(job["url"], company=job.get("site"),
-                                     title=job.get("title"), location=job.get("location"))
+                # Key the runtime identity off the EFFECTIVE apply URL (application_url
+                # or url), matching gate.engine.gate_job's stored identity_id and the
+                # cooldown's parse_ats_url basis. For ats_boards these are identical;
+                # for aggregator-resolved rows (url != application_url, common in Phase 2)
+                # this is what makes the broker/ledger/gate identity fold consistently.
+                ident = _identity_id(_effective_apply_url(job) or job["url"],
+                                     company=job.get("site"), title=job.get("title"),
+                                     location=job.get("location"))
                 broker = SubmitBroker(
                     config.APP_DIR / f".submit-ticket-{worker_id}.json", dry_run=dry_run)
                 browser_stream = BrowserStateStream(
