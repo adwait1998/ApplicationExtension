@@ -14,6 +14,7 @@ submit. `used_llm` is always False — the adapter never calls a model.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -30,6 +31,16 @@ if TYPE_CHECKING:
     from playwright.sync_api import Page
 
 log = logging.getLogger(__name__)
+
+# Defense-in-depth: any label shaped like a legal / EEO / immigration / export
+# attestation must NEVER be answered by the free-text LLM fallback. Canary
+# handles the ones it recognizes; this belt catches anything the classifier
+# missed (future phrasings) so it stays UNRESOLVED and can't be auto-submitted.
+_LEGAL_ATTESTATION_RE = re.compile(
+    r"\b(sponsor\w*|visa|immigration|citizen\w*|authoriz\w+|eligible to work|"
+    r"work permit|itar|export[- ]?control|ear|us person|security clearance|"
+    r"clearance|felony|convicted|background check|veteran|disabilit\w+|"
+    r"race|ethnicit\w+|gender|salary|compensation)\b", re.I)
 
 _DECLINE = (
     "decline to self-identify", "decline", "i do not wish to answer",
@@ -540,6 +551,9 @@ def fill_greenhouse(page: "Page", profile: dict, resume_pdf_path: str, *,
                         still.append(u)
                 else:
                     still.append(u)  # unresolvable canary stays UNRESOLVED
+                continue
+            if _LEGAL_ATTESTATION_RE.search(lab):
+                still.append(u)   # defense-in-depth: never LLM-guess a legal/EEO attestation
                 continue
             loc = None
             for tag in ("textarea", "input"):

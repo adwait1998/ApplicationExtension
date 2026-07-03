@@ -19,6 +19,8 @@ _MARKERS = {
     "address": re.compile(r"\b(street address|mailing address|home address|zip|postal code|address)\b", re.I),
     "dob": re.compile(r"\b(date of birth|birth ?date|dob)\b", re.I),
     "clearance": re.compile(r"\b(security clearance|clearance)\b", re.I),
+    "immigration": re.compile(r"\b(immigration|immigrant status|work visa case|commence .* case)\b", re.I),
+    "export_control": re.compile(r"\b(itar|export[- ]?control|ear\b|us person|export administration)\b", re.I),
     "password": re.compile(r"\bpassword\b", re.I),
 }
 
