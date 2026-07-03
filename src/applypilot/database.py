@@ -188,6 +188,35 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS engine_control "
         "(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
     )
+
+    # Board Atlas (v2 Phase 2). Profile-AGNOSTIC registry of ATS boards:
+    # one row per (ats, token). status/ring drive the freshness scheduler;
+    # job_id_set_hash powers the incremental poller's cheap unchanged-board
+    # short-circuit. Created here (standalone table, not in _ALL_COLUMNS).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS boards (
+            ats               TEXT NOT NULL,     -- 'greenhouse' | 'lever' | 'ashby'
+            token             TEXT NOT NULL,     -- board slug, lowercased
+            company_name      TEXT,              -- best-effort display name
+            status            TEXT NOT NULL DEFAULT 'candidate',
+                                                 -- 'candidate' (unvalidated) | 'active'
+                                                 -- | 'dead' (validation/poll failing)
+            ring              INTEGER,           -- 0 hot | 1 warm | 2 cold | NULL unassigned
+            first_seen        TEXT NOT NULL,
+            last_checked      TEXT,              -- last successful poll/validation
+            last_changed      TEXT,              -- last time job_id_set_hash changed
+            job_id_set_hash   TEXT,              -- sha1 of sorted job-id set (incremental diff)
+            job_count         INTEGER,           -- ids seen at last poll (posting-rate signal)
+            new_last_poll     INTEGER DEFAULT 0, -- new ids at last poll (posting-rate signal)
+            error_streak      INTEGER NOT NULL DEFAULT 0,
+            source            TEXT,              -- 'yaml_import' | 'db_mining' | 'cc_snapshot' | 'search'
+            PRIMARY KEY (ats, token)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_boards_ring_status "
+        "ON boards(ring, status)"
+    )
     conn.commit()
 
     # Run migrations for any columns added after initial schema
