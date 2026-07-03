@@ -309,8 +309,12 @@ def _run_gate(min_score=None, **kwargs) -> dict:
         rows = db.get_jobs_by_stage(conn, "pending_gate", limit=0)
         n = 0
         for row in rows:
-            db.update_gate(conn, row["url"], gate_job(dict(row), policy))
-            n += 1
+            try:
+                db.update_gate(conn, row["url"], gate_job(dict(row), policy))
+                n += 1
+            except Exception as e:  # noqa: BLE001 — one bad row must not kill the stage
+                log.warning("gate failed for %s: %s", row["url"], e)
+                continue
         return {"status": "ok", "gated": n}
     except Exception as e:
         log.error("Gate failed: %s", e)

@@ -269,10 +269,14 @@ def run_ats_boards_discovery(workers: int = 4, hours_old: int | None = None) -> 
                 "posted_at": j.get("posted_at") or now,
                 "detail_scraped_at": now,
             }
-            if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
-                total_new += 1
-            else:
-                total_dup += 1
+            try:
+                if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
+                    total_new += 1
+                else:
+                    total_dup += 1
+            except Exception as e:  # noqa: BLE001 — one bad row must not kill the batch
+                log.warning("gate/store failed for %s: %s", job_row.get("url"), e)
+                continue
 
     elapsed = time.time() - t0
     total = sum(len(j) for _, _, j in all_jobs)

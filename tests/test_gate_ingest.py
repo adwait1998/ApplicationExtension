@@ -51,6 +51,21 @@ def test_only_gated_eligible_jobs_are_pending_score(tmp_path):
     urls = {r["url"] for r in db.get_jobs_by_stage(conn, "pending_score")}
     assert urls == {"good"}
 
+def test_gate_job_tolerates_non_string_fields():
+    from applypilot.gate.engine import gate_job
+    r = gate_job({"url": "u", "title": 3.5, "location": None, "salary": 12}, PROFILE)
+    assert r["gate_result"] in ("eligible", "ineligible", "unknown")  # no crash
+
+def test_store_gated_respects_explicit_none_full_description(tmp_path):
+    db.init_db(tmp_path / "t5.db")
+    conn = db.get_connection(tmp_path / "t5.db")
+    job = {"url": "sx1", "title": "Senior Product Designer", "location": "Remote - US",
+           "description": "thin snippet", "full_description": None}
+    from applypilot.gate.engine import gate_job as gj
+    db.store_gated(conn, job, gj(job, PROFILE), strategy="smart_extract")
+    row = conn.execute("SELECT full_description FROM jobs WHERE url='sx1'").fetchone()
+    assert row["full_description"] is None   # must await enrichment, not score on the snippet
+
 def test_pending_gate_includes_ungated_and_stale_gated(tmp_path):
     db.init_db(tmp_path / "t4.db")
     conn = db.get_connection(tmp_path / "t4.db")

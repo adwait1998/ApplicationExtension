@@ -204,10 +204,14 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
             "posted_at": posted_at,
             "detail_scraped_at": detail_scraped_at,
         }
-        if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
-            new += 1
-        else:
-            existing += 1
+        try:
+            if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
+                new += 1
+            else:
+                existing += 1
+        except Exception as e:  # noqa: BLE001 — one bad row must not kill the batch
+            log.warning("gate/store failed for %s: %s", job_row.get("url"), e)
+            continue
 
     return new, existing
 

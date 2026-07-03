@@ -306,6 +306,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     conn = get_connection()
 
     if rescore:
+        # NOTE: rescore=True bypasses the gate predicate; wire through queue_policy before exposing to CLI.
         query = "SELECT * FROM jobs WHERE full_description IS NOT NULL"
         if limit > 0:
             query += f" LIMIT {limit}"

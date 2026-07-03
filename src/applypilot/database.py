@@ -492,7 +492,9 @@ def store_gated(conn, job: dict, gate: dict, *, strategy: str) -> bool:
             "gate_reasons, automatability, gate_version, gated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [url, job.get("title"), job.get("salary"), job.get("description"),
-             job.get("full_description") or job.get("description"),
+             # An explicit full_description key wins even when None (thin rows
+             # must await enrichment, not become scoreable on the snippet).
+             job.get("full_description") if "full_description" in job else job.get("description"),
              job.get("application_url") or url, job.get("location"), job.get("site"),
              # discovered_at must never be NULL; detail_scraped_at MUST stay NULL
              # for thin rows so the enrich stage still picks them up.
@@ -540,8 +542,8 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         # Ungated OR gated before enrichment finished (thin->full description):
         # the gate stage re-gates so sponsorship/location verdicts use the full text.
         "pending_gate": (
-            "gated_at IS NULL "
-            "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at)"
+            "(gated_at IS NULL "
+            "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at))"
         ),
         "pending_score": (
             "full_description IS NOT NULL AND fit_score IS NULL "

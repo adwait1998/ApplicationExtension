@@ -118,14 +118,21 @@ def _store_jobs_filtered(
             "title": job.get("title"),
             "salary": job.get("salary"),
             "description": job.get("description"),
+            # Explicit None: smartextract rows are thin snippets and MUST be
+            # enriched before scoring (full_description stays NULL until then).
+            "full_description": None,
             "location": job.get("location"),
             "site": site,
             "posted_at": now,
         }
-        if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
-            new += 1
-        else:
-            existing += 1
+        try:
+            if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
+                new += 1
+            else:
+                existing += 1
+        except Exception as e:  # noqa: BLE001 — one bad row must not kill the batch
+            log.warning("gate/store failed for %s: %s", job_row.get("url"), e)
+            continue
 
     if filtered:
         log.info("Filtered %d jobs (wrong location)", filtered)

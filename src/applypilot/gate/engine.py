@@ -11,10 +11,12 @@ from applypilot.identity import identity_id, parse_ats_url
 
 
 def gate_job(job: dict, profile: dict) -> dict:
-    apply_url = job.get("application_url") or job.get("url") or ""
-    title = job.get("title") or ""
-    location = job.get("location") or ""
-    desc = job.get("full_description") or job.get("description") or ""
+    # Defensive coercion: raw discovery dicts can carry non-string values
+    # (e.g. floats from API JSON / pandas NaN). One bad field must not raise.
+    apply_url = str(job.get("application_url") or job.get("url") or "")
+    title = str(job.get("title") or "")
+    location = str(job.get("location") or "")
+    desc = str(job.get("full_description") or job.get("description") or "")
 
     verdicts = {
         "automatability": automatability_rule(apply_url, workday_accounts=profile.get("workday_accounts", [])),

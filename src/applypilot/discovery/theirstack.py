@@ -331,10 +331,14 @@ def _store_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> tuple[int, int]:
             "posted_at": job.get("posted_at"),
             "detail_scraped_at": detail_scraped_at,
         }
-        if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy="theirstack_api"):
-            new += 1
-        else:
-            duplicates += 1
+        try:
+            if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy="theirstack_api"):
+                new += 1
+            else:
+                duplicates += 1
+        except Exception as e:  # noqa: BLE001 — one bad row must not kill the batch
+            log.warning("gate/store failed for %s: %s", job_row.get("url"), e)
+            continue
 
     return new, duplicates
 

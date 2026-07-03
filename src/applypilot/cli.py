@@ -858,11 +858,17 @@ def gate_cmd(
         rows = conn.execute("SELECT * FROM jobs WHERE gate_version IS NULL OR gate_version < ?",
                             (GATE_VERSION,)).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM jobs WHERE gated_at IS NULL AND full_description IS NOT NULL").fetchall()
+        # Same shared predicate as the pipeline 'gate' stage: ungated rows OR
+        # rows gated before enrichment finished (stale verdict on thin text).
+        rows = db.get_jobs_by_stage(conn, "pending_gate", limit=0)
     n = 0
     for row in rows:
-        db.update_gate(conn, row["url"], gate_job(dict(row), policy))
-        n += 1
+        try:
+            db.update_gate(conn, row["url"], gate_job(dict(row), policy))
+            n += 1
+        except Exception as e:  # noqa: BLE001 — one bad row must not kill the batch
+            log.warning("gate failed for %s: %s", row["url"], e)
+            continue
     console.print(f"Gated [bold]{n}[/bold] jobs at version {GATE_VERSION}.")
 
 
