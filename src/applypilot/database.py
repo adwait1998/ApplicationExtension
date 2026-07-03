@@ -101,6 +101,17 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             strategy              TEXT,
             discovered_at         TEXT,
 
+            -- Gate (v2 spine) — set at ingest; NULL = not yet gated.
+            identity_id           TEXT,
+            ats                   TEXT,
+            board_token           TEXT,
+            ats_job_id            TEXT,
+            gate_result           TEXT,
+            gate_reasons          TEXT,
+            automatability        TEXT,
+            gate_version          INTEGER,
+            gated_at              TEXT,
+
             -- Enrichment stage (detail_scraper)
             full_description      TEXT,
             application_url       TEXT,
@@ -170,6 +181,16 @@ _ALL_COLUMNS: dict[str, str] = {
     "site": "TEXT",
     "strategy": "TEXT",
     "discovered_at": "TEXT",
+    # Gate (v2 spine) — set at ingest; NULL = not yet gated.
+    "identity_id": "TEXT",
+    "ats": "TEXT",
+    "board_token": "TEXT",
+    "ats_job_id": "TEXT",
+    "gate_result": "TEXT",       # "eligible" | "ineligible" | "unknown"
+    "gate_reasons": "TEXT",      # JSON list of {rule, result, code, evidence}
+    "automatability": "TEXT",    # "auto" | "account_required" | "manual" | "unknown"
+    "gate_version": "INTEGER",
+    "gated_at": "TEXT",
     # Enrichment
     "full_description": "TEXT",
     "application_url": "TEXT",
