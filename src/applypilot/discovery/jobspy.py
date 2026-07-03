@@ -133,6 +133,15 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 
 def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tuple[int, int]:
     """Store JobSpy DataFrame results into the DB. Returns (new, existing)."""
+    from applypilot.gate.engine import gate_job
+    from applypilot.gate.profile_map import gate_profile
+    from applypilot import database as _db
+    from applypilot.config import load_profile, load_search_config
+    try:
+        _policy = gate_profile(load_profile(), load_search_config())
+    except Exception:
+        _policy = gate_profile({}, {})   # missing profile -> permissive-ish defaults; rows still gated
+
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
@@ -179,21 +188,27 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
         # Extract apply URL if JobSpy provided it
         apply_url = _clean_url(row.get("job_url_direct"))
 
-        discovered_at = iso_or_none(row.get("date_posted")) or now
+        posted_at = iso_or_none(row.get("date_posted"))
 
-        try:
-            conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at, "
-                "full_description, application_url, detail_scraped_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, title, salary, description, location_str, site_label, strategy, discovered_at,
-                 full_description, apply_url, detail_scraped_at),
-            )
+        job_row = {
+            "url": url,
+            "title": title,
+            "salary": salary,
+            "description": description,
+            "full_description": full_description,
+            "application_url": apply_url,
+            "location": location_str,
+            "site": site_label,
+            # store_gated falls back to `now` when posted_at is None (preserves
+            # the old `iso_or_none(...) or now` discovered_at semantics).
+            "posted_at": posted_at,
+            "detail_scraped_at": detail_scraped_at,
+        }
+        if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
             new += 1
-        except sqlite3.IntegrityError:
+        else:
             existing += 1
 
-    conn.commit()
     return new, existing
 
 

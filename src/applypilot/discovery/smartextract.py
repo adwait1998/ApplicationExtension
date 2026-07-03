@@ -92,6 +92,15 @@ def _store_jobs_filtered(
     reject_locs: list[str],
 ) -> tuple[int, int]:
     """Store jobs with location filtering. Returns (new, existing)."""
+    from applypilot.gate.engine import gate_job
+    from applypilot.gate.profile_map import gate_profile
+    from applypilot import database as _db
+    from applypilot.config import load_profile, load_search_config
+    try:
+        _policy = gate_profile(load_profile(), load_search_config())
+    except Exception:
+        _policy = gate_profile({}, {})   # missing profile -> permissive-ish defaults; rows still gated
+
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
@@ -104,20 +113,22 @@ def _store_jobs_filtered(
         if not _location_ok(job.get("location"), accept_locs, reject_locs):
             filtered += 1
             continue
-        try:
-            conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, job.get("title"), job.get("salary"), job.get("description"),
-                 job.get("location"), site, strategy, now),
-            )
+        job_row = {
+            "url": url,
+            "title": job.get("title"),
+            "salary": job.get("salary"),
+            "description": job.get("description"),
+            "location": job.get("location"),
+            "site": site,
+            "posted_at": now,
+        }
+        if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
             new += 1
-        except sqlite3.IntegrityError:
+        else:
             existing += 1
 
     if filtered:
         log.info("Filtered %d jobs (wrong location)", filtered)
-    conn.commit()
     return new, existing
 
 

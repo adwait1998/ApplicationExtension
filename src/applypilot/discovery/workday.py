@@ -302,6 +302,15 @@ def fetch_details(employer: dict, jobs: list[dict]) -> list[dict]:
 
 def store_results(conn: sqlite3.Connection, jobs: list[dict], employers: dict) -> tuple[int, int]:
     """Store corporate jobs in DB. Returns (new, existing)."""
+    from applypilot.gate.engine import gate_job
+    from applypilot.gate.profile_map import gate_profile
+    from applypilot import database as _db
+    from applypilot.config import load_profile, load_search_config
+    try:
+        _policy = gate_profile(load_profile(), load_search_config())
+    except Exception:
+        _policy = gate_profile({}, {})   # missing profile -> permissive-ish defaults; rows still gated
+
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
@@ -324,19 +333,24 @@ def store_results(conn: sqlite3.Connection, jobs: list[dict], employers: dict) -
         site = job.get("employer_name", "Corporate")
         strategy = "workday_api"
 
-        try:
-            conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, "
-                "discovered_at, full_description, application_url, detail_scraped_at, detail_error) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, job.get("title"), None, short_desc, job.get("location"),
-                 site, strategy, now, full_description, url, detail_scraped_at, detail_error),
-            )
+        job_row = {
+            "url": url,
+            "title": job.get("title"),
+            "salary": None,
+            "description": short_desc,
+            "full_description": full_description,
+            "application_url": url,
+            "location": job.get("location"),
+            "site": site,
+            "posted_at": now,
+            "detail_scraped_at": detail_scraped_at,
+            "detail_error": detail_error,
+        }
+        if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
             new += 1
-        except sqlite3.IntegrityError:
+        else:
             existing += 1
 
-    conn.commit()
     return new, existing
 
 

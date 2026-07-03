@@ -28,7 +28,7 @@ console = Console()
 log = logging.getLogger(__name__)
 
 # Valid pipeline stages (in execution order)
-VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+VALID_STAGES = ("discover", "enrich", "gate", "score", "tailor", "cover", "pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -836,6 +836,34 @@ def prune_expired(
         console.print(f"  [red]expired[/red] {u}")
     if len(result.expired_urls) > 20:
         console.print(f"  … and {len(result.expired_urls) - 20} more")
+
+
+@app.command("gate")
+def gate_cmd(
+    rerun: bool = typer.Option(False, "--rerun", help="Re-gate all rows whose gate_version is stale."),
+) -> None:
+    """Run (or re-run) the eligibility gate over stored jobs."""
+    _bootstrap()
+    from applypilot import database as db
+    from applypilot.gate import GATE_VERSION
+    from applypilot.gate.engine import gate_job
+    from applypilot.gate.profile_map import gate_profile
+    from applypilot.config import load_profile, load_search_config
+    conn = db.get_connection()
+    try:
+        policy = gate_profile(load_profile(), load_search_config())
+    except Exception:
+        policy = gate_profile({}, {})
+    if rerun:
+        rows = conn.execute("SELECT * FROM jobs WHERE gate_version IS NULL OR gate_version < ?",
+                            (GATE_VERSION,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM jobs WHERE gated_at IS NULL AND full_description IS NOT NULL").fetchall()
+    n = 0
+    for row in rows:
+        db.update_gate(conn, row["url"], gate_job(dict(row), policy))
+        n += 1
+    console.print(f"Gated [bold]{n}[/bold] jobs at version {GATE_VERSION}.")
 
 
 @app.command()

@@ -234,7 +234,16 @@ def run_ats_boards_discovery(workers: int = 4, hours_old: int | None = None) -> 
 
     # Store all. We bypass store_jobs() so we can populate full_description
     # AND application_url from the API directly — no enrichment needed.
-    import sqlite3
+    # Gate at ingest so the scorer only ever sees gated-eligible rows.
+    from applypilot.gate.engine import gate_job
+    from applypilot.gate.profile_map import gate_profile
+    from applypilot import database as _db
+    from applypilot.config import load_profile, load_search_config
+    try:
+        _policy = gate_profile(load_profile(), load_search_config())
+    except Exception:
+        _policy = gate_profile({}, {})   # missing profile -> permissive-ish defaults; rows still gated
+
     conn = get_connection()
     total_new = 0
     total_dup = 0
@@ -248,25 +257,22 @@ def run_ats_boards_discovery(workers: int = 4, hours_old: int | None = None) -> 
             url = j.get("url")
             if not url:
                 continue
-            try:
-                conn.execute(
-                    "INSERT INTO jobs ("
-                    "url, title, salary, description, full_description, "
-                    "application_url, location, site, strategy, "
-                    "discovered_at, detail_scraped_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        url, j.get("title"), j.get("salary"),
-                        j.get("description"), j.get("description"),
-                        url,  # application_url = job URL (apply on same page)
-                        j.get("location"), site_label, strategy,
-                        j.get("posted_at") or now, now,
-                    ),
-                )
+            job_row = {
+                "url": url,
+                "title": j.get("title"),
+                "salary": j.get("salary"),
+                "description": j.get("description"),
+                "full_description": j.get("description"),
+                "application_url": url,  # application_url = job URL (apply on same page)
+                "location": j.get("location"),
+                "site": site_label,
+                "posted_at": j.get("posted_at") or now,
+                "detail_scraped_at": now,
+            }
+            if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy=strategy):
                 total_new += 1
-            except sqlite3.IntegrityError:
+            else:
                 total_dup += 1
-    conn.commit()
 
     elapsed = time.time() - t0
     total = sum(len(j) for _, _, j in all_jobs)

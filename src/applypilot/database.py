@@ -464,6 +464,57 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
     return new, existing
 
 
+# Full column list stored/updated by BOTH store_gated and update_gate — keep in sync.
+_GATE_COLS = ["identity_id", "ats", "board_token", "ats_job_id", "gate_result",
+              "gate_reasons", "automatability", "gate_version", "gated_at"]
+
+
+def _gate_values(gate: dict) -> list:
+    import json as _json
+    return [gate["identity_id"], gate["ats"], gate["board_token"], gate["ats_job_id"],
+            gate["gate_result"], _json.dumps(gate["gate_reasons"]), gate["automatability"],
+            gate["gate_version"], gate["gated_at"]]
+
+
+def store_gated(conn, job: dict, gate: dict, *, strategy: str) -> bool:
+    """Insert a discovered job with its gate verdict. Returns True if new.
+    Mirrors store_jobs' INSERT+IntegrityError dedup on the url PK. Jobs are
+    ALWAYS stored regardless of verdict (audit + retroactive re-gate)."""
+    now = datetime.now(timezone.utc).isoformat()
+    url = job.get("url")
+    if not url:
+        return False
+    try:
+        conn.execute(
+            "INSERT INTO jobs (url, title, salary, description, full_description, "
+            "application_url, location, site, strategy, discovered_at, detail_scraped_at, "
+            "detail_error, identity_id, ats, board_token, ats_job_id, gate_result, "
+            "gate_reasons, automatability, gate_version, gated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [url, job.get("title"), job.get("salary"), job.get("description"),
+             job.get("full_description") or job.get("description"),
+             job.get("application_url") or url, job.get("location"), job.get("site"),
+             # discovered_at must never be NULL; detail_scraped_at MUST stay NULL
+             # for thin rows so the enrich stage still picks them up.
+             strategy, job.get("posted_at") or now, job.get("detail_scraped_at"),
+             job.get("detail_error")] + _gate_values(gate),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def update_gate(conn, url: str, gate: dict) -> None:
+    """Re-stamp an existing row's gate columns (catch-up 'gate' stage and
+    'gate --rerun'). Does NOT touch discovery/enrichment columns."""
+    conn.execute(
+        f"UPDATE jobs SET {', '.join(f'{c} = ?' for c in _GATE_COLS)} WHERE url = ?",
+        _gate_values(gate) + [url],
+    )
+    conn.commit()
+
+
 def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
                       stage: str = "discovered",
                       min_score: int | None = None,
@@ -486,7 +537,17 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         "discovered": "1=1",
         "pending_detail": "detail_scraped_at IS NULL",
         "enriched": "full_description IS NOT NULL",
-        "pending_score": "full_description IS NOT NULL AND fit_score IS NULL",
+        # Ungated OR gated before enrichment finished (thin->full description):
+        # the gate stage re-gates so sponsorship/location verdicts use the full text.
+        "pending_gate": (
+            "gated_at IS NULL "
+            "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at)"
+        ),
+        "pending_score": (
+            "full_description IS NOT NULL AND fit_score IS NULL "
+            "AND gated_at IS NOT NULL AND gate_result = 'eligible' "
+            "AND (detail_scraped_at IS NULL OR gated_at >= detail_scraped_at)"
+        ),
         "scored": "fit_score IS NOT NULL",
         "pending_tailor": (
             "fit_score >= ? AND full_description IS NOT NULL "

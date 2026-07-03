@@ -304,30 +304,38 @@ def _filter_jobs(
 
 
 def _store_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> tuple[int, int]:
+    from applypilot.gate.engine import gate_job
+    from applypilot.gate.profile_map import gate_profile
+    from applypilot import database as _db
+    from applypilot.config import load_profile, load_search_config
+    try:
+        _policy = gate_profile(load_profile(), load_search_config())
+    except Exception:
+        _policy = gate_profile({}, {})   # missing profile -> permissive-ish defaults; rows still gated
+
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     duplicates = 0
 
     for job in jobs:
         detail_scraped_at = now if job.get("full_description") else None
-        try:
-            conn.execute(
-                "INSERT INTO jobs ("
-                "url, title, salary, description, full_description, "
-                "application_url, location, site, strategy, discovered_at, detail_scraped_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    job["url"], job["title"], job.get("salary"),
-                    job.get("description"), job.get("full_description"),
-                    job.get("application_url"), job.get("location"), job.get("site"),
-                    "theirstack_api", job.get("posted_at") or now, detail_scraped_at,
-                ),
-            )
+        job_row = {
+            "url": job["url"],
+            "title": job["title"],
+            "salary": job.get("salary"),
+            "description": job.get("description"),
+            "full_description": job.get("full_description"),
+            "application_url": job.get("application_url"),
+            "location": job.get("location"),
+            "site": job.get("site"),
+            "posted_at": job.get("posted_at"),
+            "detail_scraped_at": detail_scraped_at,
+        }
+        if _db.store_gated(conn, job_row, gate_job(job_row, _policy), strategy="theirstack_api"):
             new += 1
-        except sqlite3.IntegrityError:
+        else:
             duplicates += 1
 
-    conn.commit()
     return new, duplicates
 
 

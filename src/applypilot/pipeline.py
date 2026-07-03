@@ -34,11 +34,12 @@ console = Console()
 # Stage definitions
 # ---------------------------------------------------------------------------
 
-STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+STAGE_ORDER = ("discover", "enrich", "gate", "score", "tailor", "cover", "pdf")
 
 STAGE_META: dict[str, dict] = {
     "discover": {"desc": "Job discovery (JobSpy + Workday + ATS boards + TheirStack)"},
     "enrich":   {"desc": "Detail enrichment (full descriptions + apply URLs)"},
+    "gate":     {"desc": "Eligibility gate (location/visa/seniority/automatability)"},
     "score":    {"desc": "LLM scoring (fit 1-10)"},
     "tailor":   {"desc": "Resume tailoring (LLM + validation)"},
     "cover":    {"desc": "Cover letter generation"},
@@ -50,7 +51,8 @@ STAGE_META: dict[str, dict] = {
 _UPSTREAM: dict[str, str | None] = {
     "discover": None,
     "enrich":   "discover",
-    "score":    "enrich",
+    "gate":     "enrich",
+    "score":    "gate",
     "tailor":   "score",
     "cover":    "tailor",
     "pdf":      "cover",
@@ -287,6 +289,34 @@ def _run_enrich(
         return {"status": f"error: {e}"}
 
 
+def _run_gate(min_score=None, **kwargs) -> dict:
+    """Stage: Eligibility gate — (re-)stamp gate verdicts on ungated / stale rows.
+
+    Runs the deterministic gate over `pending_gate` rows (never gated, or
+    gated before enrichment produced the full description). The scorer only
+    sees gated-eligible rows downstream.
+    """
+    try:
+        from applypilot import database as db
+        from applypilot.gate.engine import gate_job
+        from applypilot.gate.profile_map import gate_profile
+        from applypilot.config import load_profile, load_search_config
+        conn = db.get_connection()
+        try:
+            policy = gate_profile(load_profile(), load_search_config())
+        except Exception:
+            policy = gate_profile({}, {})
+        rows = db.get_jobs_by_stage(conn, "pending_gate", limit=0)
+        n = 0
+        for row in rows:
+            db.update_gate(conn, row["url"], gate_job(dict(row), policy))
+            n += 1
+        return {"status": "ok", "gated": n}
+    except Exception as e:
+        log.error("Gate failed: %s", e)
+        return {"status": f"error: {e}"}
+
+
 def _run_score(
     limit: int = 0,
     resolve_linkedin_site_contains: str | None = None,
@@ -382,6 +412,7 @@ def _run_pdf() -> dict:
 _STAGE_RUNNERS: dict[str, callable] = {
     "discover": _run_discover,
     "enrich":   _run_enrich,
+    "gate":     _run_gate,
     "score":    _run_score,
     "tailor":   _run_tailor,
     "cover":    _run_cover,
@@ -445,7 +476,18 @@ class _StageTracker:
 
 # SQL to count pending work for each stage
 _PENDING_SQL: dict[str, str] = {
-    "score":  "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL",
+    "gate": (
+        "SELECT COUNT(*) FROM jobs WHERE gated_at IS NULL "
+        "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at)"
+    ),
+    # Mirror database.get_jobs_by_stage("pending_score"): only gated-eligible
+    # rows (gated after enrichment) are countable pending-score work, else the
+    # streaming score loop would spin forever on ineligible/ungated rows.
+    "score": (
+        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL "
+        "AND gated_at IS NOT NULL AND gate_result = 'eligible' "
+        "AND (detail_scraped_at IS NULL OR gated_at >= detail_scraped_at)"
+    ),
     "tailor": (
         "SELECT COUNT(*) FROM jobs WHERE fit_score >= ? "
         "AND full_description IS NOT NULL "
