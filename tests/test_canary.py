@@ -69,3 +69,15 @@ def test_ambiguous_polarity_returns_none():
 def test_citizenship_refused():
     # profile has no citizenship field -> never answer citizenship questions
     assert resolve_canary("Are you a US citizen?", PROFILE) is None
+
+
+def test_string_booleans_normalized():
+    p = {"work_authorization": {"legally_authorized_to_work": "Yes", "require_sponsorship": "No"}}
+    assert resolve_canary("Will you require sponsorship?", p) in ("No", "no")       # string "No" != truthy
+    assert resolve_canary("Are you legally authorized to work in the US?", p) in ("Yes", "yes")
+
+
+def test_unparseable_flag_stays_unresolved():
+    p = {"work_authorization": {"require_sponsorship": "maybe"}}
+    assert resolve_canary("Will you require sponsorship?", p) is None
+    assert resolve_canary("Do you require sponsorship?", {}) is None  # missing flag -> park, never guess

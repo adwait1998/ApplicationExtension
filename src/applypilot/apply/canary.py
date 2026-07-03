@@ -24,6 +24,23 @@ _MARKERS = {
 
 _NEGATION_RE = re.compile(r"\b(without|not require|don'?t require|do not require|no need)\b", re.I)
 
+_TRUTHY = {"true", "yes", "y", "1"}
+_FALSY = {"false", "no", "n", "0"}
+
+
+def _as_bool(value) -> bool | None:
+    """Strict tri-state: real bools pass through; yes/no-style strings normalize;
+    anything else (None, '', 'maybe', 3) is None -> the canary stays unresolved."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in _TRUTHY:
+            return True
+        if v in _FALSY:
+            return False
+    return None
+
 
 def is_canary(question: str) -> bool:
     q = question or ""
@@ -52,14 +69,18 @@ def resolve_canary(question: str, profile: dict) -> str | None:
 
     # sponsorship / workauth: polarity-sensitive
     if _MARKERS["sponsorship"].search(q):
-        requires = bool(wa.get("require_sponsorship"))
+        requires = _as_bool(wa.get("require_sponsorship"))
+        if requires is None:
+            return None  # missing/unparseable flag -> park, never guess an attestation
         negated = _NEGATION_RE.search(q) is not None
         # need explicit polarity context; a bare "Sponsorship?" is ambiguous
         if not re.search(r"\b(require|need|without|now or in the future|will you|can you|are you able)\b", q, re.I):
             return None
         return _yn(not requires) if negated else _yn(requires)
     if _MARKERS["workauth"].search(q):
-        authorized = bool(wa.get("legally_authorized_to_work"))
+        authorized = _as_bool(wa.get("legally_authorized_to_work"))
+        if authorized is None:
+            return None  # missing/unparseable flag -> park, never guess an attestation
         negated = _NEGATION_RE.search(q) is not None
         return _yn(not authorized) if negated else _yn(authorized)
 
