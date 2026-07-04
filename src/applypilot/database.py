@@ -236,6 +236,42 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             error          TEXT
         )
     """)
+
+    # v2 Form Compiler resolver cache (spec §6.4). One row per (ats, field_fp).
+    # Stores a BINDING, never a literal value (privacy-safe, survives profile
+    # edits): binding is 'profile.<path>' or 'answer:<question_fp>' or
+    # 'policy.<key>'. Demote-never-archive: fail_streak >= 2 demotes (active=0)
+    # for re-resolution; rows are versioned + kept, never deleted. Also holds
+    # the auto-harvested submit-endpoint signature per (ats, company) that
+    # Tier-1 network-evidence verify writes on confirmed success.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS mapping_cache (
+            ats            TEXT NOT NULL,       -- 'greenhouse'
+            field_fp       TEXT NOT NULL,       -- ir.field_fp (primary key part)
+            binding        TEXT NOT NULL,       -- 'profile.<path>' | 'answer:<qfp>' | 'policy.<k>'
+            widget_driver  TEXT,                -- registry key ('text','react_select',...)
+            locator_tier   TEXT,                -- winning healing tier ('role_name','label',...)
+            version        INTEGER NOT NULL DEFAULT 1,
+            active         INTEGER NOT NULL DEFAULT 1,  -- 0 = demoted (re-resolve)
+            fail_streak    INTEGER NOT NULL DEFAULT 0,
+            hits           INTEGER NOT NULL DEFAULT 0,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            PRIMARY KEY (ats, field_fp)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS submit_endpoints (
+            ats            TEXT NOT NULL,       -- 'greenhouse'
+            company        TEXT NOT NULL,       -- board token / company slug
+            method         TEXT NOT NULL,       -- 'POST'
+            url_pattern    TEXT NOT NULL,       -- harvested submit endpoint (host+path)
+            seen_count     INTEGER NOT NULL DEFAULT 1,
+            first_seen     TEXT NOT NULL,
+            last_seen      TEXT NOT NULL,
+            PRIMARY KEY (ats, company, url_pattern)
+        )
+    """)
     conn.commit()
 
     # Run migrations for any columns added after initial schema
