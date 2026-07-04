@@ -167,6 +167,7 @@ class LLMClient:
         messages: list[dict],
         temperature: float,
         max_tokens: int,
+        response_format: dict | None = None,
     ) -> str:
         """Call the OpenAI-compatible endpoint."""
         headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -179,6 +180,8 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
 
         resp = self._client.post(
             f"{self.base_url}/chat/completions",
@@ -206,6 +209,7 @@ class LLMClient:
         messages: list[dict],
         temperature: float = 0.0,
         max_tokens: int = 4096,
+        response_format: dict | None = None,
     ) -> str:
         """Send a chat completion request and return the assistant message text."""
         # Qwen3 optimization: prepend /no_think to skip chain-of-thought
@@ -230,7 +234,8 @@ class LLMClient:
                 if self._use_native_gemini:
                     return self._chat_native_gemini(messages, temperature, max_tokens)
 
-                return self._chat_compat(messages, temperature, max_tokens)
+                return self._chat_compat(messages, temperature, max_tokens,
+                                         response_format=response_format)
 
             except _GeminiCompatForbidden:
                 # Model not available on OpenAI-compat layer — switch to native.
@@ -340,7 +345,11 @@ class ClaudeCodeClient:
         messages: list[dict],
         temperature: float = 0.0,
         max_tokens: int = 4096,
+        response_format: dict | None = None,
     ) -> str:
+        # response_format is accepted for a uniform Operator call signature but
+        # ignored — the CLI has no structured-output hint; the Operator json.loads
+        # + validates + retries regardless.
         prompt = self._format_messages(messages)
         cmd = [
             self.claude_bin,

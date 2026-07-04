@@ -36,10 +36,16 @@ class SpendLedger:
     def record(self, *, stage: str, model: str, tokens_in: int, tokens_out: int,
                identity_id: str | None = None) -> float:
         cost = estimate_cost(model, tokens_in, tokens_out)
+        # A ledger built without a path (e.g. SpendLedger.__new__ in tests, or a
+        # deliberately disabled ledger) meters as a no-op rather than crashing the
+        # LLM call it wraps — spend accounting must never break the apply path.
+        path = getattr(self, "path", None)
+        if path is None:
+            return cost
         row = {"ts": time.time(), "stage": stage, "model": model, "identity_id": identity_id,
                "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_usd": round(cost, 6)}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as f:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         return cost
 
@@ -77,8 +83,16 @@ class MeteredClient:
         self._model = model
         self._stage = stage
 
-    def chat(self, messages, temperature: float = 0.0, max_tokens: int = 4096) -> str:
-        out = self._inner.chat(messages, temperature=temperature, max_tokens=max_tokens)
+    def chat(self, messages, temperature: float = 0.0, max_tokens: int = 4096,
+             response_format=None) -> str:
+        # Forward response_format so the metering wrapper is NOT the layer that
+        # drops the Operator's structured-output hint. Degrade gracefully for
+        # older inner clients whose chat() has no response_format kwarg.
+        try:
+            out = self._inner.chat(messages, temperature=temperature, max_tokens=max_tokens,
+                                   response_format=response_format)
+        except TypeError:
+            out = self._inner.chat(messages, temperature=temperature, max_tokens=max_tokens)
         tin = sum(_est_tokens(m.get("content", "")) for m in messages)
         self._ledger.record(stage=self._stage, model=self._model,
                             tokens_in=tin, tokens_out=_est_tokens(out))
@@ -86,7 +100,8 @@ class MeteredClient:
 
     def ask(self, prompt: str, **kwargs) -> str:
         return self.chat([{"role": "user", "content": prompt}], **{
-            k: v for k, v in kwargs.items() if k in ("temperature", "max_tokens")})
+            k: v for k, v in kwargs.items()
+            if k in ("temperature", "max_tokens", "response_format")})
 
     def close(self):
         if hasattr(self._inner, "close"):
