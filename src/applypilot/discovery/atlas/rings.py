@@ -43,6 +43,13 @@ def is_due(board: dict, *, now: str) -> bool:
     ring = board.get("ring")
     if ring is None:
         return True
+    # Cold-start bootstrap: a board that has never been CONTENT-polled (no
+    # job_id_set_hash yet) is always due. `validate` records an existence-check
+    # as last_checked, which would otherwise block the board's FIRST real poll
+    # for a whole cadence window — so a freshly imported/validated Atlas could
+    # never populate its queue. Once content-polled, normal cadence applies.
+    if not (board.get("job_id_set_hash") or ""):
+        return True
     since = _hours_since(board.get("last_checked"), now)
     if since is None:
         return True
