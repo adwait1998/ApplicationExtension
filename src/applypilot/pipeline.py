@@ -266,6 +266,25 @@ def _run_discover(
     else:
         stats["smartextract"] = "skipped"
 
+    # Board Atlas freshness tick (v2 Phase 2, shadow). Opt-in until go/no-go —
+    # OFF during shadow mode so it doesn't perturb the live crawler.
+    if "atlas" in enabled or os.environ.get("APPLYPILOT_ATLAS_ENABLED") == "1":
+        console.print("  [cyan]Board Atlas tick (ring 0/1)...[/cyan]")
+        try:
+            from applypilot import database as _db
+            from applypilot.discovery.atlas.tick import run_tick
+            from applypilot.gate.profile_map import gate_profile
+            from applypilot.config import load_profile, load_search_config
+            policy = gate_profile(load_profile(), load_search_config())
+            res = run_tick(_db.get_connection(), policy)
+            stats["atlas"] = f"ok: {res['jobs_new']} new, {res['jobs_eligible']} eligible"
+        except Exception as e:
+            log.error("Atlas tick failed: %s", e)
+            console.print(f"  [red]Atlas error:[/red] {e}")
+            stats["atlas"] = f"error: {e}"
+    else:
+        stats["atlas"] = "skipped"
+
     return stats
 
 

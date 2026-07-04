@@ -80,6 +80,96 @@ def _version_callback(value: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Board Atlas sub-app (v2 Phase 2, shadow mode) — thin shells over discovery.atlas
+# ---------------------------------------------------------------------------
+
+atlas_app = typer.Typer(help="Board Atlas — discovery at scale (v2 Phase 2, shadow mode).")
+app.add_typer(atlas_app, name="atlas")
+
+
+@atlas_app.command("import")
+def atlas_import() -> None:
+    """One-time seed of the boards registry from ats_companies.yaml (56 tokens)."""
+    _bootstrap()
+    from applypilot import database as db
+    from applypilot.discovery.atlas.importer import import_registry
+    n = import_registry(db.get_connection())
+    console.print(f"Imported [bold]{n}[/bold] new boards from the ATS registry.")
+
+
+@atlas_app.command("mine")
+def atlas_mine() -> None:
+    """Harvest candidate board tokens from the jobs DB + bundled CC snapshot."""
+    _bootstrap()
+    from applypilot import database as db
+    from applypilot.discovery.atlas.miner import mine_candidates
+    n = mine_candidates(db.get_connection())
+    console.print(f"Mined [bold]{n}[/bold] new candidate boards (status=candidate).")
+
+
+@atlas_app.command("validate")
+def atlas_validate(
+    limit: int = typer.Option(500, "--limit", help="Max candidate boards to validate this run."),
+) -> None:
+    """Promote surviving candidate boards to 'active' via one cheap existence check each."""
+    _bootstrap()
+    from applypilot import database as db
+    from applypilot.discovery.atlas import validator
+    from applypilot.discovery.atlas.politeness import HostRateLimiter
+    conn = db.get_connection()
+    limiter = HostRateLimiter(rps=4.0)
+    cands = conn.execute(
+        "SELECT ats, token FROM boards WHERE status = 'candidate' LIMIT ?", (limit,)).fetchall()
+    ok = 0
+    for r in cands:
+        if validator.validate_board(conn, r["ats"], r["token"], limiter=limiter).ok:
+            ok += 1
+    console.print(f"Validated [bold]{ok}[/bold]/{len(cands)} candidate boards to active.")
+
+
+@atlas_app.command("tick")
+def atlas_tick(
+    budget: int = typer.Option(6000, "--budget", help="Max board polls this tick (ring 0/1)."),
+) -> None:
+    """Run one idempotent freshness TICK (poll due ring-0/1 boards; no daemon)."""
+    _bootstrap()
+    from applypilot import database as db
+    from applypilot.discovery.atlas.tick import run_tick
+    from applypilot.gate.profile_map import gate_profile
+    from applypilot.config import load_profile, load_search_config
+    policy = gate_profile(load_profile(), load_search_config())
+    res = run_tick(db.get_connection(), policy, budget=budget)
+    console.print(
+        f"Atlas tick: polled [bold]{res['boards_polled']}[/bold] boards, "
+        f"{res['jobs_new']} new jobs, {res['jobs_eligible']} eligible"
+        + (f" [red](error: {res['error']})[/red]" if res.get("error") else "")
+    )
+
+
+@atlas_app.command("report")
+def atlas_report() -> None:
+    """Shadow-mode telemetry + go/no-go for the Phase 2 exit."""
+    _bootstrap()
+    from applypilot import database as db
+    from applypilot.discovery.atlas import telemetry
+    conn = db.get_connection()
+    verdict = telemetry.go_no_go(conn)
+    cov = verdict["signals"]["board_coverage"]
+    table = Table(title="Atlas board coverage", header_style="bold cyan")
+    table.add_column("ATS")
+    table.add_column("active", justify="right")
+    table.add_column("candidate", justify="right")
+    table.add_column("dead", justify="right")
+    for ats, d in sorted(cov.items()):
+        table.add_row(ats, str(d.get("active", 0)), str(d.get("candidate", 0)), str(d.get("dead", 0)))
+    console.print(table)
+    vol = verdict["signals"]["poll_volume"]
+    console.print(f"Poll volume: {vol['total_requests']} requests over {vol['runs']} runs")
+    console.print(f"Fresh-eligible depth: [bold]{verdict['signals']['fresh_eligible_depth']}[/bold]")
+    console.print(f"Go/no-go: {'[green]GO[/green]' if verdict['go'] else '[yellow]NO-GO (iterate)[/yellow]'}")
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
