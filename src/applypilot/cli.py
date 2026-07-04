@@ -164,8 +164,12 @@ def atlas_report() -> None:
         table.add_row(ats, str(d.get("active", 0)), str(d.get("candidate", 0)), str(d.get("dead", 0)))
     console.print(table)
     vol = verdict["signals"]["poll_volume"]
+    sig = verdict["signals"]
     console.print(f"Poll volume: {vol['total_requests']} requests over {vol['runs']} runs")
-    console.print(f"Fresh-eligible depth: [bold]{verdict['signals']['fresh_eligible_depth']}[/bold]")
+    console.print(f"Review-ready depth: [bold]{sig['review_ready_depth']}[/bold]"
+                  + (f"  (auto-eligible: {sig['fresh_eligible_depth']}; "
+                     f"rest are sponsorship-unknown -> review, needs_sponsorship={sig['needs_sponsorship']})"
+                     if sig.get("needs_sponsorship") else ""))
     console.print(f"Go/no-go: {'[green]GO[/green]' if verdict['go'] else '[yellow]NO-GO (iterate)[/yellow]'}")
 
 

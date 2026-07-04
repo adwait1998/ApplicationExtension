@@ -60,3 +60,42 @@ def test_go_no_go_verdict(tmp_path):
     verdict = telemetry.go_no_go(conn, min_fresh_eligible=5, max_error_runs=0)
     assert verdict["go"] is True
     assert "fresh_eligible_depth" in verdict["signals"]
+
+
+def _seed_gated(conn, url, gate_result, *, loc="PASS", sen="PASS", auto="PASS", spo="PASS"):
+    import json as _j
+    reasons = _j.dumps([
+        {"rule": "location", "result": loc, "code": "x"},
+        {"rule": "seniority", "result": sen, "code": "x"},
+        {"rule": "automatability", "result": auto, "code": "x"},
+        {"rule": "sponsorship", "result": spo, "code": "x"},
+    ])
+    conn.execute("INSERT INTO jobs (url, strategy, gate_result, gate_reasons) VALUES (?,?,?,?)",
+                 (url, "atlas:greenhouse", gate_result, reasons))
+    conn.commit()
+
+
+def test_review_ready_counts_sponsorship_only_unknown_for_visa(tmp_path):
+    from applypilot import database as db
+    from applypilot.discovery.atlas import telemetry
+    db.init_db(tmp_path / "t.db"); conn = db.get_connection(tmp_path / "t.db")
+    _seed_gated(conn, "elig", "eligible")                                   # counts always
+    _seed_gated(conn, "spo_only", "unknown", spo="UNKNOWN")                 # visa: review-ready
+    _seed_gated(conn, "loc_bad", "ineligible", loc="REJECT", spo="UNKNOWN") # never (hard reject)
+    _seed_gated(conn, "sen_bad", "unknown", sen="REJECT", spo="UNKNOWN")    # never (2 opens)
+    # visa profile: eligible + sponsorship-only-unknown = 2
+    assert telemetry.review_ready_depth(conn, needs_sponsorship=True) == 2
+    # non-visa: only eligible = 1
+    assert telemetry.review_ready_depth(conn, needs_sponsorship=False) == 1
+
+def test_go_no_go_reports_both_depths(tmp_path):
+    from applypilot import database as db
+    from applypilot.discovery.atlas import telemetry
+    db.init_db(tmp_path / "g.db"); conn = db.get_connection(tmp_path / "g.db")
+    for i in range(6):
+        _seed_gated(conn, f"s{i}", "unknown", spo="UNKNOWN")
+    r = telemetry.go_no_go(conn, needs_sponsorship=True)
+    assert r["signals"]["review_ready_depth"] == 6 and r["signals"]["fresh_eligible_depth"] == 0
+    assert r["go"] is True                                                  # 6 >= 5, visa review-ready
+    r2 = telemetry.go_no_go(conn, needs_sponsorship=False)
+    assert r2["go"] is False                                                # 0 eligible for non-visa
