@@ -217,6 +217,25 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS idx_boards_ring_status "
         "ON boards(ring, status)"
     )
+
+    # Per-source run accounting (v2 Phase 2, spec §7.2). One row per Atlas tick
+    # (or per source per tick). Requests/yield/cost join down-funnel so zero-yield
+    # sources demote automatically. Standalone table (not in _ALL_COLUMNS).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS source_runs (
+            run_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            source         TEXT NOT NULL,        -- 'atlas' | 'atlas:greenhouse' | ...
+            started_at     TEXT NOT NULL,
+            finished_at    TEXT,
+            boards_polled  INTEGER DEFAULT 0,
+            requests       INTEGER DEFAULT 0,
+            jobs_seen      INTEGER DEFAULT 0,
+            jobs_new       INTEGER DEFAULT 0,
+            jobs_eligible  INTEGER DEFAULT 0,
+            cost_usd       REAL DEFAULT 0.0,
+            error          TEXT
+        )
+    """)
     conn.commit()
 
     # Run migrations for any columns added after initial schema
