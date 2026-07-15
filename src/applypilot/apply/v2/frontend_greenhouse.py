@@ -98,6 +98,27 @@ def _parse_selector(selector: str | None) -> tuple[str | None, str | None]:
     return elem_id, name_attr
 
 
+def _frame_path(ctrl) -> tuple[str, ...]:
+    """Frame chain for the field; () means the top document (ir.py Field contract).
+
+    collect_browser_observation stamps frame.url on EVERY control — including the
+    main frame, where it is the full page URL (in prod the job URL with a per-job
+    token query string). So we MUST gate on frame DEPTH (frame_index), not on the
+    truthiness of frame_url: gating on frame_url would give every standard
+    single-frame Greenhouse form a non-empty frame_path, violating the '() = top
+    document' contract and baking the per-job URL into question_fp (ir.py) so
+    recurring custom questions never share a fingerprint across jobs on a board.
+
+    For embedded forms (frame_index > 0, e.g. vanity-domain iframes) we use the
+    frame origin+path as a STABLE handle and strip the query string/fragment (the
+    per-job token) so identical recurring questions share a question_fp across
+    jobs. The raw frame_url is retained in locator_spec for frame resolution."""
+    if not ctrl.frame_index or not ctrl.frame_url:
+        return ()
+    stable = ctrl.frame_url.split("?", 1)[0].split("#", 1)[0]
+    return (stable,) if stable else ()
+
+
 def _locator_spec(ctrl) -> dict:
     """Dict that build_element_spec() (Task 5) turns into a healing.ElementSpec.
     Seeds the label + role + real DOM id/name (recovered from the selector) plus
@@ -127,7 +148,7 @@ def _to_field(ctrl) -> ir.Field:
     # char_limit is explicitly set on a field.
     return ir.Field(
         field_id=ctrl.control_id or ctrl.selector or "",
-        frame_path=(ctrl.frame_url,) if ctrl.frame_url else (),
+        frame_path=_frame_path(ctrl),
         label_text=label,
         question_text=question,
         semantic_key=sem,
