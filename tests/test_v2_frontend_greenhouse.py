@@ -6,7 +6,12 @@ from applypilot.apply.browser_stream import collect_browser_observation
 
 
 # Reuse the adapter-test synthetic form shape (label+control pairs, a react-
-# select-ish combobox, a required custom textarea, a submit button).
+# select-ish combobox, a required custom textarea, a submit button). Plus a
+# native <select> EEO pair (Gender identity / Gender) to exercise the two
+# subtlest classifier branches: native-select-first ordering (a native <select>
+# reports control_type="select" AND role="combobox", so it must NOT fall through
+# to the react_select role check) and EEO specific-before-generic key ordering
+# ("Gender identity" must not be hijacked by the generic "gender" synonym).
 _FORM = """
 <!doctype html><html><body>
 <form id="application_form">
@@ -25,6 +30,19 @@ _FORM = """
   </div>
   <label for="cust">Describe a product you shipped</label>
   <textarea id="cust" name="why_8801" required maxlength="500" class="gh-ta z9"></textarea>
+  <label for="gi">Gender identity</label>
+  <select id="gi" name="gender_identity" class="gh-sel eeo1">
+    <option value="">Select...</option>
+    <option value="woman">Woman</option>
+    <option value="man">Man</option>
+    <option value="nonbinary">Non-binary</option>
+  </select>
+  <label for="gn">Gender</label>
+  <select id="gn" name="gender" class="gh-sel eeo2">
+    <option value="">Select...</option>
+    <option value="female">Female</option>
+    <option value="male">Male</option>
+  </select>
   <button id="sub" type="button">Submit application</button>
 </form></body></html>
 """
@@ -107,3 +125,30 @@ def test_canary_keys_flagged_on_schema(page):
     schema = _schema(page)
     wa = [f for s in schema.steps for f in s.fields if f.semantic_key == "work_auth"][0]
     assert ir.is_canary_key(wa.semantic_key) is True  # resolver will not oracle it
+
+
+def test_native_select_classified_not_react_select(page):
+    # A native <select> reports control_type="select" AND role="combobox"; the
+    # native-select-first ordering in _widget_kind MUST win over the react_select
+    # role check, else the executor would drive it as a react-select combobox.
+    schema = _schema(page)
+    kinds = {f.semantic_key: f.widget.kind for s in schema.steps for f in s.fields}
+    assert kinds["eeo.gender"] == "native_select"
+    assert kinds["eeo.gender_identity"] == "native_select"
+    # invariant 4 still holds for native selects (options never enumerated at parse)
+    by_key = {f.semantic_key: f for s in schema.steps for f in s.fields}
+    assert by_key["eeo.gender"].options is ir.LAZY
+    assert by_key["eeo.gender_identity"].options is ir.LAZY
+
+
+def test_eeo_specific_key_beats_generic_gender(page):
+    # "Gender identity" must resolve to the specific eeo.gender_identity key and
+    # not be hijacked by the generic "gender" synonym (most-specific-first order).
+    # If the ordering were reversed both labels would collapse onto eeo.gender and
+    # eeo.gender_identity would be absent.
+    schema = _schema(page)
+    by_key = {f.semantic_key: f for s in schema.steps for f in s.fields}
+    assert "eeo.gender_identity" in by_key
+    assert "eeo.gender" in by_key
+    assert by_key["eeo.gender_identity"].label_text.lower() == "gender identity"
+    assert by_key["eeo.gender"].label_text.lower() == "gender"
