@@ -152,3 +152,68 @@ def test_eeo_specific_key_beats_generic_gender(page):
     assert "eeo.gender" in by_key
     assert by_key["eeo.gender_identity"].label_text.lower() == "gender identity"
     assert by_key["eeo.gender"].label_text.lower() == "gender"
+
+
+# The two tests below cover the load-bearing _frame_path branch (embedded ATS
+# forms in vanity-domain iframes). The single-form tests above only ever exercise
+# top-frame controls, so nothing there distinguishes "gate on frame DEPTH" from
+# the plausible-but-wrong "gate on frame_url truthiness" simplification.
+
+
+def test_embedded_frame_field_stamps_stripped_path_top_stays_empty(page):
+    # Render a top-frame control PLUS an iframe-embedded control served at a real
+    # URL carrying a per-job ?token= query, then assert:
+    #   - the top-frame field -> frame_path == ()  (its frame_url is a truthy
+    #     'about:blank', so a gate on frame_url TRUTHINESS would wrongly stamp it;
+    #     only a gate on frame DEPTH (frame_index) leaves it empty)
+    #   - the embedded field -> frame_path == the query-STRIPPED origin+path, so
+    #     recurring custom questions share a question_fp across jobs on a board
+    #     (question_fp joins frame_path; an unstripped per-job token would break it)
+    embed_url = "http://embed.greenhouse.test/forms/acme?token=perjob-123"
+    iframe_html = (
+        "<!doctype html><html><body>"
+        "<label for='ph'>Phone</label>"
+        "<input id='ph' name='phone' type='tel'>"
+        "</body></html>"
+    )
+    top = (
+        "<!doctype html><html><body>"
+        "<form id='top'><label for='fn'>First name</label>"
+        "<input id='fn' name='first_name' type='text' required></form>"
+        f"<iframe id='emb' src='{embed_url}'></iframe>"
+        "</body></html>"
+    )
+    page.context.route(
+        "**/embed.greenhouse.test/**",
+        lambda route: route.fulfill(status=200, content_type="text/html", body=iframe_html),
+    )
+    page.set_content(top)
+    # Deterministic wait: the embedded input must be attached before we observe.
+    page.frame_locator("#emb").locator("#ph").wait_for(state="attached", timeout=5000)
+    obs = collect_browser_observation(page)
+    schema = fe.parse_observation(obs, company="acme",
+                                  url="https://boards.greenhouse.io/acme/jobs/1")
+    by_label = {f.label_text.lower(): f for s in schema.steps for f in s.fields}
+    # Guard: both controls present (a broken iframe load would drop "phone" and
+    # let the top-frame assertion pass vacuously).
+    assert "first name" in by_label and "phone" in by_label
+    # Guard: the observation really placed the embedded control in a child frame.
+    assert [c for c in obs.controls if c.label == "Phone"][0].frame_index > 0
+
+    assert by_label["first name"].frame_path == ()   # top document, not stamped
+    assert by_label["phone"].frame_path == ("http://embed.greenhouse.test/forms/acme",)
+
+
+def test_frame_path_gates_on_depth_and_strips_query_and_fragment():
+    # Direct unit coverage of the pure _frame_path branches (no browser).
+    from applypilot.apply.browser_stream import ControlObservation
+    # frame_index == 0 with a truthy per-job page URL -> top document, NOT stamped.
+    top = ControlObservation(
+        frame_index=0, frame_url="https://boards.greenhouse.io/acme/jobs/1?t=abc")
+    assert fe._frame_path(top) == ()
+    # Embedded frame: strip BOTH ?query and #fragment (the per-job token).
+    emb = ControlObservation(
+        frame_index=2, frame_url="https://apply.example.com/embed/form?token=xyz#sec")
+    assert fe._frame_path(emb) == ("https://apply.example.com/embed/form",)
+    # Embedded but no frame_url -> nothing to stamp.
+    assert fe._frame_path(ControlObservation(frame_index=1, frame_url="")) == ()
