@@ -771,14 +771,20 @@ def apply(
 
 
 @app.command()
-def report() -> None:
+def report(
+    v2_cutover: bool = typer.Option(
+        False, "--v2-cutover",
+        help="Also print the v2->Greenhouse cutover gate "
+             "(§12.1 pass-rate / §12.2 speed p50 / §12.3 safety-audit trio).",
+    ),
+) -> None:
     """Reliability/cost report from logs/review.jsonl: $/apply, cache
     hit-rate, pass-rate by ATS/tier, and the (A) removable vs
     (B) irreducible failure split."""
     _bootstrap()
     from applypilot import config
     from applypilot.reporting import (
-        load_review_rows, summarize_review, format_report,
+        load_review_rows, summarize_review, format_report, format_v2_cutover,
     )
 
     rows = load_review_rows(config.LOG_DIR / "review.jsonl")
@@ -786,6 +792,8 @@ def report() -> None:
         typer.echo("No review.jsonl rows yet — run some applies first.")
         raise typer.Exit()
     typer.echo(format_report(summarize_review(rows)))
+    if v2_cutover:
+        typer.echo(format_v2_cutover(rows))
 
 
 @app.command()

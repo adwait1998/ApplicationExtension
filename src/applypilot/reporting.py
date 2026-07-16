@@ -163,6 +163,149 @@ def summarize_review(rows: list[dict]) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------------- #
+#  v2 A/B cutover gate (Task 12, spec §13 Phase 3 exit + §12)                  #
+#                                                                             #
+#  PURE reporting over what summarize_review already returns/reads. Does NOT  #
+#  import applypilot.apply.v2 — the tier labels are just constants here:      #
+#  v2 rows carry tier_used="v2_greenhouse" (written by the v2 seam, Task 10), #
+#  legacy rows tier_used="legacy_llm" (skill_runner.dispatch_apply OFF path). #
+#  No new telemetry: v2 vs legacy fall out of the existing tier_used field.   #
+# --------------------------------------------------------------------------- #
+_V2_TIER = "v2_greenhouse"
+_LEGACY_TIER = "legacy_llm"
+
+
+def v2_ab_verdict(summary: dict, *, min_rows: int = 100,
+                  v2_tier: str = _V2_TIER, legacy_tier: str = _LEGACY_TIER) -> dict:
+    """Phase-3 cutover gate, condition §12.1 (pass-rate). Cut Greenhouse over
+    to v2 iff v2 matches or beats legacy on >= min_rows LIVE Greenhouse rows.
+    Pure over summarize_review's ``by_tier`` — dry-run rows are already
+    excluded upstream (summarize_review filters on ``not row["dry_run"]``), so
+    this verdict inherits that live-only behaviour for free.
+
+    Shadow go/no-go (see also v2_cutover_gate for the full 3-condition gate):
+      * GO (pass-rate leg) when v2 n >= min_rows AND v2 pass_rate >= legacy.
+      * HOLD when v2 sample < min_rows, OR v2 pass_rate < legacy.
+    Full cutover ALSO requires §12.2 speed (p50 <= 45s) and §12.3 safety
+    audit (zero dangling/duplicate INTENTs, zero canary violations) — a lucky
+    100 at p50=60s, or a single dangling INTENT, is still a HOLD. Only when
+    all three pass is the legacy tier retired for Greenhouse (spec §6.8:
+    "retired per-ATS once v2 >= v1 on 100+ live rows").
+
+    Returns: {"go", "reason", "v2", "legacy", "min_rows"}.
+    """
+    by_tier = summary.get("by_tier", {})
+    v2 = by_tier.get(v2_tier, {"n": 0, "applied": 0, "pass_rate": 0.0})
+    legacy = by_tier.get(legacy_tier, {"n": 0, "applied": 0, "pass_rate": 0.0})
+    if v2["n"] < min_rows:
+        reason = f"insufficient v2 sample: {v2['n']} < {min_rows} live rows"
+        go = False
+    elif v2["pass_rate"] < legacy["pass_rate"]:
+        reason = (f"v2 pass_rate {v2['pass_rate']} < legacy {legacy['pass_rate']} "
+                  f"(n_v2={v2['n']}, n_legacy={legacy['n']})")
+        go = False
+    else:
+        reason = (f"v2 pass_rate {v2['pass_rate']} >= legacy {legacy['pass_rate']} "
+                  f"on {v2['n']} live rows")
+        go = True
+    return {"go": go, "reason": reason, "v2": v2, "legacy": legacy, "min_rows": min_rows}
+
+
+def v2_p50_duration_ms(rows: list[dict], *, tier: str = _V2_TIER) -> int | None:
+    """Phase-3 cutover gate, condition §12.2 input (speed). p50 (median) of
+    ``duration_ms`` over the LIVE ``tier_used == tier`` rows. Pure query over
+    the same rows summarize_review reads (dry-run and other tiers excluded);
+    no I/O. Returns None when there are no live rows for ``tier`` to measure.
+
+    Account for the react-select sleep tax (Task 6) here — the 45s warm budget
+    is wall-clock, so the sleeps between option clicks are already baked into
+    duration_ms and this p50 reflects them.
+    """
+    vals = sorted(
+        int(r["duration_ms"]) for r in rows
+        if not r.get("dry_run")
+        and str(r.get("tier_used") or "") == tier
+        and r.get("duration_ms") is not None
+    )
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    if len(vals) % 2:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) // 2
+
+
+def v2_cutover_gate(rows: list[dict], *, min_rows: int = 100,
+                    max_p50_ms: int = 45000, audit_clean: bool | None = None,
+                    v2_tier: str = _V2_TIER, legacy_tier: str = _LEGACY_TIER) -> dict:
+    """Full Phase-3 -> cutover go/no-go (spec §13 Phase 3 exit + §12 items 1-3).
+    THREE conditions, ALL of which must pass before flipping the flag — pass
+    rate alone is NOT sufficient:
+
+      §12.1 pass-rate : v2_ab_verdict(summary)["go"] is True (v2 >= legacy on
+                        >= min_rows live Greenhouse rows).
+      §12.2 speed     : p50 of live v2 duration_ms <= max_p50_ms (45s warm).
+      §12.3 safety    : zero dangling/duplicate INTENTs + zero canary-field
+                        violations + zero unauthorized submissions attributable
+                        to v2. This is NOT derivable from review.jsonl, so it
+                        is injected via ``audit_clean`` — the operator runs the
+                        query trio (see format_v2_cutover / below) and passes
+                        the boolean result. audit_clean=None => not-yet-run =>
+                        HOLD (never silently GO on an un-run audit).
+
+    §12.3 query trio (no new telemetry — reads existing durable records):
+      1. submission_ledger.SubmissionLedger.dangling_count() == 0  (a
+         needs_review:v2_crashed_post_submit leaves a dangling INTENT by
+         design — reconcile it, do not count it as a clean submit).
+      2. no identity double-submitted: confirmed_count_for_token(token, since)
+         <= 1 per identity across the v2 burn-in corpus.
+      3. flight-recorder / canary provenance: zero canary-field writes and no
+         submit-POST without an open broker ticket.
+
+    Cache-hit rate (mapping_cache.stats) and parse-gap rate must be MEASURED
+    and reported alongside (risk §15) before any speed claim is trusted.
+
+    Returns: {"go", "pass_rate", "speed", "audit", "min_rows", "max_p50_ms",
+    "reason"}. ``go`` is True iff all three legs are GO.
+    """
+    summary = summarize_review(rows)
+    pass_rate = v2_ab_verdict(summary, min_rows=min_rows,
+                              v2_tier=v2_tier, legacy_tier=legacy_tier)
+
+    p50 = v2_p50_duration_ms(rows, tier=v2_tier)
+    if p50 is None:
+        speed = {"go": False, "p50_ms": None, "max_p50_ms": max_p50_ms,
+                 "reason": f"no live {v2_tier} rows to measure p50"}
+    elif p50 > max_p50_ms:
+        speed = {"go": False, "p50_ms": p50, "max_p50_ms": max_p50_ms,
+                 "reason": f"v2 p50 {p50}ms > {max_p50_ms}ms warm budget"}
+    else:
+        speed = {"go": True, "p50_ms": p50, "max_p50_ms": max_p50_ms,
+                 "reason": f"v2 p50 {p50}ms <= {max_p50_ms}ms warm budget"}
+
+    if audit_clean is None:
+        audit = {"go": None, "reason": (
+            "safety audit not run — query submission_ledger for zero dangling/"
+            "duplicate INTENTs and the flight recorder for zero canary "
+            "violations, then re-run with audit_clean")}
+    elif audit_clean:
+        audit = {"go": True,
+                 "reason": "zero dangling/duplicate INTENTs + zero canary violations"}
+    else:
+        audit = {"go": False,
+                 "reason": "canary/duplicate/dangling-INTENT violation attributable to v2"}
+
+    go = bool(pass_rate["go"]) and bool(speed["go"]) and audit["go"] is True
+    reason = "; ".join([
+        "PASS-RATE ok" if pass_rate["go"] else f"PASS-RATE hold ({pass_rate['reason']})",
+        "SPEED ok" if speed["go"] else f"SPEED hold ({speed['reason']})",
+        "AUDIT ok" if audit["go"] is True else f"AUDIT hold ({audit['reason']})",
+    ])
+    return {"go": go, "pass_rate": pass_rate, "speed": speed, "audit": audit,
+            "min_rows": min_rows, "max_p50_ms": max_p50_ms, "reason": reason}
+
+
 def load_review_rows(path: str | Path) -> list[dict]:
     p = Path(path)
     if not p.exists():
@@ -218,5 +361,46 @@ def format_report(summary: dict[str, Any]) -> str:
     lines.append("  Pass rate by tier:")
     for t, d in s["by_tier"].items():
         lines.append(f"    {t[:28]:28s} {d['applied']:>3}/{d['n']:<3} ({d['pass_rate']:.0%})")
+    if _V2_TIER in s.get("by_tier", {}):
+        v = v2_ab_verdict(s)
+        tag = "CUTOVER-READY" if v["go"] else "HOLD"
+        lines.append(f"  v2 A/B (pass-rate) : {tag} — {v['reason']}")
+    lines.append("=" * 56)
+    return "\n".join(lines)
+
+
+def format_v2_cutover(rows: list[dict], *, audit_clean: bool | None = None) -> str:
+    """Operator-facing render of the full 3-condition v2 cutover gate
+    (spec §13 Phase 3 / §12). Wraps v2_cutover_gate. §12.3 is a MANUAL audit
+    (not in review.jsonl); when audit_clean is None the query trio is printed
+    for the operator to run and then re-invoke with the result."""
+    gate = v2_cutover_gate(rows, audit_clean=audit_clean)
+    pr, sp, au = gate["pass_rate"], gate["speed"], gate["audit"]
+
+    def _mark(g: bool | None) -> str:
+        return "GO  " if g is True else ("HOLD" if g is False else "????")
+
+    lines = [
+        "=" * 56,
+        "  v2 -> Greenhouse cutover gate (spec §13 Phase 3 / §12)",
+        "=" * 56,
+        f"  [{_mark(pr['go'])}] §12.1 pass-rate : {pr['reason']}",
+        f"  [{_mark(sp['go'])}] §12.2 speed p50 : {sp['reason']}",
+        f"  [{_mark(au['go'])}] §12.3 safety    : {au['reason']}",
+        "-" * 56,
+    ]
+    if au["go"] is None:
+        lines += [
+            "  §12.3 is a MANUAL audit (not in review.jsonl). Run the trio:",
+            "    1. submission_ledger.dangling_count() == 0  (reconcile any",
+            "       needs_review:v2_crashed_post_submit dangling INTENT first)",
+            "    2. no identity double-submitted:",
+            "       confirmed_count_for_token(token, since) <= 1 per identity",
+            "    3. flight-recorder / canary: zero canary-field writes, no",
+            "       submit-POST without an open broker ticket",
+            "  Then re-run report --v2-cutover with the audit result to finalize.",
+            "-" * 56,
+        ]
+    lines.append(f"  VERDICT: {'CUTOVER-READY' if gate['go'] else 'HOLD'}")
     lines.append("=" * 56)
     return "\n".join(lines)
