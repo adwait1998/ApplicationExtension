@@ -4,10 +4,13 @@ the endpoint signature on confirmed success. Tier 2 = DOM verdict cores REUSED
 unchanged from the v1 verifier. Tier 1 preferred; ambiguity -> needs_review."""
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
 from applypilot.apply.v2 import mapping_cache as mc
+
+log = logging.getLogger(__name__)
 
 # Reuse the safety kernel's host + mutation-method definitions so "submit POST"
 # is defined ONCE across the codebase (browser_stream._guard uses the same pair:
@@ -108,11 +111,19 @@ def verify(evidence: NetworkEvidence, *, conn=None, dom_signals: DomSignals | No
            verify_threshold: float = 0.75) -> VerifyResult:
     # TIER 1: network evidence (language-independent, strongest). Auto-harvest
     # the observed endpoint — Tier-1-only, since we actually saw the POST.
+    # The harvest is a best-effort cache side-effect and MUST NOT sink an
+    # already-confirmed verdict: a lost 'applied' result could cascade into a
+    # re-apply (double-issue, a Critical invariant). So isolate any cache-write
+    # failure (sqlite locked / disk error / schema drift) — log and continue.
     if evidence.submitted and evidence.submit_url:
         if conn is not None:
-            mc.record_submit_endpoint(conn, evidence.ats, evidence.company,
-                                      evidence.submit_method or "POST",
-                                      _url_pattern(evidence.submit_url))
+            try:
+                mc.record_submit_endpoint(conn, evidence.ats, evidence.company,
+                                          evidence.submit_method or "POST",
+                                          _url_pattern(evidence.submit_url))
+            except Exception:                        # best-effort harvest only
+                log.warning("submit-endpoint harvest failed for %s/%s; verdict "
+                            "stands", evidence.ats, evidence.company, exc_info=True)
         return VerifyResult(True, tier=1, confidence=1.0, submit_url=evidence.submit_url)
 
     # TIER 2: DOM verdict core, REUSED unchanged. No harvest here — no observed

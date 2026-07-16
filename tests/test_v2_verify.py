@@ -47,6 +47,24 @@ def test_tier1_success_harvests_endpoint(tmp_path):
     assert eps and "applications" in eps[0]["url_pattern"]   # auto-harvested
 
 
+def test_tier1_verdict_survives_harvest_failure():
+    # The endpoint harvest is a best-effort cache side-effect; a cache-write
+    # error (sqlite locked / disk error / schema drift) MUST NOT sink an
+    # already-confirmed Tier-1 verdict — a lost 'applied' could cascade into a
+    # re-apply (double-issue). The verdict stands; only the harvest is skipped.
+    class _BadConn:
+        def execute(self, *a, **k):
+            raise RuntimeError("database is locked")
+
+        def commit(self):
+            raise RuntimeError("database is locked")
+
+    rec = verify.NetworkEvidence(ats="greenhouse", company="acme")
+    rec.on_response(_Resp("POST", "https://boards.greenhouse.io/acme/applications", 201))
+    v = verify.verify(rec, conn=_BadConn(), dom_signals=None)
+    assert v.verified is True and v.tier == 1
+
+
 def test_tier2_dom_fallback_when_no_network_evidence(tmp_path):
     conn = _conn(tmp_path)
     rec = verify.NetworkEvidence(ats="greenhouse", company="acme")   # never saw a submit POST
