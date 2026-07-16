@@ -22,6 +22,7 @@ prove it. Replacing the react-select sleeps is a separate follow-up (not this
 task — no gold-plating)."""
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 
@@ -29,6 +30,8 @@ from applypilot.apply.v2 import drivers
 from applypilot.apply.v2 import ir
 from applypilot.apply.v2 import mapping_cache as mc
 from applypilot.apply.v2.resolver import FillPlan, PlannedField
+
+log = logging.getLogger(__name__)
 
 # A self-installing MutationObserver that stamps the last-mutation time; the JS
 # returns the current idle delta (ms since the last mutation). Polled from the
@@ -114,23 +117,42 @@ def _required_missing(scope) -> list[str]:
 def _cache_success(conn, schema, pf: PlannedField, res) -> None:
     """Mapping-cache writeback on a verified commit: persist the binding + driver
     + winning locator tier, then record the hit (invariant 3: bindings, never
-    values). No-op without a DB connection."""
+    values). No-op without a DB connection.
+
+    Best-effort, exception-isolated: the cache write is a SIDE-EFFECT of the fill
+    and MUST NOT sink it. A transient sqlite fault (DB locked / disk full / schema
+    drift) mid-fill would otherwise propagate out of execute(), crash an
+    otherwise-fillable form, and return no ExecReport. Mirror the sibling
+    verify.py harvest contract: log and continue — a cache fault demotes to a
+    no-op, the commit stands."""
     if conn is None:
         return
-    fp = ir.field_fp(pf.field)
-    if pf.binding:
-        mc.put(conn, schema.ats, fp, binding=pf.binding,
-               widget_driver=pf.driver, locator_tier=res.locator_tier)
-    mc.record_success(conn, schema.ats, fp)
+    try:
+        fp = ir.field_fp(pf.field)
+        if pf.binding:
+            mc.put(conn, schema.ats, fp, binding=pf.binding,
+                   widget_driver=pf.driver, locator_tier=res.locator_tier)
+        mc.record_success(conn, schema.ats, fp)
+    except Exception:                                  # noqa: BLE001 - best-effort side-effect
+        log.warning("mapping-cache success writeback failed for %s; commit stands",
+                    pf.field.semantic_key or pf.field.field_id, exc_info=True)
 
 
 def _cache_failure(conn, schema, pf: PlannedField) -> None:
     """Record a VERIFIED failure (read-back said not-committed) against the
     mapping — demote-never-archive (spec §6.4). No-op without a DB connection or
-    a pre-existing mapping row."""
+    a pre-existing mapping row.
+
+    Best-effort, exception-isolated like _cache_success: a cache fault must
+    demote to a no-op, never abort the fill (mirrors verify.py's isolated
+    harvest)."""
     if conn is None:
         return
-    mc.record_failure(conn, schema.ats, ir.field_fp(pf.field))
+    try:
+        mc.record_failure(conn, schema.ats, ir.field_fp(pf.field))
+    except Exception:                                  # noqa: BLE001 - best-effort side-effect
+        log.warning("mapping-cache failure writeback failed for %s",
+                    pf.field.semantic_key or pf.field.field_id, exc_info=True)
 
 
 def _fill_fields(scope, schema, planned: list[PlannedField], report: ExecReport, conn) -> None:
