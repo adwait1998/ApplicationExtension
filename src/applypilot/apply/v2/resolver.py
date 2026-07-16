@@ -184,11 +184,16 @@ def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache):
                     return PlannedField(f, binding=binding, value=ans, driver=drv)
 
     # (c) answer-bank hit (NON-canary custom free-text only; bank is §10.3-scrubbed).
+    # Consult the bank READ-ONLY via the nearest-neighbor lookup and gate on the
+    # cache's own threshold — the exact hit-path AnswerCache.answer() takes. We do
+    # NOT call answer_cache.answer() here: on a MISS it fires the real network LLM
+    # (_default_llm_fn) and persists the fabricated answer (bank write + _entries
+    # mutation), which would bypass the oracle and break the resolver's zero-I/O-
+    # beyond-DB-reads contract. A miss must fall through to (e) -> the Operator.
     if answer_cache is not None and f.widget.kind in ("text", "textarea"):
-        res = answer_cache.answer(f.question_text or f.label_text)
-        ans = getattr(res, "answer", None)
-        if ans:
-            return PlannedField(f, binding="answer:bank", value=ans, driver=driver)
+        entry, sim = answer_cache._nearest(f.question_text or f.label_text)
+        if entry is not None and sim >= answer_cache.threshold and entry.get("a"):
+            return PlannedField(f, binding="answer:bank", value=entry["a"], driver=driver)
 
     # (e) unresolved -> oracle.
     return None
