@@ -143,9 +143,14 @@ class _FakeLedger:
     def __init__(self, open_intent=True):
         self._open = open_intent
         self.failed = []                               # (identity_id, reason) tuples
+        self.confirmed = []                            # (identity_id, confidence) tuples
 
     def has_open_intent(self, identity_id):
         return self._open
+
+    def confirm(self, identity_id, *, confidence):
+        self.confirmed.append((identity_id, confidence))
+        self._open = False
 
     def fail(self, identity_id, *, reason):
         self.failed.append((identity_id, reason))
@@ -216,6 +221,10 @@ def test_production_fn_runs_prologue_before_orchestrator(monkeypatch):
     assert seen["profile"] is dec.profile
     # The passive network-evidence listener is attached on THAT page (invariant 8).
     assert page.listeners and page.listeners[0][0] == "response"
+    # And the recorded INTENT is CONFIRMED on the verified 'applied' result — the
+    # confirm at verify_threshold's floor is what keeps the company-cooldown +
+    # has_confirmed safety gates (which count only state='confirmed') alive for v2.
+    assert ledger.confirmed == [("id1", 0.75)] and ledger.failed == []
 
 
 def test_production_fn_blocked_prologue_short_circuits(monkeypatch):
@@ -348,6 +357,71 @@ def test_production_fn_cdp_setup_failure_fails_open(monkeypatch):
 
     assert legacy_ran["n"] == 1 and status == "applied"
     assert ledger.failed == [("id1", "v2_presubmit_fallback")]
+
+
+def _run_production_with_status(monkeypatch, v2_status, *, dry_run=False):
+    """Drive the production default path with a fake prologue (open INTENT) + a
+    fake orchestrator that returns `v2_status`, and return the _FakeLedger so the
+    caller can assert how the recorded INTENT was reconciled. Legacy must not run
+    for a non-sentinel terminal status."""
+    monkeypatch.setenv("APPLYPILOT_V2_ENGINE", "1")
+    _patch_cdp(monkeypatch, _FakePage())
+    ledger = _FakeLedger(open_intent=True)
+    dec = launcher._PrologueDecision(
+        False, None, 0, profile={"personal": {}},
+        apply_url="https://boards.greenhouse.io/acme/jobs/1", ledger=ledger)
+    monkeypatch.setattr(launcher, "_safety_prologue", lambda job, **k: dec)
+    monkeypatch.setattr("applypilot.apply.v2.orchestrator.run_form_compiler",
+                        lambda **k: (v2_status, 7, {"ats": "greenhouse"}))
+    status, ms, prefill = launcher._dispatch_apply_v2_aware(
+        job={"application_url": "https://boards.greenhouse.io/acme/jobs/1", "url": "u"},
+        page=None, conn=object(), company="acme", operator=object(),
+        broker=object(), identity_id="id1", browser_stream=object(), dry_run=dry_run,
+        verify_threshold=0.75, worker_id=0, run_started=1.0, port=9222,
+        legacy_dispatch_fn=lambda **k: (_ for _ in ()).throw(
+            AssertionError("legacy must not run for a non-sentinel terminal status")))
+    return ledger, status
+
+
+def test_production_fn_confirms_ledger_on_applied(monkeypatch):
+    # The core critical fix: a verified 'applied' CONFIRMS the recorded INTENT
+    # (intent->confirmed) — without it the company-cooldown + has_confirmed gates
+    # (which count only state='confirmed') are silently defeated for v2.
+    ledger, status = _run_production_with_status(monkeypatch, "applied")
+    assert status == "applied"
+    assert ledger.confirmed == [("id1", 0.75)] and ledger.failed == []
+
+
+def test_production_fn_fails_ledger_on_unverified_submission(monkeypatch):
+    # A submit fired but was not verified: the INTENT is FAILED (intent->failed),
+    # mirroring legacy run_job's _resolve_ledger_intent on an unverified submit.
+    ledger, status = _run_production_with_status(
+        monkeypatch, "needs_review:unverified_submission")
+    assert status == "needs_review:unverified_submission"
+    assert ledger.failed == [("id1", "verification_unverified_submission")]
+    assert ledger.confirmed == []
+
+
+def test_production_fn_releases_ledger_on_incomplete_required(monkeypatch):
+    # The required-completeness interlock parked the form BEFORE any submit — a
+    # PRE-submit terminal park with no legacy re-entry, so the INTENT must be
+    # released (intent->failed) here or it dangles forever and blocks next apply.
+    ledger, status = _run_production_with_status(
+        monkeypatch, "needs_review:v2_incomplete_required")
+    assert status == "needs_review:v2_incomplete_required"
+    assert ledger.failed == [("id1", "v2_incomplete_required")]
+    assert ledger.confirmed == []
+
+
+def test_production_fn_leaves_intent_dangling_on_post_submit_crash(monkeypatch):
+    # A crash AFTER a submit MAY have fired must leave the INTENT DANGLING by
+    # design: the next run's dangling-INTENT guard reconciles it rather than
+    # risking a double-submit. So neither confirm nor fail is called.
+    ledger, status = _run_production_with_status(
+        monkeypatch, "needs_review:v2_crashed_post_submit")
+    assert status == "needs_review:v2_crashed_post_submit"
+    assert ledger.confirmed == [] and ledger.failed == []
+    assert ledger.has_open_intent("id1") is True       # still dangling
 
 
 # ===========================================================================

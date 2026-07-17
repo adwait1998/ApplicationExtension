@@ -3292,33 +3292,93 @@ def _close_cdp(pw, browser) -> None:
             pass
 
 
-def _release_presubmit_intent(ledger, identity_id, dry_run) -> None:
-    """Release a still-open ledger INTENT after a v2 PRE-SUBMIT fail-open so the
-    legacy re-entry APPLIES (a normal counted apply — the orchestrator's
-    documented pre-submit contract) instead of parking on the dangling-INTENT
-    guard.
+def _release_presubmit_intent(ledger, identity_id, dry_run, *,
+                              reason="v2_presubmit_fallback") -> None:
+    """Release a still-open ledger INTENT after a v2 PRE-SUBMIT terminal outcome
+    (no submit fired) so the INTENT neither dangles forever nor wrongly blocks
+    the next run on the dangling-INTENT guard. Two callers, both provably
+    pre-submit:
 
-    SAFETY: this is only ever reached on a FALLBACK_SENTINEL from the PRODUCTION
-    engine, which runs the LIVE verify stage. A sentinel from live stages is
-    ALWAYS returned BEFORE a submit fires (orchestrator parse / resolve / fill
-    try-blocks): the orchestrator's post-submit "totally unclear" sentinel
-    (orchestrator ~L247) is UNREACHABLE with live verify, because verify()
-    returns needs_review=True in EVERY non-verified branch — verified=False AND
-    needs_review=False never occurs (pinned by
-    test_live_verify_never_unclear_after_click). So no submit has fired and the
-    INTENT is safe to release. Uses the ledger's existing fail() transition
-    (state intent->failed) — no new ledger surface. If verify() ever grows a
-    verified=False+needs_review=False path, re-gate this on an explicit
+      * FALLBACK_SENTINEL fail-open (reason 'v2_presubmit_fallback') — the legacy
+        re-entry then APPLIES as a normal counted apply (the orchestrator's
+        documented pre-submit contract) instead of parking.
+      * needs_review:v2_incomplete_required (reason 'v2_incomplete_required') —
+        the required-completeness interlock parked the form BEFORE any click
+        (orchestrator returns this status ahead of st.submit). There is no legacy
+        re-entry for this terminal status, so the INTENT MUST be freed here or it
+        dangles forever and blocks the next apply.
+
+    SAFETY (sentinel caller): the sentinel is only ever produced by the PRODUCTION
+    engine's LIVE verify stage, and a sentinel from live stages is ALWAYS returned
+    BEFORE a submit fires (orchestrator parse / resolve / fill try-blocks): the
+    orchestrator's post-submit "totally unclear" sentinel (orchestrator ~L247) is
+    UNREACHABLE with live verify, because verify() returns needs_review=True in
+    EVERY non-verified branch — verified=False AND needs_review=False never occurs
+    (pinned by test_live_verify_never_unclear_after_click). So no submit has fired
+    and the INTENT is safe to release. Uses the ledger's existing fail()
+    transition (state intent->failed) — no new ledger surface. If verify() ever
+    grows a verified=False+needs_review=False path, re-gate this on an explicit
     pre-submit signal from the orchestrator BEFORE releasing."""
     if ledger is None or not identity_id or dry_run:
         return
     try:
         if ledger.has_open_intent(identity_id):
-            ledger.fail(identity_id, reason="v2_presubmit_fallback")
+            ledger.fail(identity_id, reason=reason)
     except Exception:
         logger.warning("v2 pre-submit INTENT release failed for %s; legacy re-entry "
                        "will park as needs_review:dangling_submission_intent (safe, "
                        "not a double-submit)", identity_id, exc_info=True)
+
+
+def _reconcile_v2_ledger(ledger, identity_id, status, *, dry_run,
+                         verify_threshold) -> None:
+    """Transition the ledger INTENT recorded by _safety_prologue against a v2
+    NON-sentinel terminal status, mirroring how legacy run_job reconciles at
+    every verify site (_resolve_ledger_intent: confirm on verified / fail on
+    unverified). Skipping this leaves the INTENT open forever, which on the LIVE
+    v2 path (APPLYPILOT_V2_ENGINE=1) silently:
+      (1) defeats the company-cooldown + has_confirmed gates — both count only
+          state='confirmed', so a v2 apply that never confirms is invisible to
+          them (the cooldown throttle never fires and the cross-run re-apply
+          block is neutered);
+      (2) inflates dangling_count() on every SUCCESS, so each verified v2 apply
+          masquerades as a crashed mid-submit needing human reconciliation.
+
+    Status -> transition (the FALLBACK_SENTINEL is handled by the caller, which
+    releases the pre-submit INTENT and falls through to legacy):
+      * 'applied'                             -> confirm (submit verified SENT).
+      * 'needs_review:unverified_submission'  -> fail  (submit fired, unverified;
+                                                 mirrors legacy ledger.fail).
+      * 'needs_review:v2_incomplete_required' -> release (PRE-submit interlock
+                                                 park: no submit fired).
+      * 'needs_review:v2_crashed_post_submit' -> LEAVE DANGLING BY DESIGN (a
+                                                 submit MAY have fired; the
+                                                 dangling INTENT is the
+                                                 double-submit guard the next run
+                                                 reconciles).
+      * 'needs_review:v2_dry_run'             -> no-op (dry-run records no INTENT).
+    """
+    if ledger is None or not identity_id:
+        return
+    if status == "applied":
+        # 'applied' is returned only when verify() reported verified=True, i.e.
+        # confidence was 1.0 (Tier-1 network evidence) or >= verify_threshold
+        # (Tier-2 DOM). The orchestrator does not thread the exact value back, so
+        # record verify_threshold as the honest floor — the safety gates key off
+        # the state transition to 'confirmed', not the stored confidence.
+        _resolve_ledger_intent(
+            ledger, identity_id,
+            {"verified": True, "confidence": verify_threshold}, {})
+    elif status == "needs_review:unverified_submission":
+        _resolve_ledger_intent(
+            ledger, identity_id, {"verified": False},
+            {"failure_class": "verification_unverified_submission"})
+    elif status == "needs_review:v2_incomplete_required":
+        _release_presubmit_intent(ledger, identity_id, dry_run,
+                                  reason="v2_incomplete_required")
+    # v2_crashed_post_submit: leave the INTENT dangling by design (the next run's
+    #   dangling-INTENT guard reconciles it — never a silent re-submit).
+    # v2_dry_run: _safety_prologue records no INTENT in dry-run — nothing to do.
 
 
 def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port):
@@ -3385,9 +3445,19 @@ def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port)
         finally:
             _close_cdp(pw, browser)
 
-        # (4) PRE-SUBMIT fail-open reconciliation (see _release_presubmit_intent).
+        # (4) LEDGER RECONCILIATION — the INTENT recorded in step (1) MUST be
+        #     transitioned on EVERY terminal status, exactly as legacy run_job
+        #     reconciles at each verify site. A verified 'applied' that never
+        #     confirms would defeat the company-cooldown + has_confirmed safety
+        #     gates (they count only state='confirmed') and inflate
+        #     dangling_count() so every v2 success looks like a crashed
+        #     mid-submit (see _reconcile_v2_ledger).
         if status == _orch.FALLBACK_SENTINEL:
+            # PRE-SUBMIT fail-open: release so the legacy re-entry APPLIES.
             _release_presubmit_intent(dec.ledger, identity_id, dry_run)
+        else:
+            _reconcile_v2_ledger(dec.ledger, identity_id, status,
+                                 dry_run=dry_run, verify_threshold=verify_threshold)
         return status, ms, prefill
 
     return _run
