@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -2227,6 +2228,155 @@ def reset_manual(site_contains: str | None = None, resolved_only: bool = False) 
 # Per-job execution
 # ---------------------------------------------------------------------------
 
+@dataclass
+class _PrologueDecision:
+    """The outcome of the shared pre-apply safety gate. When `blocked`, `status`
+    is the exact short-circuit both engines return verbatim; otherwise the
+    clean-path payload (profile/apply_url/resume/ledger/broker_file/worker_dir)
+    is carried for the caller to continue with."""
+    blocked: bool
+    status: str | None = None          # the short-circuit status when blocked
+    duration_ms: int = 0
+    profile: dict | None = None
+    apply_url: str = ""
+    resume_path: str | None = None
+    resume_text: str = ""
+    ledger: "SubmissionLedger | None" = None
+    broker_file: str | None = None
+    worker_dir: Path | None = None
+
+
+def _safety_prologue(job: dict, *, worker_id: int, run_started: float,
+                     job_meta: dict, identity_id: str | None,
+                     broker, dry_run: bool) -> _PrologueDecision:
+    """Shared pre-apply safety gate (spec §10). Extracted from run_job so v2's
+    run_form_compiler reuses the SAME broker/ledger/identity path (invariant 1).
+
+    Runs every pre-apply gate (location reject, idempotency + checkpoint
+    duplicate guards, the two-phase submission-ledger gates), then records the
+    ledger INTENT and issues the submit-broker ticket. Returns a decision; when
+    `blocked`, `status` is the exact short-circuit (failed:* / needs_review:*)
+    both engines return verbatim. It does NOT write the MCP config (legacy-only)
+    and does NOT run prefill."""
+    profile = config.load_profile()
+    apply_url = _effective_apply_url(job) or ""
+    job["application_url"] = apply_url
+    location_reject = _preapply_location_reject(job, profile)
+    if location_reject:
+        job_meta["failure_class"] = _classify_failure_class(f"failed:{location_reject}", location_reject)
+        _write_job_runtime_metadata(
+            job["url"],
+            last_failure_class=job_meta["failure_class"],
+            checkpoint=_checkpoint(CHECKPOINT_PAGE_REACHED, apply_url=_canonicalize_url(apply_url), preapply_location_gate=True),
+        )
+        add_event(f"[W{worker_id}] Pre-apply location reject: {location_reject}")
+        update_state(worker_id, status="failed", last_action=location_reject)
+        return _PrologueDecision(True, f"failed:{location_reject}", int((time.time() - run_started) * 1000))
+    idempotency_key = _compute_idempotency_key(job, profile)
+    job_meta["idempotency_key"] = idempotency_key
+    _write_job_runtime_metadata(
+        job["url"],
+        idempotency_key=idempotency_key,
+        checkpoint=_checkpoint(CHECKPOINT_PAGE_REACHED, apply_url=_canonicalize_url(apply_url)),
+    )
+    job_meta["checkpoint_stage"] = CHECKPOINT_PAGE_REACHED
+
+    existing_row = _read_job_row(job["url"])
+    checkpoint_stage = None
+    if existing_row and existing_row.get("checkpoint_json"):
+        try:
+            checkpoint_stage = json.loads(existing_row["checkpoint_json"]).get("stage")
+        except Exception:
+            checkpoint_stage = None
+    if checkpoint_stage in {CHECKPOINT_SUBMIT_ATTEMPTED, CHECKPOINT_VERIFICATION_COMPLETE}:
+        job_meta["failure_class"] = "verification_possible_duplicate_guard"
+        job_meta["checkpoint_stage"] = checkpoint_stage
+        _write_job_runtime_metadata(
+            job["url"],
+            last_failure_class=job_meta["failure_class"],
+        )
+        return _PrologueDecision(True, "needs_review:possible_duplicate_guard", int((time.time() - run_started) * 1000))
+
+    if _idempotency_already_applied(idempotency_key, job["url"]):
+        job_meta["failure_class"] = "verification_possible_duplicate_guard"
+        _write_job_runtime_metadata(
+            job["url"],
+            last_failure_class=job_meta["failure_class"],
+            checkpoint=_checkpoint(CHECKPOINT_SUBMIT_ATTEMPTED, duplicate_guard=True),
+        )
+        job_meta["checkpoint_stage"] = CHECKPOINT_SUBMIT_ATTEMPTED
+        return _PrologueDecision(True, "needs_review:possible_duplicate_guard", int((time.time() - run_started) * 1000))
+
+    # SUBMIT-CRITICAL: Phase 3 watchdog must grant +15s grace here so a kill
+    # can't strand a dangling INTENT.
+    # Durable two-phase submission ledger (Task 10A). Runs whenever an identity
+    # is known (identity_id is None only for legacy/test callers, which keep the
+    # old behavior). Blocks re-apply across runs BEFORE any submit is attempted.
+    ledger = None
+    if identity_id:
+        ledger = SubmissionLedger(get_connection())
+        # (1) hard re-apply block across runs: prior CONFIRMED submission to
+        #     this identity.
+        if ledger.has_confirmed(identity_id):
+            job_meta["failure_class"] = "verification_already_applied_identity"
+            _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
+            return _PrologueDecision(True, "needs_review:already_applied_identity", int((time.time() - run_started) * 1000))
+        # (2) dangling-INTENT block: a prior run died mid-submit for this
+        #     identity — never blindly re-apply over an unreconciled intent
+        #     (the double-submit guard).
+        if ledger.has_open_intent(identity_id):
+            job_meta["failure_class"] = "verification_dangling_submission_intent"
+            _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
+            return _PrologueDecision(True, "needs_review:dangling_submission_intent", int((time.time() - run_started) * 1000))
+        # (3) company cooldown: >=N confirmed applies to this board within window.
+        _ref = parse_ats_url(_effective_apply_url(job) or "")
+        if _ref and _ref.token:
+            _since = (datetime.now(timezone.utc)
+                      - timedelta(days=config.DEFAULTS["company_cooldown_days"])).isoformat()
+            if ledger.confirmed_count_for_token(_ref.token, _since) >= config.DEFAULTS["company_cooldown_max"]:
+                job_meta["failure_class"] = "verification_company_cooldown"
+                _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
+                return _PrologueDecision(True, "needs_review:company_cooldown", int((time.time() - run_started) * 1000))
+
+    # Read resume text â€” fall back to master resume if no tailored version
+    resume_path = job.get("tailored_resume_path") or str(config.RESUME_PDF_PATH)
+    txt_path = Path(resume_path).with_suffix(".txt")
+    if not txt_path.exists():
+        txt_path = config.RESUME_PATH
+    job["tailored_resume_path"] = resume_path
+    resume_text = ""
+    if txt_path.exists():
+        resume_text = txt_path.read_text(encoding="utf-8")
+
+    worker_dir = reset_worker_dir(worker_id)
+    job["_upload_dir"] = str(worker_dir)
+
+    # Submit broker: issue the one-shot ticket for THIS identity now that both
+    # duplicate-guard short-circuits above have passed. In dry-run issue() is a
+    # no-op (SubmitBroker never opens a ticket in dry-run) so the network route
+    # fails closed and no submit POST can leave the browser. broker=None (e.g.
+    # legacy/test callers) simply skips issue/gate — backward-compatible.
+    broker_file = None
+    if identity_id and ledger is not None and not dry_run:
+        # INTENT before any submit. Gated on not-dry_run to mirror the broker
+        # (dry-run never submits, so it must not strand an intent). A crash
+        # between here and confirm/fail leaves a dangling INTENT that the NEXT
+        # run blocks on (see block (2) above) — safe by design: better a
+        # needs_review than a silent double-submit.
+        ledger.record_intent(identity_id, worker_id=worker_id)
+    if broker is not None and identity_id:
+        try:
+            broker.issue(identity_id)                          # returns None!
+            broker_file = str(getattr(broker, "path", "") or "") or None
+        except Exception as e:
+            logger.warning("submit broker issue failed (submits will fail closed): %s", e)
+
+    return _PrologueDecision(
+        False, None, 0, profile=profile, apply_url=apply_url,
+        resume_path=resume_path, resume_text=resume_text, ledger=ledger,
+        broker_file=broker_file, worker_dir=worker_dir)
+
+
 def run_job(job: dict, port: int, worker_id: int = 0,
             model: str = "sonnet", dry_run: bool = False,
             job_timeout: int | None = None,
@@ -2290,118 +2440,21 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     }
     job["_run_meta"] = job_meta
 
-    profile = config.load_profile()
-    apply_url = _effective_apply_url(job) or ""
-    job["application_url"] = apply_url
-    location_reject = _preapply_location_reject(job, profile)
-    if location_reject:
-        job_meta["failure_class"] = _classify_failure_class(f"failed:{location_reject}", location_reject)
-        _write_job_runtime_metadata(
-            job["url"],
-            last_failure_class=job_meta["failure_class"],
-            checkpoint=_checkpoint(CHECKPOINT_PAGE_REACHED, apply_url=_canonicalize_url(apply_url), preapply_location_gate=True),
-        )
-        add_event(f"[W{worker_id}] Pre-apply location reject: {location_reject}")
-        update_state(worker_id, status="failed", last_action=location_reject)
-        return f"failed:{location_reject}", int((time.time() - run_started) * 1000), None
-    idempotency_key = _compute_idempotency_key(job, profile)
-    job_meta["idempotency_key"] = idempotency_key
-    _write_job_runtime_metadata(
-        job["url"],
-        idempotency_key=idempotency_key,
-        checkpoint=_checkpoint(CHECKPOINT_PAGE_REACHED, apply_url=_canonicalize_url(apply_url)),
-    )
-    job_meta["checkpoint_stage"] = CHECKPOINT_PAGE_REACHED
-
-    existing_row = _read_job_row(job["url"])
-    checkpoint_stage = None
-    if existing_row and existing_row.get("checkpoint_json"):
-        try:
-            checkpoint_stage = json.loads(existing_row["checkpoint_json"]).get("stage")
-        except Exception:
-            checkpoint_stage = None
-    if checkpoint_stage in {CHECKPOINT_SUBMIT_ATTEMPTED, CHECKPOINT_VERIFICATION_COMPLETE}:
-        job_meta["failure_class"] = "verification_possible_duplicate_guard"
-        job_meta["checkpoint_stage"] = checkpoint_stage
-        _write_job_runtime_metadata(
-            job["url"],
-            last_failure_class=job_meta["failure_class"],
-        )
-        return "needs_review:possible_duplicate_guard", int((time.time() - run_started) * 1000), None
-
-    if _idempotency_already_applied(idempotency_key, job["url"]):
-        job_meta["failure_class"] = "verification_possible_duplicate_guard"
-        _write_job_runtime_metadata(
-            job["url"],
-            last_failure_class=job_meta["failure_class"],
-            checkpoint=_checkpoint(CHECKPOINT_SUBMIT_ATTEMPTED, duplicate_guard=True),
-        )
-        job_meta["checkpoint_stage"] = CHECKPOINT_SUBMIT_ATTEMPTED
-        return "needs_review:possible_duplicate_guard", int((time.time() - run_started) * 1000), None
-
-    # SUBMIT-CRITICAL: Phase 3 watchdog must grant +15s grace here so a kill
-    # can't strand a dangling INTENT.
-    # Durable two-phase submission ledger (Task 10A). Runs whenever an identity
-    # is known (identity_id is None only for legacy/test callers, which keep the
-    # old behavior). Blocks re-apply across runs BEFORE any submit is attempted.
-    ledger = None
-    if identity_id:
-        ledger = SubmissionLedger(get_connection())
-        # (1) hard re-apply block across runs: prior CONFIRMED submission to
-        #     this identity.
-        if ledger.has_confirmed(identity_id):
-            job_meta["failure_class"] = "verification_already_applied_identity"
-            _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
-            return "needs_review:already_applied_identity", int((time.time() - run_started) * 1000), None
-        # (2) dangling-INTENT block: a prior run died mid-submit for this
-        #     identity — never blindly re-apply over an unreconciled intent
-        #     (the double-submit guard).
-        if ledger.has_open_intent(identity_id):
-            job_meta["failure_class"] = "verification_dangling_submission_intent"
-            _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
-            return "needs_review:dangling_submission_intent", int((time.time() - run_started) * 1000), None
-        # (3) company cooldown: >=N confirmed applies to this board within window.
-        _ref = parse_ats_url(_effective_apply_url(job) or "")
-        if _ref and _ref.token:
-            _since = (datetime.now(timezone.utc)
-                      - timedelta(days=config.DEFAULTS["company_cooldown_days"])).isoformat()
-            if ledger.confirmed_count_for_token(_ref.token, _since) >= config.DEFAULTS["company_cooldown_max"]:
-                job_meta["failure_class"] = "verification_company_cooldown"
-                _write_job_runtime_metadata(job["url"], last_failure_class=job_meta["failure_class"])
-                return "needs_review:company_cooldown", int((time.time() - run_started) * 1000), None
-
-    # Read resume text â€” fall back to master resume if no tailored version
-    resume_path = job.get("tailored_resume_path") or str(config.RESUME_PDF_PATH)
-    txt_path = Path(resume_path).with_suffix(".txt")
-    if not txt_path.exists():
-        txt_path = config.RESUME_PATH
-    job["tailored_resume_path"] = resume_path
-    resume_text = ""
-    if txt_path.exists():
-        resume_text = txt_path.read_text(encoding="utf-8")
-
-    worker_dir = reset_worker_dir(worker_id)
-    job["_upload_dir"] = str(worker_dir)
-
-    # Submit broker: issue the one-shot ticket for THIS identity now that both
-    # duplicate-guard short-circuits above have passed. In dry-run issue() is a
-    # no-op (SubmitBroker never opens a ticket in dry-run) so the network route
-    # fails closed and no submit POST can leave the browser. broker=None (e.g.
-    # legacy/test callers) simply skips issue/gate — backward-compatible.
-    broker_file = None
-    if identity_id and ledger is not None and not dry_run:
-        # INTENT before any submit. Gated on not-dry_run to mirror the broker
-        # (dry-run never submits, so it must not strand an intent). A crash
-        # between here and confirm/fail leaves a dangling INTENT that the NEXT
-        # run blocks on (see block (2) above) — safe by design: better a
-        # needs_review than a silent double-submit.
-        ledger.record_intent(identity_id, worker_id=worker_id)
-    if broker is not None and identity_id:
-        try:
-            broker.issue(identity_id)
-            broker_file = str(getattr(broker, "path", "") or "") or None
-        except Exception as e:
-            logger.warning("submit broker issue failed (submits will fail closed): %s", e)
+    # Shared pre-apply safety gate (spec §10), extracted so v2's
+    # run_form_compiler reuses the SAME broker/ledger/identity path (invariant
+    # 1). When blocked, the decision carries the exact short-circuit status.
+    dec = _safety_prologue(job, worker_id=worker_id, run_started=run_started,
+                           job_meta=job_meta, identity_id=identity_id,
+                           broker=broker, dry_run=dry_run)
+    if dec.blocked:
+        return dec.status, dec.duration_ms, None
+    profile = dec.profile
+    apply_url = dec.apply_url
+    resume_path = dec.resume_path
+    resume_text = dec.resume_text
+    ledger = dec.ledger
+    broker_file = dec.broker_file
+    worker_dir = dec.worker_dir
 
     # Write per-worker MCP config (dry_run forwarded → server-side submit block)
     mcp_config_path = config.APP_DIR / f".mcp-apply-{worker_id}.json"
