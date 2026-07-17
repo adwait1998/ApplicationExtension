@@ -3241,6 +3241,197 @@ def _classify_apply_result(result: str) -> tuple[str, str | None, bool]:
 
 
 # ---------------------------------------------------------------------------
+# v2 dispatch seam (Task 10) — routes Greenhouse jobs to the Form Compiler
+# engine behind APPLYPILOT_V2_ENGINE, failing OPEN to legacy dispatch_apply.
+# ---------------------------------------------------------------------------
+
+def _v2_enabled() -> bool:
+    """Fresh-read APPLYPILOT_V2_ENGINE each call (mirrors skill_runner.
+    is_skill_flow_enabled — no import-time cache, so env edits take effect)."""
+    from applypilot.apply.v2 import V2_ENGINE_ENV
+    return (os.environ.get(V2_ENGINE_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_greenhouse(job: dict) -> bool:
+    """Greenhouse-only gate for v2 (Lever/Ashby/Workday are Phase 4). Reuses
+    prefill._detect_ats — the SAME detection the legacy prefill uses — rather
+    than re-parsing the URL, so vanity ?gh_jid= hosts route identically."""
+    from applypilot.apply.prefill import _detect_ats
+    return _detect_ats(job.get("application_url") or job.get("url") or "") == "greenhouse"
+
+
+def _v2_connect_page(port: int, apply_url: str):
+    """Open the short-lived CDP page the v2 orchestrator drives, mirroring
+    prefill_application's connect (prefill.py) — a SEPARATE connection from the
+    browser_stream's private daemon-thread context, exactly as legacy prefill
+    already runs concurrently with the stream. Returns (pw, browser, page) for
+    the caller to close in a finally. A standalone helper so the dispatch
+    ordering stays unit-testable via monkeypatch (no Chrome)."""
+    from playwright.sync_api import sync_playwright
+    pw = sync_playwright().start()
+    browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=4000)
+    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    if apply_url and apply_url not in (page.url or ""):
+        page.goto(apply_url, wait_until="domcontentloaded", timeout=30000)
+    return pw, browser, page
+
+
+def _close_cdp(pw, browser) -> None:
+    """Best-effort teardown of the v2 CDP connection (Browser.close only releases
+    the socket — it does NOT kill Chrome, which worker_loop still owns)."""
+    if browser is not None:
+        try:
+            browser.close()
+        except Exception:
+            pass
+    if pw is not None:
+        try:
+            pw.stop()
+        except Exception:
+            pass
+
+
+def _release_presubmit_intent(ledger, identity_id, dry_run) -> None:
+    """Release a still-open ledger INTENT after a v2 PRE-SUBMIT fail-open so the
+    legacy re-entry APPLIES (a normal counted apply — the orchestrator's
+    documented pre-submit contract) instead of parking on the dangling-INTENT
+    guard.
+
+    SAFETY: this is only ever reached on a FALLBACK_SENTINEL from the PRODUCTION
+    engine, which runs the LIVE verify stage. A sentinel from live stages is
+    ALWAYS returned BEFORE a submit fires (orchestrator parse / resolve / fill
+    try-blocks): the orchestrator's post-submit "totally unclear" sentinel
+    (orchestrator ~L247) is UNREACHABLE with live verify, because verify()
+    returns needs_review=True in EVERY non-verified branch — verified=False AND
+    needs_review=False never occurs (pinned by
+    test_live_verify_never_unclear_after_click). So no submit has fired and the
+    INTENT is safe to release. Uses the ledger's existing fail() transition
+    (state intent->failed) — no new ledger surface. If verify() ever grows a
+    verified=False+needs_review=False path, re-gate this on an explicit
+    pre-submit signal from the orchestrator BEFORE releasing."""
+    if ledger is None or not identity_id or dry_run:
+        return
+    try:
+        if ledger.has_open_intent(identity_id):
+            ledger.fail(identity_id, reason="v2_presubmit_fallback")
+    except Exception:
+        logger.warning("v2 pre-submit INTENT release failed for %s; legacy re-entry "
+                       "will park as needs_review:dangling_submission_intent (safe, "
+                       "not a double-submit)", identity_id, exc_info=True)
+
+
+def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port):
+    """Build the real v2 engine callable for _dispatch_apply_v2_aware.
+
+    CRITICAL ORDERING (the double-submit kernel): _safety_prologue MUST run —
+    every pre-apply gate + record_intent + broker.issue — BEFORE the orchestrator,
+    because run_form_compiler's post-submit tail can return a status AFTER a
+    submit may have fired; the INTENT recorded here is exactly what makes a legacy
+    re-entry park (needs_review:dangling_submission_intent) instead of
+    double-submitting. Blocked gate decisions short-circuit here and NEVER reach
+    v2. The orchestrator is handed the prologue's profile (NOT a second
+    config.load_profile()) and the SAME broker/identity/ledger the worker built
+    (invariant 1). The passive network-evidence listener is attached on the CDP
+    page the orchestrator drives (invariant 8 — a read-only observer, never a
+    route)."""
+    def _run(*, job, page, conn, company, operator, dry_run, verify_threshold):
+        from applypilot.apply.v2 import orchestrator as _orch
+        from applypilot.apply.v2.verify import NetworkEvidence
+        started = run_started if run_started is not None else time.time()
+        # job_meta is visible to worker_loop's post-dispatch telemetry read.
+        meta = job.setdefault("_run_meta", {})
+
+        # (1) SAME safety kernel FIRST: gates + record_intent + broker.issue.
+        dec = _safety_prologue(job, worker_id=worker_id, run_started=started,
+                               job_meta=meta, identity_id=identity_id,
+                               broker=broker, dry_run=dry_run)
+        if dec.blocked:
+            # The exact short-circuit both engines return verbatim — never v2.
+            return dec.status, dec.duration_ms, None
+
+        # (2) Open the CDP page the orchestrator drives + attach the PASSIVE
+        #     network-evidence listener on it. A CDP-setup crash is PRE-submit
+        #     (no page, no submit) -> fail open + release the recorded INTENT.
+        pw = browser = drive_page = None
+        try:
+            pw, browser, drive_page = _v2_connect_page(port, dec.apply_url)
+        except Exception:
+            logger.warning("v2 CDP setup failed pre-submit; failing open to legacy",
+                           exc_info=True)
+            _close_cdp(pw, browser)
+            _release_presubmit_intent(dec.ledger, identity_id, dry_run)
+            return _orch.FALLBACK_SENTINEL, int((time.time() - started) * 1000), None
+
+        evidence = NetworkEvidence(ats="greenhouse", company=company)
+        try:
+            drive_page.on("response", evidence.on_response)     # invariant 8 (page-level)
+        except Exception:
+            # Listener is additive — its failure must never kill the dispatch;
+            # verification simply falls back to Tier-2 DOM signals.
+            logger.warning("v2 network-evidence listener attach failed; verification "
+                           "falls back to Tier-2 DOM", exc_info=True)
+
+        # (3) Run the compiler on the reused kernel. run_form_compiler owns its
+        #     own fail-open (pre-submit) / fail-closed (post-submit) boundary and
+        #     does NOT raise; it is left OUTSIDE the setup try so an unexpected
+        #     raise propagates with the INTENT INTACT (legacy parks — never a
+        #     double-submit) rather than being mistaken for a pre-submit release.
+        try:
+            status, ms, prefill = _orch.run_form_compiler(
+                job=job, page=drive_page, profile=dec.profile, conn=conn,
+                company=company, operator=operator, network_evidence=evidence,
+                dry_run=dry_run, verify_threshold=verify_threshold)
+        finally:
+            _close_cdp(pw, browser)
+
+        # (4) PRE-SUBMIT fail-open reconciliation (see _release_presubmit_intent).
+        if status == _orch.FALLBACK_SENTINEL:
+            _release_presubmit_intent(dec.ledger, identity_id, dry_run)
+        return status, ms, prefill
+
+    return _run
+
+
+def _dispatch_apply_v2_aware(*, job, page, conn, company, operator, broker,
+                             identity_id, browser_stream, dry_run, verify_threshold,
+                             run_form_compiler_fn=None, legacy_dispatch_fn=None,
+                             worker_id=0, run_started=None, port=0):
+    """Route Greenhouse jobs to the v2 Form Compiler when APPLYPILOT_V2_ENGINE is
+    on; fall OPEN to legacy on the FALLBACK_SENTINEL (invariant 2). Reuses the
+    SAME broker/identity/browser_stream the worker already built (invariant 1).
+
+    This is ROUTING ONLY. The v2 engine itself is `run_form_compiler_fn`:
+      * tests inject a fake, bypassing the prologue + ledger + CDP entirely;
+      * production leaves it None, so we build the default closure
+        (_make_v2_production_fn) which runs _safety_prologue FIRST — recording
+        the ledger INTENT + issuing the broker ticket BEFORE any submit can fire
+        (the double-submit kernel) — and only then drives the orchestrator.
+
+    With the flag unset this is a byte-for-byte passthrough to legacy: the v2
+    engine closure is built but never invoked, and nothing else runs before
+    `legacy_dispatch_fn(job=job)`."""
+    from applypilot.apply.v2.orchestrator import FALLBACK_SENTINEL
+    if run_form_compiler_fn is None:
+        run_form_compiler_fn = _make_v2_production_fn(
+            worker_id=worker_id, run_started=run_started, identity_id=identity_id,
+            broker=broker, port=port)
+    if _v2_enabled() and _is_greenhouse(job):
+        status, ms, prefill = run_form_compiler_fn(
+            job=job, page=page, conn=conn, company=company, operator=operator,
+            dry_run=dry_run, verify_threshold=verify_threshold)
+        if status != FALLBACK_SENTINEL:
+            # A/B labeling is free: v2 results carry tier_used=v2_greenhouse
+            # (setdefault — never clobber a tier the engine already stamped).
+            if isinstance(prefill, dict):
+                prefill.setdefault("tier_used", "v2_greenhouse")
+            return status, ms, prefill
+        # FALLBACK_SENTINEL: v2 failed open (pre-submit) -> legacy runs as the
+        # counted fallback (its own prologue re-enters the SAME ledger identity).
+    return legacy_dispatch_fn(job=job)
+
+
+# ---------------------------------------------------------------------------
 # Worker loop
 # ---------------------------------------------------------------------------
 
@@ -3389,28 +3580,54 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 # Phase 4: route through the skill-playbook dispatcher.
                 # When APPLYPILOT_USE_SKILLS is unset/0 the dispatcher is a
                 # pure passthrough — identical call to run_job, identical args.
-                from applypilot.apply.skill_runner import dispatch_apply
-                result, duration_ms, prefill_status = dispatch_apply(
-                    job=job, port=port, worker_id=worker_id,
-                    model=model, dry_run=dry_run,
-                    verify_threshold=verify_threshold if verify_threshold is not None
-                                       else float(config.DEFAULTS["verify_threshold"]),
-                    run_job_fn=run_job,
-                    run_job_kwargs={
-                        "model": model, "dry_run": dry_run,
-                        "job_timeout": job_timeout,
-                        "verify_threshold": verify_threshold,
-                        "navigation_timeout": navigation_timeout,
-                        "interaction_timeout": interaction_timeout,
-                        "assert_timeout": assert_timeout,
-                        "escalation_mode": escalation_mode,
-                        "legacy_result_fallback": legacy_result_fallback,
-                        "retry_count": attempt,
-                        "visual_trace": visual_trace,
-                        "broker": broker,
-                        "identity_id": ident,
-                    },
-                    browser_stream=browser_stream,
+                from applypilot.apply.skill_runner import (
+                    dispatch_apply, company_key_for_job)
+                from applypilot.apply.v2.operator import LLMOperator
+                _eff_verify_threshold = (
+                    verify_threshold if verify_threshold is not None
+                    else float(config.DEFAULTS["verify_threshold"]))
+
+                def _legacy_dispatch(*, job):
+                    # The EXISTING legacy dispatch, unchanged — Phase-4 skill
+                    # dispatcher over run_job. v2 falls open to exactly this.
+                    return dispatch_apply(
+                        job=job, port=port, worker_id=worker_id,
+                        model=model, dry_run=dry_run,
+                        verify_threshold=_eff_verify_threshold,
+                        run_job_fn=run_job,
+                        run_job_kwargs={
+                            "model": model, "dry_run": dry_run,
+                            "job_timeout": job_timeout,
+                            "verify_threshold": verify_threshold,
+                            "navigation_timeout": navigation_timeout,
+                            "interaction_timeout": interaction_timeout,
+                            "assert_timeout": assert_timeout,
+                            "escalation_mode": escalation_mode,
+                            "legacy_result_fallback": legacy_result_fallback,
+                            "retry_count": attempt,
+                            "visual_trace": visual_trace,
+                            "broker": broker,
+                            "identity_id": ident,
+                        },
+                        browser_stream=browser_stream,
+                    )
+
+                # v2 dispatch seam (Task 10). With APPLYPILOT_V2_ENGINE unset the
+                # wrapper is a byte-for-byte passthrough to _legacy_dispatch — the
+                # v2 operator/conn are built only when the flag is ON and the job
+                # is Greenhouse. The SAME broker/identity/browser_stream the worker
+                # constructed are threaded through (invariant 1); v2 fails open to
+                # legacy on the FALLBACK_SENTINEL (invariant 2).
+                _v2_gate = _v2_enabled() and _is_greenhouse(job)
+                result, duration_ms, prefill_status = _dispatch_apply_v2_aware(
+                    job=job, page=None,
+                    conn=get_connection() if _v2_gate else None,
+                    company=company_key_for_job(job) if _v2_gate else "",
+                    operator=LLMOperator() if _v2_gate else None,
+                    broker=broker, identity_id=ident, browser_stream=browser_stream,
+                    dry_run=dry_run, verify_threshold=_eff_verify_threshold,
+                    worker_id=worker_id, run_started=time.time(), port=port,
+                    legacy_dispatch_fn=_legacy_dispatch,
                 )
                 total_duration_ms += duration_ms
             finally:
