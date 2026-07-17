@@ -174,6 +174,41 @@ def atlas_report() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Flight-recorder fixture sub-app (v2 Phase 3) — turn a recorded bundle into a
+# replayable CI regression (real recorded DOM replaces synthetic-only tests).
+# ---------------------------------------------------------------------------
+
+fixtures_app = typer.Typer(help="Flight-recorder fixture management (v2 CI regressions).")
+app.add_typer(fixtures_app, name="fixtures")
+
+
+@fixtures_app.command("promote")
+def fixtures_promote(
+    run: str = typer.Argument(..., help="Path to a flight-recorder bundle .json (or run stem)."),
+    out_dir: str = typer.Option("tests/fixtures/v2", "--out", help="Fixture dir."),
+) -> None:
+    """Turn a flight-recorder bundle into a replayable CI fixture: writes
+    <company>.html (the captured real DOM) + <company>.expected.json (semantic
+    keys the front-end must recover). Real recorded DOM replaces synthetic tests."""
+    _bootstrap()
+    import json
+    from pathlib import Path
+    p = Path(run)
+    if not p.exists():
+        from applypilot import config
+        p = config.APP_DIR / "flight" / f"{run}.json"
+    bundle = json.loads(p.read_text(encoding="utf-8"))
+    out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    stem = bundle["company"]
+    (out / f"{stem}.html").write_text(bundle.get("dom_html", ""), encoding="utf-8")
+    expected = {"semantic_keys": sorted({f["semantic_key"] for f in bundle.get("fields", [])
+                                         if f.get("semantic_key")})}
+    (out / f"{stem}.expected.json").write_text(json.dumps(expected, indent=2), encoding="utf-8")
+    console.print(f"Promoted fixture [bold]{stem}[/bold] to {out} "
+                  f"({len(expected['semantic_keys'])} semantic keys).")
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
