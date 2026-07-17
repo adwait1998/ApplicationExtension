@@ -12,9 +12,32 @@ in its own exception guard so a write failure never changes a submit result)."""
 from __future__ import annotations
 
 import json
+import re
+import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+_SAFE_STEM_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_stem(name) -> str:
+    """Reduce an arbitrary (untrusted) company/ATS string to ONE safe path
+    segment usable as a filename stem.
+
+    `company` originates from ATS/job data and reaches both the recorder's bundle
+    path and `fixtures promote`'s output filename. A value containing a path
+    separator or `..` must NEVER let a write escape its directory (a bundle with
+    company='../ESCAPED' would otherwise write outside the run/fixture dir, and
+    company='Rock/Paper' would break the recorder path). We take the final path
+    component, allowlist to [A-Za-z0-9._-], then strip leading dots so the result
+    can never be '.', '..', or a hidden/escaping name — always a single, in-dir
+    stem. Callers should STILL assert the resolved output stays inside the target
+    dir as defence-in-depth."""
+    base = Path(str(name)).name          # drop any dir components / separators
+    base = _SAFE_STEM_RE.sub("_", base)  # allowlist (catches residual separators)
+    base = base.lstrip(".")              # no '.', '..', or hidden-file stems
+    return base or "unknown"
 
 
 @dataclass
@@ -67,13 +90,31 @@ class FlightRecorder:
         self._phases[phase] = ms
 
     def set_dom(self, html: str) -> None:
+        """Store the captured real DOM that `promote` turns into <company>.html.
+
+        PRIVACY GUARDRAIL — must hold before Step 6 wires this into
+        run_form_compiler: capture the DOM *before* any field is filled. `promote`
+        writes this html verbatim into a git-tracked <company>.html with NO
+        scrubbing, so a POST-fill capture would serialize
+        textarea/select/contenteditable/React `value` attributes carrying Nida's
+        real answers and land her PII in the tracked repo. Pass only pre-fill DOM
+        here; if a caller ever needs post-fill DOM, `promote` must first scrub
+        input/textarea/select values. FIELDS carry bindings only (never answer
+        text) — this html string is the ONE place raw answers could leak, so
+        invariant 3 is enforced at the capture site, not downstream."""
         self._dom_html = html or ""
 
     def commit(self, *, status: str) -> Path:
-        stem = f"{self.company}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+        # Sanitize company (untrusted ATS/job data) so it stays inside run_dir,
+        # and add sub-second + random entropy so two attempts for the same
+        # company completing in the same UTC second can't collide and silently
+        # overwrite each other. `now` is captured ONCE so the filename timestamp
+        # and created_at field can never disagree across a second boundary.
+        now = datetime.now(timezone.utc)
+        stem = f"{safe_stem(self.company)}_{now.strftime('%Y%m%dT%H%M%S_%f')}_{secrets.token_hex(3)}"
         bundle = {
             "job_url": self.job_url, "ats": self.ats, "company": self.company,
-            "status": status, "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": status, "created_at": now.isoformat(),
             "template_fp": self._schema.template_fp() if self._schema else None,
             "questions_fp": self._schema.questions_fp() if self._schema else None,
             "fields": [asdict(f) for f in self._fields],

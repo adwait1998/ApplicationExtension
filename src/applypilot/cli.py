@@ -193,13 +193,22 @@ def fixtures_promote(
     _bootstrap()
     import json
     from pathlib import Path
+
+    from applypilot.apply.v2.flight_recorder import safe_stem
     p = Path(run)
     if not p.exists():
         from applypilot import config
         p = config.APP_DIR / "flight" / f"{run}.json"
     bundle = json.loads(p.read_text(encoding="utf-8"))
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-    stem = bundle["company"]
+    # `company` is untrusted ATS/job data; a value with a path separator or `..`
+    # would otherwise write <company>.html OUTSIDE out_dir and clobber unrelated
+    # files. Sanitize to one safe segment, then assert the resolved target is a
+    # direct child of out_dir (defence-in-depth) before any write.
+    stem = safe_stem(bundle.get("company"))
+    out_resolved = out.resolve()
+    if (out_resolved / f"{stem}.html").resolve().parent != out_resolved:
+        raise typer.BadParameter(f"refusing to promote: unsafe fixture stem {stem!r}")
     (out / f"{stem}.html").write_text(bundle.get("dom_html", ""), encoding="utf-8")
     expected = {"semantic_keys": sorted({f["semantic_key"] for f in bundle.get("fields", [])
                                          if f.get("semantic_key")})}
