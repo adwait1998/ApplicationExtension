@@ -147,7 +147,13 @@ def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache, resume_pa
     # values provenance: binding names it, value carries the concrete path, same
     # shape as the personal.* rungs); with no path, park-don't-guess. Placed
     # before the mapping-cache / answer-bank / oracle rungs. resume is not canary.
-    if key == "resume":
+    # GATE ON THE FILE WIDGET: the frontend keys 'resume' by substring ('resume',
+    # 'cv', 'resume/cv'), so a non-file custom question (e.g. text 'Link to your
+    # resume', textarea 'gap in your CV') can share the key. Only the actual file
+    # input binds here — a mis-keyed non-file field falls through the normal ladder
+    # (as it did before this rung existed) rather than getting a filesystem path
+    # typed into a screening box, or parked out of the Operator's reach.
+    if key == "resume" and f.widget.kind == "file":
         if resume_path:
             return PlannedField(f, binding="profile.resume_path",
                                 value=str(resume_path), driver=driver)

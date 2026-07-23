@@ -134,6 +134,25 @@ def test_resume_without_path_parks_never_oracle(tmp_path):
         assert plan.needs_oracle == []                  # park-don't-guess, NOT oracle
 
 
+def test_resume_key_on_non_file_widget_falls_through_not_bound(tmp_path):
+    conn = _conn(tmp_path)
+    # The frontend keys 'resume' by substring ('resume'/'cv'), so a NON-file custom
+    # question can share the key: a text 'Link to your resume' or a textarea
+    # 'Describe a gap in your CV'. The resume rung is file-gated, so these must NOT
+    # bind to the resume_path (never type a filesystem path into a screening box)
+    # and must NOT park out of the Operator's reach — they fall through to oracle.
+    text_q = _field("resume", kind="text", label="Link to your resume", fid="rq1")
+    ta_q = _field("resume", kind="textarea", label="Describe a gap in your CV", fid="rq2")
+    schema = _schema([text_q, ta_q])
+    # even WITH a resume_path present, the non-file fields do not consume it.
+    plan = rz.resolve(schema, PROFILE, conn=conn, resume_path=r"C:\x\resume.pdf")
+    # nothing bound to the resume path; nothing parked with the path typed in.
+    assert all(pf.binding != "profile.resume_path" for pf in plan.planned)
+    assert all(pf.value != r"C:\x\resume.pdf" for pf in plan.planned)
+    # both mis-keyed non-file questions fall through to the Operator (pre-rung behavior).
+    assert {f.field_id for f in plan.needs_oracle} == {"rq1", "rq2"}
+
+
 def test_build_element_spec_maps_locator_dict():
     from applypilot.apply.healing import ElementSpec
     spec = rz.build_element_spec({"label": "Email", "role": "textbox",
