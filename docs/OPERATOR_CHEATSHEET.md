@@ -283,15 +283,21 @@ Turn it back off:
 Remove-Item Env:\APPLYPILOT_V2_ENGINE
 ```
 
-### 11.2 Safe shadow A/B
+### 11.2 Shadow A/B (LIVE — real submissions; "safe" = fail-open/fail-closed, NOT dry-run)
 
-With the flag on, `applypilot apply` does not switch over wholesale — every Greenhouse job still gets a legacy-equivalent safety net:
+With the flag on, `applypilot apply` does not switch over wholesale — every Greenhouse job still gets a legacy-equivalent safety net. That safety net is about WHICH engine ends up submitting and how crashes are handled — it is not a rehearsal mode. The command below is a live apply like any other in this cheatsheet (`--no-live` only disables the terminal dashboard; it does not stop submissions) and WILL submit real applications:
 - **Fail-open pre-submit.** Any exception in Parse/Resolve/Fill (before a Submit click) returns the internal `v2_fallback_to_legacy` sentinel and the SAME job re-runs through the legacy LLM-agent path in the same call — counted as a normal legacy apply, not a failure.
 - **Fail-closed post-submit.** Once Submit may have fired, a crash returns `needs_review:v2_crashed_post_submit` instead of falling back — it never risks a double submission. The ledger's dangling-INTENT guard reconciles it on the next run.
 - Both engines share the SAME safety kernel (submit broker / submission ledger / browser_stream network guard) — v2 constructs none of its own; the worker threads the same objects into whichever engine runs.
 - Every `review.jsonl` row carries `tier_used`: `v2_greenhouse` for v2 attempts, `legacy_llm` for legacy — this is exactly what `report --v2-cutover` compares (no new telemetry).
 
-Run applies exactly as usual (section 5) with the flag set — no other flags change:
+**Rehearse with `--dry-run` first** (see §5) — same as any other live apply, validate before spending real submissions:
+```powershell
+$env:APPLYPILOT_V2_ENGINE = "1"
+& $PY -m applypilot apply --limit 5 --model claude-haiku-4-5-20251001 --headless --no-live --dry-run --job-timeout 720
+```
+
+Then run for real exactly as usual (section 5) with the flag set — no other flags change (LIVE — real submissions):
 ```powershell
 $env:APPLYPILOT_V2_ENGINE = "1"
 & $PY -m applypilot apply --limit 10 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720 --max-transient-retries 1

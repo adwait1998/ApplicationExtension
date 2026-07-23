@@ -1316,7 +1316,7 @@ and closed genuine bugs, not just nits:
   LLM and persists the fabricated answer. Fixed to consult the bank READ-ONLY via
   `_nearest()` + the cache's own similarity threshold; a miss now falls through to
   the Oracle instead of silently writing a hallucinated answer into the bank.
-- **`frame_path` top-document contract bug in the front-end** (`156db8b`, `9977fee`,
+- **`frame_path` top-document contract bug in the front-end** (`9977fee`,
   `9da29ae`) — `collect_browser_observation` stamps `frame.url` on every control,
   including the main frame (where it's the per-job page URL). Gating on
   `frame_url` truthiness (instead of frame depth) would have given every
@@ -1366,7 +1366,7 @@ resume field therefore falls through to the Oracle, which can never answer a fil
 widget (`options=[]` is unanswerable by index) and parks it. Because resume is
 required on essentially every live Greenhouse form, this trips the executor's
 required-completeness interlock and parks the WHOLE job as
-`needs_review:v2_incomplete_required` **before any Fill or Submit happens** — safe
+`needs_review:v2_incomplete_required` **before any Submit happens** — safe
 (fail-closed-before-submit), but it means turning `APPLYPILOT_V2_ENGINE` on today
 measures v2's PARK rate, not its APPLY rate, on live traffic. Fixed in follow-up
 commit `9a632ae` ("v2: resume binding — thread prologue-resolved resume_path into
