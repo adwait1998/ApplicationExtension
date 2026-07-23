@@ -1282,3 +1282,102 @@ live (it's best-effort by design).
    inbox (making the accidental application real) or let it lapse.
 2. The 24h discovery window yielded only 3 new jobs after a 3-week idle
    gap — consider `--hours-old 168` (or equivalent) for the first refill.
+
+---
+
+## Iteration 18 — Phase 3: v2 Form Compiler apply engine shipped (Greenhouse, shadow A/B) — 2026-07-17/23
+
+### Scope
+
+13 tasks + a dedicated Task-13 verification pass, building a second, deterministic
+Greenhouse-only apply engine (`src/applypilot/apply/v2/`: `ir.py`, `operator.py`,
+`mapping_cache.py`, `frontend_greenhouse.py`, `resolver.py`, `drivers.py`,
+`executor.py`, `verify.py`, `orchestrator.py`, `flight_recorder.py`) behind
+`APPLYPILOT_V2_ENGINE`, fully documented in `docs/superpowers/plans/2026-07-02-phase3-form-compiler.md`.
+Commit range `06dd23f..5f79378` — **19 commits**. Pipeline: Parse (BrowserObservation
+→ FormSchema IR) → Resolve (profile/EEO/mapping-cache/answer-bank ladder → FillPlan)
+→ Fill (WidgetDriver registry, read-back verified) → Verify (Tier-1 passive
+submit-POST network evidence, Tier-2 reused DOM verdict). Fails OPEN to the legacy
+LLM-agent path pre-submit, fails CLOSED (`needs_review:v2_crashed_post_submit`)
+post-submit; reuses the existing safety kernel (broker/ledger/browser_stream)
+rather than building a new one.
+
+**Suite: 640 passed @ pre-range commit `30a1b46` → 730 passed, 1 skipped @ `5f79378`**
+(both counts re-run and confirmed directly, not taken on faith — the 1 skip is
+`tests/test_v2_fixture_replay.py`, which skips until `applypilot fixtures promote`
+has produced a first real fixture).
+
+### Two-stage review process caught real defects
+
+Every task commit was followed by a dedicated review-fix commit; the process found
+and closed genuine bugs, not just nits:
+- **Answer-bank LLM-call-on-miss in the resolver** (`67d9442`) — the resolver was
+  calling `answer_cache.answer()` directly, which on a miss fires the real network
+  LLM and persists the fabricated answer. Fixed to consult the bank READ-ONLY via
+  `_nearest()` + the cache's own similarity threshold; a miss now falls through to
+  the Oracle instead of silently writing a hallucinated answer into the bank.
+- **`frame_path` top-document contract bug in the front-end** (`156db8b`, `9977fee`,
+  `9da29ae`) — `collect_browser_observation` stamps `frame.url` on every control,
+  including the main frame (where it's the per-job page URL). Gating on
+  `frame_url` truthiness (instead of frame depth) would have given every
+  single-frame Greenhouse form a non-empty `frame_path`, violating the "`()` = top
+  document" IR contract and baking the per-job URL into `question_fp`, breaking
+  cross-job fingerprint reuse for recurring custom questions.
+- **Tier-1 verdict survivability vs. cache-write failure in `verify.py`** (`86d9e3b`)
+  — the `submit_endpoints` harvest on a confirmed Tier-1 success shared a code path
+  with the verdict itself; an sqlite fault (locked/disk-full/schema drift) during
+  the harvest could have sunk an already-confirmed `applied` result. Isolated the
+  harvest into its own try/except so a cache fault demotes to a no-op and the
+  verdict stands.
+- **Executor writeback isolation** (`47d8beb`) — the same class of bug in
+  `executor.py`'s mapping-cache writeback (`_cache_success`/`_cache_failure`): a
+  side-effect DB write must never be able to crash an otherwise-successful commit.
+  Both writebacks are now best-effort, log-and-continue.
+- **Dispatch INTENT-release proof** (`e8f17cd`) — the v2 dispatch seam
+  (`launcher._dispatch_apply_v2_aware`) records a ledger INTENT before the
+  orchestrator runs (the double-submit kernel), but wasn't reconciling it on every
+  v2 terminal status. An unreconciled INTENT on a verified `applied` would defeat
+  the company-cooldown/has-confirmed gates (they count only `state='confirmed'`)
+  and inflate `dangling_count()` on every success. Fixed with
+  `_reconcile_v2_ledger` (confirm/fail/release per terminal status) +
+  `_release_presubmit_intent` for the two pre-submit-park cases, proved by
+  dedicated tests (`test_production_fn_presubmit_sentinel_releases_intent_then_legacy`,
+  `test_production_fn_releases_ledger_on_incomplete_required`,
+  `test_production_fn_leaves_intent_dangling_on_post_submit_crash`) plus a
+  standalone safety-invariant test asserting the pre-submit release is only reachable
+  when the live verify stage is genuinely pre-submit.
+
+### Task 13 verification — PASS
+
+Full suite green (730 passed / 1 skipped, re-run and confirmed, see above), the
+`v2` package lints clean, the flag-off path was confirmed to be a byte-for-byte
+passthrough to legacy (no v2 module touched beyond the cheap flag check), and a
+synthetic end-to-end wiring smoke (fake DOM + fake Operator + temp DB, zero
+network/zero live browser) walked Parse → Resolve → Execute → Verify →
+`run_form_compiler` → `v2_ab_verdict` and composed cleanly.
+
+### Blocker discovered during verification: resolver has no resume binding
+
+Task 13's synthetic smoke only exercises fake fill plans; re-reading the resolver
+ladder for the live path surfaced that it has **no rung for the resume/file
+field** — `resume` isn't in `_PROFILE_PATHS`, isn't a canary key, isn't an EEO
+default, and the answer-bank rung only applies to `text`/`textarea` widgets. Every
+resume field therefore falls through to the Oracle, which can never answer a file
+widget (`options=[]` is unanswerable by index) and parks it. Because resume is
+required on essentially every live Greenhouse form, this trips the executor's
+required-completeness interlock and parks the WHOLE job as
+`needs_review:v2_incomplete_required` **before any Fill or Submit happens** — safe
+(fail-closed-before-submit), but it means turning `APPLYPILOT_V2_ENGINE` on today
+measures v2's PARK rate, not its APPLY rate, on live traffic. Fixed in follow-up
+commit `9a632ae` ("v2: resume binding — thread prologue-resolved resume_path into
+resolver") on `main`, one commit past this iteration's `5f79378` baseline.
+
+A second, same-shaped gap was found in the same pass: `drivers._REGISTRY` had no
+entry for `radio_group`/`checkbox`/`date`, so a required field of one of those
+kinds also fails to commit and parks the form the same way. Fixed in follow-up
+commit `85d00f4` ("v2: radio_group/checkbox/date drivers — close Task 6 registry
+gap") on branch `p3-drivers-gap`, also not yet merged into this baseline.
+
+Neither fix is part of the `5f79378` Phase 3 baseline this iteration verifies —
+both are documented as known limitations in `docs/OPERATOR_CHEATSHEET.md` §11 and
+`CONTEXT.md` pending merge.
