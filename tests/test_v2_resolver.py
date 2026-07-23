@@ -105,6 +105,35 @@ def test_hard_refusal_parks_uncovered_legal_attestation(tmp_path):
     assert parked or plan.needs_oracle    # not silently filled with a guess
 
 
+def test_resume_resolves_to_file_plannedfield_with_path(tmp_path):
+    conn = _conn(tmp_path)
+    # The always-required Greenhouse Resume/CV file input (semantic_key='resume',
+    # widget kind 'file'). The authoritative path is resolved UPSTREAM by the
+    # prologue and threaded in as data -> deterministic file-driver PlannedField.
+    schema = _schema([_field("resume", kind="file", label="Resume/CV")])
+    plan = rz.resolve(schema, PROFILE, conn=conn, resume_path=r"C:\x\resume.pdf")
+    byk = {pf.field.semantic_key: pf for pf in plan.planned}
+    pf = byk["resume"]
+    assert pf.driver == "file"                          # consumed by drivers._file
+    assert pf.value == r"C:\x\resume.pdf"               # the concrete resolved path
+    assert pf.binding == "profile.resume_path"          # bindings-not-values provenance
+    assert pf.park is False
+    assert plan.needs_oracle == []                      # NEVER oracle a file widget
+
+
+def test_resume_without_path_parks_never_oracle(tmp_path):
+    conn = _conn(tmp_path)
+    schema = _schema([_field("resume", kind="file", label="Resume/CV")])
+    # resume_path omitted entirely, explicit None, and empty string ALL park —
+    # a required file widget must never reach the Operator (it cannot answer it).
+    for kwargs in ({}, {"resume_path": None}, {"resume_path": ""}):
+        plan = rz.resolve(schema, PROFILE, conn=conn, **kwargs)
+        resume_pfs = [pf for pf in plan.planned if pf.field.semantic_key == "resume"]
+        assert len(resume_pfs) == 1 and resume_pfs[0].park is True
+        assert resume_pfs[0].driver == "file"
+        assert plan.needs_oracle == []                  # park-don't-guess, NOT oracle
+
+
 def test_build_element_spec_maps_locator_dict():
     from applypilot.apply.healing import ElementSpec
     spec = rz.build_element_spec({"label": "Email", "role": "textbox",

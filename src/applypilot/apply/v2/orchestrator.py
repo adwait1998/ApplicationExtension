@@ -112,10 +112,10 @@ def _run_oracle(plan, schema, operator):
     return plan
 
 
-def _passthrough_plan(schema, profile, conn=None):
+def _passthrough_plan(schema, profile, conn=None, resume_path=None):
     """Resolve with no oracle escalation — the resolver ladder only (used as the
     injected `resolve` stage in tests, and the natural resolve default)."""
-    return resolver.resolve(schema, profile, conn=conn)
+    return resolver.resolve(schema, profile, conn=conn, resume_path=resume_path)
 
 
 # --- Tier-2 DOM signals (live only; injected tests stub verify) -----------
@@ -169,7 +169,8 @@ def _default_submit(page, schema):
     return ok
 
 
-def _default_stages(verify_threshold: float = 0.75) -> Stages:
+def _default_stages(verify_threshold: float = 0.75,
+                    resume_path: str | None = None) -> Stages:
     def _verify(evidence, conn, dom_signals):
         from applypilot.apply.v2 import verify as verify_mod
         return verify_mod.verify(evidence, conn=conn, dom_signals=dom_signals,
@@ -177,7 +178,11 @@ def _default_stages(verify_threshold: float = 0.75) -> Stages:
 
     return Stages(
         parse=_default_parse,
-        resolve=lambda schema, profile, conn: resolver.resolve(schema, profile, conn=conn),
+        # the default resolve CLOSES OVER resume_path so the Resume/CV file field
+        # binds to the prologue-resolved path; injected fakes keep their 3-arg
+        # (schema, profile, conn) shape and are unaffected.
+        resolve=lambda schema, profile, conn: resolver.resolve(
+            schema, profile, conn=conn, resume_path=resume_path),
         run_oracle=_run_oracle,
         execute=_default_execute,
         submit=_default_submit,
@@ -189,10 +194,15 @@ def _default_stages(verify_threshold: float = 0.75) -> Stages:
 
 def run_form_compiler(*, job, page, profile, conn, company, operator,
                       network_evidence=None, stages: Stages | None = None,
-                      dry_run: bool = False, verify_threshold: float = 0.75):
+                      dry_run: bool = False, verify_threshold: float = 0.75,
+                      resume_path: str | None = None):
     """Run the v2 Form Compiler for one job. Returns run_job's exact tuple
     (status, duration_ms, prefill_status). See module docstring for the
-    fail-open / fail-closed boundary."""
+    fail-open / fail-closed boundary.
+
+    `resume_path` (the prologue-resolved authoritative resume path) is threaded
+    into the resolve stage so the Resume/CV file field binds deterministically —
+    a file widget the Operator cannot answer never lands in needs_oracle."""
     started = time.monotonic()
 
     def _ms() -> int:
@@ -200,7 +210,14 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
 
     prefill = {"ats": "greenhouse", "tier_used": V2_TIER_LABEL,
                "fields_filled": [], "error": None}
-    st = stages if stages is not None else _default_stages(verify_threshold)
+    st = stages if stages is not None else _default_stages(verify_threshold, resume_path)
+    # An injected partial Stages may omit resolve (to exercise the real resolver
+    # while faking the browser stages); fall back to the resume_path-aware default
+    # so resume_path is threaded on that path too. Injected 3-arg resolve fakes are
+    # used verbatim and are unaffected.
+    resolve_stage = st.resolve if st.resolve is not None else (
+        lambda schema, profile, conn: resolver.resolve(
+            schema, profile, conn=conn, resume_path=resume_path))
     url = job.get("application_url") or job.get("url") or ""
 
     # PARSE — pre-submit, safe to fail open (no submit fired).
@@ -212,7 +229,7 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
     # RESOLVE -> ORACLE -> FILL — all still PRE-submit: a crash here is safe to
     # fail open (nothing has been submitted) -> hand back to legacy (invariant 2).
     try:
-        plan = st.resolve(schema, profile, conn)
+        plan = resolve_stage(schema, profile, conn)
         plan = st.run_oracle(plan, schema, operator)
 
         report = st.execute(page, schema, plan, conn)

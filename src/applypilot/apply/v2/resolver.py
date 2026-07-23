@@ -103,16 +103,23 @@ def _driver_for(kind: str) -> str:
 
 def resolve(schema: ir.FormSchema, profile: dict, *, conn=None,
             answer_lookup: Callable[[str], str | None] | None = None,
-            answer_cache=None) -> FillPlan:
+            answer_cache=None, resume_path: str | None = None) -> FillPlan:
     """Walk the resolver ladder per field -> FillPlan. Deterministic, zero I/O
     beyond the DB reads (mapping_cache lookup) and the injected answer_lookup /
     answer_cache seams. Canary fields are resolved BEFORE any oracle batching so
-    they never reach needs_oracle (invariant 7)."""
+    they never reach needs_oracle (invariant 7).
+
+    `resume_path` is the authoritative resume path already resolved UPSTREAM by
+    launcher._safety_prologue (with fallbacks) — the resolver treats it as pure
+    data (no os.path.exists; file existence is the prologue's job) and binds the
+    Resume/CV file field to it, so a file widget the Operator cannot answer never
+    reaches needs_oracle."""
     plan = FillPlan()
     ats = schema.ats
     for step in schema.steps:
         for f in step.fields:
-            pf = _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache)
+            pf = _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache,
+                                resume_path)
             if pf is None:
                 plan.needs_oracle.append(f)
             else:
@@ -120,7 +127,7 @@ def resolve(schema: ir.FormSchema, profile: dict, *, conn=None,
     return plan
 
 
-def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache):
+def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache, resume_path=None):
     key = f.semantic_key
     driver = _driver_for(f.widget.kind)
 
@@ -134,6 +141,17 @@ def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache):
             return PlannedField(f, binding=f"profile.{path}", option_intent=_yn(raw), driver=driver)
         return PlannedField(f, binding=f"profile.{path}",
                             value=str(raw), option_intent=str(raw).lower(), driver=driver)
+
+    # resume: a file widget the Operator cannot answer -> must NEVER reach the
+    # oracle. Bind deterministically to the prologue-resolved path (bindings-not-
+    # values provenance: binding names it, value carries the concrete path, same
+    # shape as the personal.* rungs); with no path, park-don't-guess. Placed
+    # before the mapping-cache / answer-bank / oracle rungs. resume is not canary.
+    if key == "resume":
+        if resume_path:
+            return PlannedField(f, binding="profile.resume_path",
+                                value=str(resume_path), driver=driver)
+        return PlannedField(f, park=True, driver=driver)
 
     # (a) non-canary semantic_key -> profile path.
     if key in _PROFILE_PATHS:

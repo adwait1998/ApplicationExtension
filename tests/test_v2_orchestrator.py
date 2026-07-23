@@ -27,6 +27,46 @@ def _schema():
                          [ir.Step(0, fields, advance_control={"role": "button", "name": "Submit"}, terminal=True)])
 
 
+def _resume_schema():
+    fields = [ir.Field("rz", (), "Resume/CV", "Resume/CV", "resume", ir.Widget("file"), ir.LAZY, True)]
+    return ir.FormSchema("greenhouse", "acme", "https://boards.greenhouse.io/acme/jobs/1",
+                         [ir.Step(0, fields, advance_control={"role": "button", "name": "Submit"}, terminal=True)])
+
+
+def test_orchestrator_threads_resume_path_to_default_resolve(tmp_path):
+    """run_form_compiler threads resume_path into the DEFAULT resolve stage. Here
+    every stage EXCEPT resolve is injected, so the real resolver runs (closing
+    over resume_path) and the executor fake receives a plan whose resume
+    PlannedField carries the prologue-resolved path."""
+    conn = _conn(tmp_path)
+    captured = {}
+
+    def _execute(page, schema, plan, conn):
+        captured["plan"] = plan
+        return orch.ExecStub(ready_to_submit=True, committed_keys=["resume"])
+
+    fakes = orch.Stages(
+        parse=lambda page, company, url: _resume_schema(),
+        # resolve intentionally OMITTED -> default resolve (with resume_path) runs.
+        run_oracle=lambda plan, schema, operator: plan,
+        execute=_execute,
+        submit=lambda page, schema: True,
+        verify=lambda evidence, conn, dom_signals: orch.VerifyStub(verified=True, tier=1),
+    )
+    status, _, prefill = orch.run_form_compiler(
+        job={"url": "u", "application_url": "u"}, page=object(), profile=PROFILE,
+        conn=conn, company="acme", operator=None, stages=fakes,
+        resume_path=r"C:\x\resume.pdf")
+    assert status == "applied"
+    plan = captured["plan"]
+    resume_pfs = [pf for pf in plan.planned if pf.field.semantic_key == "resume"]
+    assert len(resume_pfs) == 1
+    assert resume_pfs[0].value == r"C:\x\resume.pdf"
+    assert resume_pfs[0].binding == "profile.resume_path"
+    assert resume_pfs[0].driver == "file"
+    assert plan.needs_oracle == []                       # file widget never oracled
+
+
 def test_orchestrator_happy_path_returns_v2_tier(tmp_path):
     conn = _conn(tmp_path)
     fakes = orch.Stages(

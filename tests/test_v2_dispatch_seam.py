@@ -227,6 +227,40 @@ def test_production_fn_runs_prologue_before_orchestrator(monkeypatch):
     assert ledger.confirmed == [("id1", 0.75)] and ledger.failed == []
 
 
+def test_production_fn_forwards_resume_path_to_orchestrator(monkeypatch):
+    # The blocker fix: the production closure threads the prologue-resolved resume
+    # path (dec.resume_path) into run_form_compiler so 'resume' file fields become
+    # a deterministic file PlannedField instead of parking every live apply.
+    monkeypatch.setenv("APPLYPILOT_V2_ENGINE", "1")
+    page = _FakePage()
+    _patch_cdp(monkeypatch, page)
+
+    ledger = _FakeLedger(open_intent=True)
+    dec = launcher._PrologueDecision(
+        False, None, 0, profile={"personal": {}},
+        apply_url="https://boards.greenhouse.io/acme/jobs/1",
+        resume_path=r"C:\x\resume.pdf", ledger=ledger)
+    monkeypatch.setattr(launcher, "_safety_prologue", lambda job, **k: dec)
+
+    seen = {}
+
+    def fake_orch(**kwargs):
+        seen.update(kwargs)
+        return "applied", 1, {"tier_used": "v2_greenhouse"}
+
+    monkeypatch.setattr("applypilot.apply.v2.orchestrator.run_form_compiler", fake_orch)
+
+    status, ms, prefill = launcher._dispatch_apply_v2_aware(
+        job={"application_url": "https://boards.greenhouse.io/acme/jobs/1", "url": "u"},
+        page=None, conn=object(), company="acme", operator=object(),
+        broker=object(), identity_id="id1", browser_stream=object(), dry_run=False,
+        verify_threshold=0.75, worker_id=0, run_started=1.0, port=9222,
+        legacy_dispatch_fn=lambda **k: (_ for _ in ()).throw(AssertionError("legacy must not run")))
+
+    assert status == "applied"
+    assert seen["resume_path"] == dec.resume_path        # forwarded verbatim
+
+
 def test_production_fn_blocked_prologue_short_circuits(monkeypatch):
     monkeypatch.setenv("APPLYPILOT_V2_ENGINE", "1")
     opened = {"cdp": 0, "orch": 0, "legacy": 0}

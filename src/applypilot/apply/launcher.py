@@ -3441,7 +3441,8 @@ def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port)
             status, ms, prefill = _orch.run_form_compiler(
                 job=job, page=drive_page, profile=dec.profile, conn=conn,
                 company=company, operator=operator, network_evidence=evidence,
-                dry_run=dry_run, verify_threshold=verify_threshold)
+                dry_run=dry_run, verify_threshold=verify_threshold,
+                resume_path=dec.resume_path)
         finally:
             _close_cdp(pw, browser)
 
