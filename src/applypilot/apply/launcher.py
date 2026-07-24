@@ -2051,10 +2051,16 @@ def write_review_log(job: dict, status: str, model: str, duration_ms: int,
         "status": status,
         "duration_ms": duration_ms,
         "error": error,
-        "prefill_ats": prefill_status["ats"] if prefill_status else None,
-        "prefill_fields_filled": prefill_status["fields_filled"] if prefill_status else None,
-        "prefill_duration_ms": prefill_status["duration_ms"] if prefill_status else None,
-        "prefill_error": prefill_status["error"] if prefill_status else None,
+        # Defensive .get() on EVERY prefill key: the v2 engine's prefill dict
+        # carries only {ats, tier_used, fields_filled, error} — a bare
+        # prefill_status["duration_ms"] KeyError here crashed worker_loop AFTER a
+        # real v2 apply, dropping the telemetry row. Absent keys map to None; the
+        # row schema is unchanged and legacy producers (which carry every key)
+        # return identical values.
+        "prefill_ats": prefill_status.get("ats") if prefill_status else None,
+        "prefill_fields_filled": prefill_status.get("fields_filled") if prefill_status else None,
+        "prefill_duration_ms": prefill_status.get("duration_ms") if prefill_status else None,
+        "prefill_error": prefill_status.get("error") if prefill_status else None,
         "prefill_submit_ready": prefill_status.get("submit_ready") if prefill_status else None,
         "failure_class": failure_class,
         "retry_count": retry_count,
@@ -3491,6 +3497,11 @@ def _dispatch_apply_v2_aware(*, job, page, conn, company, operator, broker,
         status, ms, prefill = run_form_compiler_fn(
             job=job, page=page, conn=conn, company=company, operator=operator,
             dry_run=dry_run, verify_threshold=verify_threshold)
+        # Observability: one INFO line per v2 attempt so worker logs show what v2
+        # did (how far parse/resolve/fill got) instead of a silent 34s black box.
+        _fields = len(prefill.get("fields_filled") or []) if isinstance(prefill, dict) else None
+        logger.info("v2 outcome: status=%s fields_filled=%s duration_ms=%s",
+                    status, _fields, ms)
         if status != FALLBACK_SENTINEL:
             # A/B labeling is free: v2 results carry tier_used=v2_greenhouse
             # (setdefault — never clobber a tier the engine already stamped).

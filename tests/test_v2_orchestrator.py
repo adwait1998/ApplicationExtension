@@ -244,3 +244,89 @@ def test_run_oracle_no_op_without_operator():
     out = orch._run_oracle(plan, schema, None)       # operator=None -> untouched
     assert out is plan
     assert len(out.needs_oracle) == 1
+
+
+# ---------------------------------------------------------------------------
+# Rehearsal-blocker fix: every dict-returning path stamps an int duration_ms
+# into the prefill so write_review_log's prefill_duration_ms is populated (v2's
+# prefill previously lacked the key that every legacy producer carries).
+# ---------------------------------------------------------------------------
+
+def _stages_for(path):
+    """Injected Stages that drive run_form_compiler to a specific dict-prefill
+    return path."""
+    base = dict(
+        parse=lambda page, company, url: _schema(),
+        resolve=lambda schema, profile, conn: orch._passthrough_plan(schema, profile),
+        run_oracle=lambda plan, schema, operator: plan,
+        submit=lambda page, schema: True,
+    )
+    if path == "applied":
+        base.update(
+            execute=lambda page, schema, plan, conn: orch.ExecStub(
+                ready_to_submit=True, committed_keys=["first_name", "email"]),
+            verify=lambda evidence, conn, dom_signals: orch.VerifyStub(verified=True, tier=1))
+    elif path == "incomplete":
+        base.update(
+            execute=lambda page, schema, plan, conn: orch.ExecStub(
+                ready_to_submit=False, missing_required=["First name"]))
+    elif path == "dry_run":
+        base.update(
+            execute=lambda page, schema, plan, conn: orch.ExecStub(
+                ready_to_submit=True, committed_keys=["first_name"]),
+            verify=lambda evidence, conn, dom_signals: orch.VerifyStub(verified=True, tier=1))
+    elif path == "crashed_post_submit":
+        def _boom(*a, **k):
+            raise RuntimeError("crash after submit clicked")
+        base.update(
+            execute=lambda page, schema, plan, conn: orch.ExecStub(
+                ready_to_submit=True, committed_keys=["first_name"]),
+            verify=_boom)
+    elif path == "unverified":
+        base.update(
+            execute=lambda page, schema, plan, conn: orch.ExecStub(
+                ready_to_submit=True, committed_keys=["first_name"]),
+            verify=lambda evidence, conn, dom_signals: orch.VerifyStub(
+                verified=False, needs_review=True))
+    return orch.Stages(**base)
+
+
+def test_every_dict_prefill_path_stamps_int_duration_ms(tmp_path):
+    """Each dict-returning run_form_compiler path (applied / v2_incomplete_required
+    / v2_dry_run / v2_crashed_post_submit / unverified_submission) carries an int
+    duration_ms in prefill that equals the returned tuple's duration — the key
+    write_review_log reads. Sentinel paths keep prefill=None (asserted separately)."""
+    cases = {
+        "applied": ("applied", False),
+        "incomplete": ("needs_review:v2_incomplete_required", False),
+        "dry_run": ("needs_review:v2_dry_run", True),
+        "crashed_post_submit": ("needs_review:v2_crashed_post_submit", False),
+        "unverified": ("needs_review:unverified_submission", False),
+    }
+    for path, (expected_status, dry_run) in cases.items():
+        conn = _conn(tmp_path)
+        status, duration_ms, prefill = orch.run_form_compiler(
+            job={"url": "u", "application_url": "u"}, page=object(), profile=PROFILE,
+            conn=conn, company="acme", operator=None, stages=_stages_for(path),
+            dry_run=dry_run)
+        assert status == expected_status, path
+        assert isinstance(prefill, dict), path
+        assert "duration_ms" in prefill, path
+        assert isinstance(prefill["duration_ms"], int), path
+        assert prefill["duration_ms"] == duration_ms, path   # consistent with tuple
+        assert prefill["tier_used"] == "v2_greenhouse", path  # unchanged
+
+
+def test_sentinel_paths_keep_prefill_none(tmp_path):
+    """Fail-open sentinel paths (parse crash, pre-submit crash) still return
+    prefill=None — no duration_ms dict is fabricated on the legacy-fallback route."""
+    conn = _conn(tmp_path)
+
+    def _boom(*a, **k):
+        raise RuntimeError("parse blew up")
+
+    status, _, prefill = orch.run_form_compiler(
+        job={"url": "u", "application_url": "u"}, page=object(), profile=PROFILE,
+        conn=conn, company="acme", operator=None, stages=orch.Stages(parse=_boom))
+    assert status == orch.FALLBACK_SENTINEL
+    assert prefill is None

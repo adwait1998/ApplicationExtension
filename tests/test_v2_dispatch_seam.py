@@ -14,7 +14,11 @@ Two layers of coverage, both pure injection (no Chrome, no network):
    the recorded INTENT so the legacy re-entry APPLIES instead of parking. These
    monkeypatch the prologue / CDP-connect / orchestrator to assert real ordering.
 """
+import json
+import logging
 import os
+
+import pytest
 
 from applypilot.apply import launcher
 
@@ -483,3 +487,119 @@ def test_live_verify_never_unclear_after_click():
                                 no_validation_errors=False, required_ok=False)
     r = verify_mod.verify(ev, conn=None, dom_signals=dom, verify_threshold=0.75)
     assert r.verified is False and r.needs_review is True
+
+
+# ===========================================================================
+# 4. THE REHEARSAL BLOCKER: write_review_log tolerates the v2 prefill shape
+# ===========================================================================
+# Tonight's first real-DOM dry-run crashed worker_loop at write_review_log:
+# prefill_status["duration_ms"] KeyError, because v2's prefill dict lacks the
+# duration_ms key every legacy producer carries. The consumer must be defensive
+# (.get()) so a real submission's telemetry row can never be lost to a KeyError.
+
+@pytest.fixture
+def _log_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("applypilot.config.LOG_DIR", tmp_path)
+    monkeypatch.setattr("applypilot.config.ensure_dirs", lambda: None)
+    return tmp_path
+
+
+def _last_row(log_dir):
+    lines = (log_dir / "review.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    return json.loads(lines[-1])
+
+
+_JOB = {"url": "j1", "title": "Designer", "site": "acme (greenhouse)", "fit_score": 9}
+
+
+def test_write_review_log_tolerates_v2_prefill_without_duration_ms(_log_dir):
+    # The exact crash shape: a v2 prefill dict with ats/tier_used/fields_filled/
+    # error but NO duration_ms (and no submit_ready). The row must land, no raise,
+    # with the absent keys mapped to None.
+    v2_prefill = {"ats": "greenhouse", "tier_used": "v2_greenhouse",
+                  "fields_filled": ["first_name", "email"], "error": None}
+    launcher.write_review_log(_JOB, "dry_run:needs_review:v2_dry_run", "sonnet",
+                              34000, True, prefill_status=v2_prefill)
+    row = _last_row(_log_dir)
+    assert row["prefill_duration_ms"] is None            # absent key -> None, not KeyError
+    assert row["prefill_submit_ready"] is None           # also absent in the v2 shape
+    assert row["prefill_ats"] == "greenhouse"
+    assert row["prefill_fields_filled"] == ["first_name", "email"]
+    assert row["prefill_error"] is None
+    assert row["tier_used"] == "v2_greenhouse"
+
+
+def test_write_review_log_legacy_prefill_values_unchanged(_log_dir):
+    # A legacy-shaped prefill carries every key; .get() returns the SAME values the
+    # bare subscript did -> zero behavior change for legacy producers.
+    legacy_prefill = {"ats": "workday", "fields_filled": ["a", "b", "c"],
+                      "duration_ms": 8123, "error": "some warning",
+                      "submit_ready": True, "tier_used": "legacy_llm"}
+    launcher.write_review_log(_JOB, "needs_review", "sonnet", 9000, False,
+                              prefill_status=legacy_prefill)
+    row = _last_row(_log_dir)
+    assert row["prefill_ats"] == "workday"
+    assert row["prefill_fields_filled"] == ["a", "b", "c"]
+    assert row["prefill_duration_ms"] == 8123
+    assert row["prefill_error"] == "some warning"
+    assert row["prefill_submit_ready"] is True
+    assert row["tier_used"] == "legacy_llm"
+
+
+def test_write_review_log_none_prefill_all_none(_log_dir):
+    # The legacy run_job path passes prefill_status=None -> all prefill_* None.
+    launcher.write_review_log(_JOB, "applied", "sonnet", 500, False,
+                              prefill_status=None)
+    row = _last_row(_log_dir)
+    for key in ("prefill_ats", "prefill_fields_filled", "prefill_duration_ms",
+                "prefill_error", "prefill_submit_ready"):
+        assert row[key] is None
+    assert row["tier_used"] is None
+
+
+# ===========================================================================
+# 5. OBSERVABILITY: one INFO line per v2 attempt reports the outcome
+# ===========================================================================
+
+def test_v2_dispatch_logs_one_outcome_line(monkeypatch, caplog):
+    monkeypatch.setenv("APPLYPILOT_V2_ENGINE", "1")
+
+    def fake_v2(**kwargs):
+        return "applied", 34000, {"ats": "greenhouse", "tier_used": "v2_greenhouse",
+                                  "fields_filled": ["first_name", "email"],
+                                  "duration_ms": 34000}
+
+    with caplog.at_level(logging.INFO, logger="applypilot.apply.launcher"):
+        launcher._dispatch_apply_v2_aware(
+            job={"application_url": "https://boards.greenhouse.io/acme/jobs/1", "url": "u"},
+            page=object(), conn=object(), company="acme", operator=None,
+            broker=object(), identity_id="id1", browser_stream=object(), dry_run=False,
+            verify_threshold=0.75,
+            run_form_compiler_fn=fake_v2, legacy_dispatch_fn=lambda **k: (None, 0, None))
+
+    outcome = [r.getMessage() for r in caplog.records if "v2 outcome" in r.getMessage()]
+    assert len(outcome) == 1                              # exactly ONE line per attempt
+    assert "status=applied" in outcome[0]
+    assert "fields_filled=2" in outcome[0]               # len(fields_filled) reported
+    assert "duration_ms=34000" in outcome[0]
+
+
+def test_v2_dispatch_logs_outcome_on_sentinel_fallback(monkeypatch, caplog):
+    # A pre-submit fall-open still logs one outcome line (fields_filled=None for a
+    # None prefill) so worker logs show v2 attempted and handed back to legacy.
+    monkeypatch.setenv("APPLYPILOT_V2_ENGINE", "1")
+    from applypilot.apply.v2.orchestrator import FALLBACK_SENTINEL
+
+    with caplog.at_level(logging.INFO, logger="applypilot.apply.launcher"):
+        launcher._dispatch_apply_v2_aware(
+            job={"application_url": "https://boards.greenhouse.io/acme/jobs/1", "url": "u"},
+            page=object(), conn=object(), company="acme", operator=None,
+            broker=object(), identity_id="id1", browser_stream=object(), dry_run=False,
+            verify_threshold=0.75,
+            run_form_compiler_fn=lambda **k: (FALLBACK_SENTINEL, 5, None),
+            legacy_dispatch_fn=lambda **k: ("applied", 20, {"tier_used": "legacy_llm"}))
+
+    outcome = [r.getMessage() for r in caplog.records if "v2 outcome" in r.getMessage()]
+    assert len(outcome) == 1
+    assert f"status={FALLBACK_SENTINEL}" in outcome[0]
+    assert "fields_filled=None" in outcome[0]

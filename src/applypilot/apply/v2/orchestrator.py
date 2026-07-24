@@ -237,10 +237,14 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
         if not getattr(report, "ready_to_submit", False):
             # required-completeness interlock failed -> park, never submit an
             # incomplete form (invariant 9).
-            return "needs_review:v2_incomplete_required", _ms(), prefill
+            ms = _ms()
+            prefill["duration_ms"] = ms                # write_review_log reads this
+            return "needs_review:v2_incomplete_required", ms, prefill
         if dry_run:
             # Submit is structurally impossible in dry-run; park BEFORE any click.
-            return "needs_review:v2_dry_run", _ms(), prefill
+            ms = _ms()
+            prefill["duration_ms"] = ms
+            return "needs_review:v2_dry_run", ms, prefill
     except Exception:                                # noqa: BLE001 — FAIL OPEN (pre-submit only)
         return FALLBACK_SENTINEL, _ms(), None
 
@@ -254,11 +258,14 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
             dom = _dom_signals(page)                 # Tier-2 fallback (live only)
         v = st.verify(network_evidence, conn, dom)
     except Exception:                                # noqa: BLE001 — post-submit crash: DO NOT re-apply
-        return "needs_review:v2_crashed_post_submit", _ms(), prefill
+        ms = _ms()
+        prefill["duration_ms"] = ms
+        return "needs_review:v2_crashed_post_submit", ms, prefill
 
     ms = _ms()
+    prefill["duration_ms"] = ms                       # stamped on the dict return paths
     if getattr(v, "verified", False):
         return "applied", ms, prefill
     if getattr(v, "needs_review", False) or not clicked:
         return "needs_review:unverified_submission", ms, prefill
-    return FALLBACK_SENTINEL, ms, None               # totally unclear -> let legacy try
+    return FALLBACK_SENTINEL, ms, None               # totally unclear -> prefill dropped, let legacy try
