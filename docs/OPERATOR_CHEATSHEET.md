@@ -258,3 +258,87 @@ ats_boards  full    fit 1-10                  skill replay  success-page
 - `report` tells you the truth; `status` tells you volume.
 ```
 ```
+
+---
+
+## 11. v2 engine (Form Compiler) — SHADOW / EXPERIMENTAL, Greenhouse only
+
+Phase 3 shipped a second apply engine (`src/applypilot/apply/v2/`) that replaces the
+LLM-agent loop with a deterministic **Parse → Resolve → Fill → Verify** pipeline for
+Greenhouse forms only. It is fully behind a flag, defaults OFF, and fails open to the
+legacy path before a submit fires. Status: **Phases 0–3 complete + verified @ commit
+`5f79378`** (730 passed, 1 intentional skip).
+
+### 11.1 The flag
+
+```powershell
+$env:APPLYPILOT_V2_ENGINE = "1"     # also accepts true / yes / on (case-insensitive)
+```
+- Read fresh on every dispatch (`launcher._v2_enabled`) — no restart needed, flip it and the next job picks it up.
+- Only routes when BOTH the flag is on AND the job is Greenhouse (`launcher._is_greenhouse`) — Lever/Ashby/Workday/LinkedIn always run the legacy path regardless of the flag.
+- Unset (default): byte-for-byte legacy passthrough — the v2 closure is built but never invoked.
+
+Turn it back off:
+```powershell
+Remove-Item Env:\APPLYPILOT_V2_ENGINE
+```
+
+### 11.2 Shadow A/B (LIVE — real submissions; "safe" = fail-open/fail-closed, NOT dry-run)
+
+With the flag on, `applypilot apply` does not switch over wholesale — every Greenhouse job still gets a legacy-equivalent safety net. That safety net is about WHICH engine ends up submitting and how crashes are handled — it is not a rehearsal mode. The command below is a live apply like any other in this cheatsheet (`--no-live` only disables the terminal dashboard; it does not stop submissions) and WILL submit real applications:
+- **Fail-open pre-submit.** Any exception in Parse/Resolve/Fill (before a Submit click) returns the internal `v2_fallback_to_legacy` sentinel and the SAME job re-runs through the legacy LLM-agent path in the same call — counted as a normal legacy apply, not a failure.
+- **Fail-closed post-submit.** Once Submit may have fired, a crash returns `needs_review:v2_crashed_post_submit` instead of falling back — it never risks a double submission. The ledger's dangling-INTENT guard reconciles it on the next run.
+- Both engines share the SAME safety kernel (submit broker / submission ledger / browser_stream network guard) — v2 constructs none of its own; the worker threads the same objects into whichever engine runs.
+- Every `review.jsonl` row carries `tier_used`: `v2_greenhouse` for v2 attempts, `legacy_llm` for legacy — this is exactly what `report --v2-cutover` compares (no new telemetry).
+
+**Rehearse with `--dry-run` first** (see §5) — same as any other live apply, validate before spending real submissions:
+```powershell
+$env:APPLYPILOT_V2_ENGINE = "1"
+& $PY -m applypilot apply --limit 5 --model claude-haiku-4-5-20251001 --headless --no-live --dry-run --job-timeout 720
+```
+
+Then run for real exactly as usual (section 5) with the flag set — no other flags change (LIVE — real submissions):
+```powershell
+$env:APPLYPILOT_V2_ENGINE = "1"
+& $PY -m applypilot apply --limit 10 --model claude-haiku-4-5-20251001 --headless --no-live --job-timeout 720 --max-transient-retries 1
+```
+
+### 11.3 Reading the cutover gate
+
+```powershell
+& $PY -m applypilot report --v2-cutover
+```
+Prints the normal `report` output plus a 3-leg go/no-go (spec §12) — **all three** must read GO before Greenhouse is permanently cut over to v2:
+
+| Leg | Pass condition |
+|---|---|
+| §12.1 pass-rate | v2 `pass_rate` >= legacy `pass_rate`, on >=100 LIVE (non-dry-run) `v2_greenhouse` rows |
+| §12.2 speed | p50 `duration_ms` over live v2 rows <= 45,000 ms |
+| §12.3 safety audit | MANUAL — not derived from `review.jsonl`. The CLI has no flag to pass the audit result in yet, so this leg always prints `????` (not-yet-run) today |
+
+§12.3's manual query trio (the command prints these when unresolved):
+1. `submission_ledger.dangling_count() == 0` (reconcile any dangling `v2_crashed_post_submit` INTENT first)
+2. no identity double-submitted: `confirmed_count_for_token(token, since) <= 1`
+3. flight-recorder / canary provenance: zero canary-field writes, no submit-POST without an open broker ticket
+
+**Do not cut Greenhouse over on pass-rate alone** — the report reads `HOLD` until all three legs are `GO`.
+
+### 11.4 Promoting a flight-recorder bundle to a CI fixture
+
+```powershell
+& $PY -m applypilot fixtures promote <run> --out tests/fixtures/v2
+```
+- `<run>` is either a path to a flight-recorder bundle `.json`, or a bare stem resolved against `$env:APPLYPILOT_DIR\flight\<run>.json`.
+- Writes `tests/fixtures/v2/<company>.html` (the real captured DOM) + `<company>.expected.json` (the semantic keys the front-end must recover) — replaces synthetic-only `set_content` tests with a real recorded form.
+- The company name is sanitized before it becomes a filename (path-traversal / separator characters are stripped).
+- `tests/test_v2_fixture_replay.py` SKIPS ("no promoted fixtures yet") until the first fixture lands in `tests/fixtures/v2/` — that is the 1 skip in the current 730-passed suite, not a failure.
+
+**Gap to know about:** `flight_recorder.FlightRecorder` is a complete, tested module, but as of commit `5f79378` nothing in `orchestrator.run_form_compiler` constructs or calls it yet — no live v2 attempt currently writes a bundle to `$env:APPLYPILOT_DIR\flight\`. Until that wiring lands, there is nothing a real run has produced to promote from.
+
+### 11.5 Known limitations (read before enabling on live jobs)
+
+- **Resume binding gap.** At commit `5f79378` the resolver has no rung for the resume/file field, so on a live Greenhouse form the resume upload falls through every rung to the Oracle — which can never answer a file widget (options are always `[]`) — and parks. Because resume is (almost always) required, this trips the executor's required-completeness interlock and the WHOLE job parks as `needs_review:v2_incomplete_required` before any Submit happens (safe, but no live apply gets through). **A fix has landed as follow-up commit `9a632ae`** ("v2: resume binding — thread prologue-resolved resume_path into resolver") on `main`, ahead of this branch's `5f79378` baseline — confirm it's present on whatever branch you enable the flag on before trusting live A/B pass-rate numbers.
+- **radio_group / checkbox / date widgets have no driver.** At commit `5f79378`, `drivers._REGISTRY` only covers `text`, `textarea`, `file`, `react_select`, `native_select`, `typeahead_location`, `phone_intl`. A required field whose widget is `radio_group`/`checkbox`/`date` fails to commit (`no_driver:<kind>`) and parks the form the same way the resume gap does. **Implemented in follow-up commit `85d00f4`** ("v2: radio_group/checkbox/date drivers — close Task 6 registry gap") on branch `p3-drivers-gap` — not yet merged into this branch's Phase 3 baseline (`5f79378`); confirm it has landed before relying on forms that use these widgets.
+- **Enumerated custom questions always park.** Options are enumerated LAZILY (never at parse), so a required custom question rendered as a dropdown/react-select reaches the Oracle with `options=[]` and can never be indexed — deliberate park-don't-guess, deferred to Phase 4. Free-text custom questions ARE fully handled today.
+- **Flight-recorder is not wired into the orchestrator** — see 11.4 above.
+- **react-select fixed-sleep tax.** The promoted combobox drivers still carry `time.sleep()` calls from `prefill.py`: ~0.25s (1 call) when the portal-click path commits cleanly; up to ~1.4s total (5 calls) when it desyncs and falls back to the keyboard-driven path. This is NOT zero-sleep like the rest of the executor (invariant 9 covers the executor's own waits, not the promoted driver internals) — worth watching against the 45s p50 budget on EEO/screening-heavy forms.

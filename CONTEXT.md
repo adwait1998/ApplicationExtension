@@ -70,6 +70,39 @@ All persisted via `[Environment]::SetEnvironmentVariable(..., "User")`.
 - `apply/launcher.py` SQL — relaxed `tailored_resume_path IS NOT NULL` filter; added inner-loop manual-ATS skip so launcher doesn't bail when first job is LinkedIn.
 - `config/sites.yaml` — added LinkedIn Easy Apply / Indeed Quick Apply / Glassdoor / ZipRecruiter URL patterns to `manual_ats` (skip aggregator quick-apply flows).
 
+### Auto-apply v2 — Form Compiler (Phase 3, added 2026-07)
+
+**Status: Phases 0–3 complete + verified @ commit `5f79378`** (730 passed, 1 intentional
+skip). A second, deterministic apply engine for Greenhouse only, living entirely in
+`src/applypilot/apply/v2/`. Behind the `APPLYPILOT_V2_ENGINE` env flag (fresh-read every
+call, `1`/`true`/`yes`/`on`; default OFF = byte-for-byte legacy passthrough). Fails OPEN
+to the legacy LLM-agent path pre-submit, fails CLOSED (`needs_review:v2_crashed_post_submit`,
+never a silent re-apply) post-submit. Reuses the SAME safety kernel (submit broker /
+submission ledger / browser_stream) the legacy path uses — v2 constructs none of it.
+
+Package map (`src/applypilot/apply/v2/`):
+- `__init__.py` — `V2_ENGINE_ENV` ("APPLYPILOT_V2_ENGINE") / `V2_TIER_LABEL` ("v2_greenhouse") constants.
+- `ir.py` — `FormSchema`/`Step`/`Field` IR; churn-resistant `field_fp`/`template_fp`/`questions_fp` fingerprints; `LAZY` options sentinel; canary-key taxonomy (work_auth/sponsorship/citizenship/salary/address/dob).
+- `operator.py` — `Operator` protocol + `LLMOperator`/`ClaudeCLIOperator`; JSON-in/JSON-out field resolution, enumerated answers by index only (never free-typed), one retry, park-don't-guess on failure.
+- `mapping_cache.py` — `mapping_cache` + `submit_endpoints` SQLite tables: demote-never-archive locator bindings (2 verified failures demotes, row is never deleted) + submit-endpoint harvest.
+- `frontend_greenhouse.py` — `BrowserObservation` → `FormSchema` parser: semantic-key synonym table, widget-kind classifier, options=LAZY (dropdowns are never opened at parse).
+- `resolver.py` — `FormSchema` + profile + caches → `FillPlan`: canary-first ladder (exact profile path → non-canary profile path → EEO-decline default → hard-refusal park → mapping-cache → answer-bank read-only → Oracle; note: no resume/file rung at `5f79378` — see known limitations).
+- `drivers.py` — `WidgetDriver` registry (`text`/`textarea`/`file`/`react_select`/`native_select`/`typeahead_location`/`phone_intl`); every commit is read-back verified; promotes `prefill.py`'s react-select/location/phone helpers rather than re-authoring them.
+- `executor.py` — walks a `FillPlan` step-by-step: resume/file fields first, then a MutationObserver quiet-window settle gate before the rest (zero fixed sleeps of its own); required-completeness interlock gates `ready_to_submit`.
+- `verify.py` — Tier-1 passive submit-POST network evidence (auto-harvests `submit_endpoints` on a confirmed success) + Tier-2 reuses the legacy DOM verdict core; ambiguity → `needs_review`.
+- `orchestrator.py` — `run_form_compiler`: Parse → Resolve → Oracle → Fill → Submit → Verify conductor; owns the fail-open/fail-closed boundary described above.
+- `flight_recorder.py` — `FlightRecorder` per-attempt bundle writer (IR + per-field provenance + network log + captured DOM + phase timings) feeding `applypilot fixtures promote`; **not yet called from `orchestrator.py`** — no live attempt writes a bundle today.
+
+The dispatch seam (`_dispatch_apply_v2_aware`, `_v2_enabled`, `_make_v2_production_fn`)
+lives in `launcher.py`, not the `v2/` package — it threads the worker's existing
+broker/ledger/browser_stream into the orchestrator and reconciles the ledger INTENT on
+every v2 terminal status. New CLI: `applypilot report --v2-cutover` (3-leg cutover gate:
+pass-rate + p50 speed + manual safety audit) and `applypilot fixtures promote <run>`
+(flight-recorder bundle → `tests/fixtures/v2/<company>.html` + `.expected.json`). See
+`docs/OPERATOR_CHEATSHEET.md` §11 for the operator workflow and known limitations
+(resume-binding gap, missing radio_group/checkbox/date drivers, unwired flight recorder,
+enumerated-custom-question parking, react-select sleep tax).
+
 ### Config / utilities
 - `config.py` — `find_claude_binary()` checks PATH then globs common Windows install roots. Returns whatever exists.
 
@@ -107,6 +140,12 @@ Motorola Solutions Workday job (ECH Application Specialist) is marked applied fr
 - **Cover letter generation** — also subject to fabrication issues. Currently no cover letter is uploaded; Sonnet handles "tell us about yourself" inline if asked.
 - **`/superpowers` plugin scope** — installed but scoped to `E:` drive only. Slash commands like `/requesting-code-review` only register if Claude Code is launched from `E:\`. To make global, change scope in Customize panel.
 - **Style nit (low priority)** — `prompt.py` STEP-BY-STEP still says "1. browser_navigate" while pre-fill HARD RULES section says don't navigate. Sonnet is reconciling correctly; could be tightened by conditionally rewriting step 1.
+- **v2 Form Compiler (Phase 3, `APPLYPILOT_V2_ENGINE`, Greenhouse only) known limitations** — see "Auto-apply v2" above for the package map:
+  - Resume/file field has no resolver binding at commit `5f79378`, so every live Greenhouse form parks as `needs_review:v2_incomplete_required` before any Submit happens (safe, but shadow mode currently measures parks, not applies). Fixed in follow-up commit `9a632ae` on `main` ("resume binding — thread prologue-resolved resume_path into resolver") — confirm it has landed on the branch you enable the flag on.
+  - No driver registered for `radio_group` / `checkbox` / `date` widgets at `5f79378` (`drivers._REGISTRY` covered only `text`/`textarea`/`file`/`react_select`/`native_select`/`typeahead_location`/`phone_intl`); a required field of one of those kinds fails to commit and parks the form. Implemented in follow-up commit `85d00f4` ("v2: radio_group/checkbox/date drivers — close Task 6 registry gap") on branch `p3-drivers-gap` — not yet merged into this Phase 3 baseline.
+  - `flight_recorder.FlightRecorder` is built and tested but not yet called from `orchestrator.run_form_compiler` — no live v2 attempt writes a bundle to `$APPLYPILOT_DIR\flight\` yet, so `applypilot fixtures promote` has nothing real to promote from until that wiring lands.
+  - Enumerated (dropdown/react-select) custom questions always park — options are LAZY at parse so the Oracle can never index them; free-text custom questions work today. Enumerating them is Phase 4.
+  - The promoted react-select drivers still carry fixed `time.sleep()` calls from `prefill.py` (~0.25s clean commit, up to ~1.4s across 5 calls on the keyboard-fallback/desync path) — not covered by the executor's own zero-fixed-sleep invariant; watch this against the 45s p50 cutover budget.
 
 ## Quick command reference
 
