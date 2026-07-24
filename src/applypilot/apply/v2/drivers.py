@@ -19,7 +19,9 @@ budget in Task 12.
 """
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
+from datetime import datetime
 
 from applypilot.apply.healing import heal
 from applypilot.apply.v2.resolver import build_element_spec, PlannedField
@@ -203,6 +205,189 @@ def _phone_intl(scope, planned: PlannedField) -> CommitResult:
     return CommitResult(bool(ok), "phone_country")
 
 
+# --- radio_group / checkbox / date -------------------------------------------
+# No promotable source existed for these: prefill.py has only
+# _click_segmented_button (aria-pressed/class "active" button widgets keyed by
+# needles+preferred) — a different widget shape than native <input type=radio>
+# with <label> association, so promoting it would be a poor fit. These three are
+# minimal Playwright-sync implementations following THIS module's own conventions
+# (heal -> act -> genuine DOM read-back; invariants 4/5/6). resolver._driver_for
+# routes radio_group/checkbox on option_intent and date on value.
+
+_TOKENS = itertools.count(1)
+
+
+def _next_token() -> str:
+    return f"drv{next(_TOKENS)}"
+
+
+# JS: from an anchor element (whatever heal returned inside the group), gather the
+# radio group, resolve each radio's label (label[for] -> wrapping <label> ->
+# aria-label -> value), tag each radio with a unique token, and return the
+# [{token, label}] roster. The intent->label MATCH is done in Python via
+# _match_real_option (exact-first, length-guarded) — NOT a first-substring find()
+# in JS, which would commit the first prefix-sharing option ('none' onto 'No').
+_RADIO_ENUM_JS = r"""
+(anchor, args) => {
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  let radios = [];
+  if (anchor.matches && anchor.matches('input[type="radio"]')) {
+    const nm = anchor.getAttribute('name');
+    radios = nm
+      ? Array.from(document.querySelectorAll('input[type="radio"][name="' + CSS.escape(nm) + '"]'))
+      : [anchor];
+  }
+  if (!radios.length) {
+    let cur = anchor;
+    for (let i = 0; i < 5 && cur; i += 1, cur = cur.parentElement) {
+      const found = cur.querySelectorAll
+        ? Array.from(cur.querySelectorAll('input[type="radio"]')) : [];
+      if (found.length) { radios = found; break; }
+    }
+  }
+  if (!radios.length) return [];
+  const labelOf = el => {
+    let t = '';
+    if (el.id) { const L = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (L) t = L.textContent; }
+    if (!t) { const W = el.closest('label'); if (W) t = W.textContent; }
+    if (!t) t = el.getAttribute('aria-label') || '';
+    if (!t) t = el.getAttribute('value') || '';
+    return norm(t);
+  };
+  return radios.map((el, i) => {
+    const token = args.token + '-' + i;
+    el.setAttribute('data-applypilot-radio', token);
+    return { token: token, label: labelOf(el) };
+  });
+}
+"""
+
+
+def _radio_group(scope, planned: PlannedField) -> CommitResult:
+    """Enumerated radio widget: map option_intent to a REAL radio label, check it,
+    read back is_checked on the TARGET radio (invariants 5/6). A non-matching
+    intent checks NOTHING — never the first radio. The group is located via heal
+    on the field's locator_spec; individual radios carry the option labels, so we
+    enumerate the roster in the DOM then match the intent to a REAL label with the
+    shared _match_real_option ordering (exact -> preferred⊆option -> option⊆
+    preferred, length-guarded) so a prefix-sharing option never wins by accident."""
+    intent = (planned.option_intent or "").strip()
+    if not intent:                                # optional enumerated field, no data
+        return CommitResult(False, error="no_intent")
+    loc, tier = _locate(scope, planned)
+    if loc is None:
+        return CommitResult(False, tier, "not_located")
+    token = _next_token()
+    try:
+        roster = loc.evaluate(_RADIO_ENUM_JS, {"token": token})
+    except Exception as e:                        # noqa: BLE001
+        return CommitResult(False, tier, str(e))
+    if not roster:                                # no radios reachable from the anchor
+        return CommitResult(False, tier, "not_located")
+    labels = [(r.get("label") or "") for r in roster]
+    # Exact-first, length-guarded match (same ordering the dropdown drivers use):
+    # never a naive first-substring pick that would commit a WRONG option.
+    winner = _match_real_option((intent,), labels)
+    if winner is None:                            # intent maps to no real option
+        return CommitResult(False, tier, "no_matching_option")
+    win_token = roster[labels.index(winner)]["token"]
+    radio = scope.locator(f'[data-applypilot-radio="{win_token}"]').first
+    try:
+        radio.check(timeout=1500)
+    except Exception as e:                        # noqa: BLE001
+        return CommitResult(False, tier, str(e))
+    # READ-BACK: the real checked state of the TARGET radio, never the click.
+    try:
+        checked = radio.is_checked(timeout=1000)
+    except Exception:                             # noqa: BLE001
+        checked = False
+    return CommitResult(bool(checked), tier)
+
+
+# yes-ish / no-ish intent vocabularies (case-insensitive). Anything outside both
+# sets is ambiguous -> commit nothing (invariant 6: never guess a consent box).
+_YES_INTENTS = {"yes", "true", "checked", "check", "accept", "agree", "agreed",
+                "consent", "on", "1"}
+_NO_INTENTS = {"no", "false", "unchecked", "uncheck", "decline", "declined",
+               "disagree", "off", "0"}
+
+
+def _checkbox(scope, planned: PlannedField) -> CommitResult:
+    """Single boolean checkbox. Intent (option_intent, else value) is mapped to a
+    definite target state through the yes/no vocabularies; an intent in neither set
+    is ambiguous and commits nothing WITHOUT touching the DOM. Reads back
+    is_checked and confirms it equals the intended state (invariant 5)."""
+    raw = planned.option_intent
+    if raw is None:                               # fall back to a truthy value string
+        raw = planned.value
+    intent = str(raw).strip().lower() if raw is not None else ""
+    if not intent:
+        return CommitResult(False, error="no_intent")
+    if intent in _YES_INTENTS:
+        want = True
+    elif intent in _NO_INTENTS:
+        want = False
+    else:                                         # ambiguous -> never guess, DOM untouched
+        return CommitResult(False, error="ambiguous_intent")
+    loc, tier = _locate(scope, planned)
+    if loc is None:
+        return CommitResult(False, tier, "not_located")
+    try:
+        loc.set_checked(want, timeout=1500)
+    except Exception as e:                        # noqa: BLE001
+        return CommitResult(False, tier, str(e))
+    # READ-BACK: the real checkbox state must equal the intended state.
+    try:
+        checked = loc.is_checked(timeout=1000)
+    except Exception:                             # noqa: BLE001
+        checked = not want                        # unreadable -> not committed
+    return CommitResult(checked == want, tier)
+
+
+# Minimal date normalization: native <input type="date"> stores/accepts only ISO
+# yyyy-mm-dd, so a US-style M/D/Y value is normalized to ISO before fill. Plain
+# text date inputs are filled verbatim (YAGNI: no fuzzy parsing).
+_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y")
+
+
+def _to_iso_date(value: str) -> str | None:
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _date(scope, planned: PlannedField) -> CommitResult:
+    """Date input. For a native type=date input the value is normalized to ISO
+    (yyyy-mm-dd) — the only format the control accepts and reads back; a plain
+    text date input is filled verbatim. Reads back input_value (invariant 5)."""
+    if not planned.value:
+        return CommitResult(False, error="no_value")
+    loc, tier = _locate(scope, planned)
+    if loc is None:
+        return CommitResult(False, tier, "not_located")
+    try:
+        input_type = (loc.evaluate(
+            "el => (el.getAttribute('type') || el.type || '').toLowerCase()") or "")
+    except Exception:                             # noqa: BLE001
+        input_type = ""
+    value = str(planned.value).strip()
+    if input_type == "date":
+        iso = _to_iso_date(value)
+        if iso is None:                           # not a parseable date -> don't guess
+            return CommitResult(False, tier, "bad_date")
+        value = iso
+    try:
+        _do_fill(loc, value)
+    except Exception as e:                        # noqa: BLE001
+        return CommitResult(False, tier, str(e))
+    # READ-BACK: the input's real value (ISO for native date; verbatim for text).
+    got = _read_input_value(loc)
+    return CommitResult(str(got).strip() == value.strip(), tier)
+
+
 _REGISTRY = {
     "text": _text,
     "textarea": _textarea,
@@ -211,6 +396,9 @@ _REGISTRY = {
     "native_select": _native_select,
     "typeahead_location": _typeahead_location,
     "phone_intl": _phone_intl,
+    "radio_group": _radio_group,
+    "checkbox": _checkbox,
+    "date": _date,
 }
 
 
