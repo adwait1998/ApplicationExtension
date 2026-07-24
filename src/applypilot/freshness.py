@@ -21,12 +21,83 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 log = logging.getLogger(__name__)
 
 LIVE = "live"
 EXPIRED = "expired"
 UNKNOWN = "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Greenhouse soft-302 signature (shared with the v2 apply path)
+# ---------------------------------------------------------------------------
+# An expired Greenhouse req does NOT 404 — it 302-redirects the
+# /<company>/jobs/<id> link to the board index (e.g.
+# job-boards.greenhouse.io/twilio?error=true). Body-marker matching misses this
+# (the board index is a normal 200 with neither an expired phrase nor a live
+# application form), so it needs a URL-shape check on the FINAL landed URL.
+# ONE source of truth used by both classify_liveness (freshness pre-check) and
+# the v2 dispatch closure (launcher) so the two never disagree on what "expired"
+# means. Deliberately conservative — only the unambiguous signatures below.
+
+
+def _is_greenhouse_host(host: str | None) -> bool:
+    h = (host or "").lower()
+    return h == "greenhouse.io" or h.endswith(".greenhouse.io")
+
+
+def _has_job_path(path: str | None) -> bool:
+    """A Greenhouse job req path carries a /jobs/<id> segment."""
+    return "/jobs/" in (path or "")
+
+
+def is_greenhouse_expired_redirect(
+    intended_url: str | None, landed_url: str | None
+) -> bool:
+    """True iff a Greenhouse job link soft-302'd to its board index — the
+    unambiguous 'this req is expired' signature.
+
+    `intended_url` is where we meant to go (the job req link); `landed_url` is
+    where we ACTUALLY ended up (browser page.url after navigation, or the HTTP
+    client's final URL after following redirects).
+
+    Conservative by construction — returns False whenever the signal is not
+    clearly present: no landed URL, a non-Greenhouse intent we can't reason
+    about, or a link still sitting on its /jobs/<id> path. A false 'expired'
+    silently drops a LIVE job, which is worse than a mislabeled park, so we only
+    fire on the two signatures actually observed on expired Greenhouse reqs.
+    """
+    if not intended_url or not landed_url:
+        return False
+    try:
+        want = urlsplit(intended_url)
+        got = urlsplit(landed_url)
+    except Exception:  # noqa: BLE001 — a malformed URL is never 'expired'
+        return False
+
+    # The intended link must itself be a Greenhouse job req: either a
+    # boards.greenhouse.io/<co>/jobs/<id> path OR a vanity careers host carrying
+    # the canonical ?gh_jid=<id> embed param. Anything else is out of scope
+    # (we cannot reason about arbitrary vanity-domain redirects) -> not expired.
+    intended_is_gh_job = (
+        (_is_greenhouse_host(want.hostname) and _has_job_path(want.path))
+        or "gh_jid=" in (want.query or "").lower()
+    )
+    if not intended_is_gh_job:
+        return False
+
+    landed_is_gh = _is_greenhouse_host(got.hostname)
+    # Signature 1: Greenhouse appends ?error=true to the board root when a req
+    # is gone. Unambiguous — but only trust it on a Greenhouse landing host.
+    if landed_is_gh and "error=true" in (got.query or "").lower():
+        return True
+    # Signature 2: the link left its /jobs/<id> path and landed on the
+    # Greenhouse board root (no /jobs/ segment). A live req keeps /jobs/<id>.
+    if landed_is_gh and _has_job_path(want.path) and not _has_job_path(got.path):
+        return True
+    return False
 
 # Confident "posting is gone" body markers, all lowercase.
 # Sources: Greenhouse, Lever, Ashby, Workday, generic ATS wording.
@@ -67,15 +138,30 @@ _LIVE_MARKERS = (
 )
 
 
-def classify_liveness(status_code: int | None, body_text: str | None) -> str:
-    """Pure classifier: HTTP status + body → live / expired / unknown.
+def classify_liveness(
+    status_code: int | None,
+    body_text: str | None,
+    url: str | None = None,
+    final_url: str | None = None,
+) -> str:
+    """Pure classifier: HTTP status + body (+ optional URLs) → live / expired /
+    unknown.
 
-    Conservative by construction — only 404/410 or an explicit expired marker
-    (without a live form on the same page) returns EXPIRED.
+    Conservative by construction — only 404/410, an explicit expired marker
+    (without a live form on the same page), or a Greenhouse soft-302 to the board
+    index returns EXPIRED.
+
+    `url` (the request URL) and `final_url` (where redirects landed) enable the
+    Greenhouse soft-302 check: an expired GH req 302s its /jobs/<id> link to the
+    board root (?error=true), a 200 the body markers alone can't catch.
     """
     if status_code is None:
         return UNKNOWN
     if status_code in (404, 410):
+        return EXPIRED
+    # Greenhouse soft-302: the redirect already lands a 200 board index, so this
+    # must be checked BEFORE the non-200 / body-marker logic below.
+    if is_greenhouse_expired_redirect(url, final_url):
         return EXPIRED
     if status_code != 200:
         # 403/429/5xx → bot defenses or transient; never park on these.
@@ -93,8 +179,12 @@ def classify_liveness(status_code: int | None, body_text: str | None) -> str:
     return UNKNOWN
 
 
-def _fetch(url: str, timeout: float = 15.0) -> tuple[int | None, str | None]:
-    """GET a URL, returning (status_code, body_text). Never raises."""
+def _fetch(url: str, timeout: float = 15.0) -> tuple[int | None, str | None, str | None]:
+    """GET a URL, returning (status_code, body_text, final_url). Never raises.
+
+    `final_url` is the URL redirects actually landed on (resp.url) — needed to
+    catch the Greenhouse soft-302-to-board expired signature the body misses.
+    """
     try:
         import httpx
 
@@ -109,10 +199,10 @@ def _fetch(url: str, timeout: float = 15.0) -> tuple[int | None, str | None]:
             },
         ) as client:
             resp = client.get(url)
-            return resp.status_code, resp.text[:200_000]
+            return resp.status_code, resp.text[:200_000], str(resp.url)
     except Exception as exc:  # noqa: BLE001 — network errors are expected
         log.debug("freshness fetch failed for %s: %s", url, exc)
-        return None, None
+        return None, None, None
 
 
 @dataclass
@@ -168,8 +258,14 @@ def check_queue(
         futures = {pool.submit(fetch, app_url): (url, app_url) for url, app_url in targets}
         for fut in as_completed(futures):
             url, app_url = futures[fut]
-            status_code, body = fut.result()
-            verdicts[url] = classify_liveness(status_code, body)
+            fetched = fut.result()
+            # Back-compat: a fetch_fn may return (status, body) OR the newer
+            # (status, body, final_url). Tolerate both so injected test fetchers
+            # and the real _fetch both work.
+            status_code, body = fetched[0], fetched[1]
+            final_url = fetched[2] if len(fetched) > 2 else None
+            verdicts[url] = classify_liveness(
+                status_code, body, url=app_url, final_url=final_url)
 
     for url, verdict in verdicts.items():
         result.checked += 1

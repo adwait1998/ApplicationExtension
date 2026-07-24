@@ -3429,6 +3429,33 @@ def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port)
             _release_presubmit_intent(dec.ledger, identity_id, dry_run)
             return _orch.FALLBACK_SENTINEL, int((time.time() - started) * 1000), None
 
+        # (2.5) EXPIRED-REQ SHORT-CIRCUIT (bucket B, irreducible). An expired
+        #     Greenhouse req does NOT 404 — it soft-302s its /jobs/<id> link to
+        #     the board index (e.g. job-boards.greenhouse.io/<co>?error=true).
+        #     Without this guard v2 PARSES that board page, fills 0 fields, and
+        #     mislabels the run needs_review:v2_incomplete_required (bucket A —
+        #     removable), polluting the A/B metric the cutover gate reads when the
+        #     truth is expired (bucket B — irreducible). Detection sits AFTER
+        #     navigation (drive_page.url is the post-redirect landed URL) and
+        #     BEFORE run_form_compiler, so parse is never attempted on a dead link.
+        #     This is a PROVABLY PRE-submit terminal (no form, no click): it
+        #     releases the recorded INTENT exactly like the CDP-setup fail-open
+        #     above, then returns failed:expired (worker_loop promotes it to a
+        #     permanent 'expired', reporting buckets it B on the 'expired'
+        #     substring). Conservative: only the unambiguous URL signatures fire
+        #     (see freshness.is_greenhouse_expired_redirect) — a live req keeps
+        #     its /jobs/<id> URL and is untouched, so a false 'expired' can never
+        #     silently drop a live job.
+        from applypilot.freshness import is_greenhouse_expired_redirect
+        landed_url = getattr(drive_page, "url", None)
+        if is_greenhouse_expired_redirect(dec.apply_url, landed_url):
+            logger.info("v2 expired-req: soft-302 to board index; intended=%s landed=%s",
+                        dec.apply_url, landed_url)
+            _close_cdp(pw, browser)
+            _release_presubmit_intent(dec.ledger, identity_id, dry_run,
+                                      reason="v2_expired")
+            return "failed:expired", int((time.time() - started) * 1000), None
+
         evidence = NetworkEvidence(ats="greenhouse", company=company)
         try:
             drive_page.on("response", evidence.on_response)     # invariant 8 (page-level)
