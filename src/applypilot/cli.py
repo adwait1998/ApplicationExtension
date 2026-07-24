@@ -836,8 +836,19 @@ def report(
         typer.echo("No review.jsonl rows yet — run some applies first.")
         raise typer.Exit()
     typer.echo(format_report(summarize_review(rows)))
+    audit_clean = None
     if v2_cutover:
-        typer.echo(format_v2_cutover(rows))
+        try:
+            from applypilot.submission_ledger import SubmissionLedger
+            from applypilot.database import get_connection
+            from applypilot.reporting import v2_audit_clean
+            ledger = SubmissionLedger(get_connection())
+            tokens = sorted({t for r in rows if (t := r.get("board_token"))})   # if present in rows
+            audit = v2_audit_clean(ledger=ledger, flight_dir=config.APP_DIR / "flight", tokens=tokens)
+            audit_clean = audit["go"]
+        except Exception:
+            audit_clean = None      # fall back to the manual trio print (never crash report)
+        typer.echo(format_v2_cutover(rows, audit_clean=audit_clean))
 
 
 @app.command()

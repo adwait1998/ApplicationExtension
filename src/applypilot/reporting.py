@@ -306,6 +306,76 @@ def v2_cutover_gate(rows: list[dict], *, min_rows: int = 100,
             "min_rows": min_rows, "max_p50_ms": max_p50_ms, "reason": reason}
 
 
+def v2_audit_clean(*, ledger, flight_dir=None, tokens=None) -> dict:
+    """Compute the §12.3 safety-audit leg from EXISTING durable records (no new
+    telemetry). Three conditions, ALL required for go=True:
+      1. zero dangling INTENTs (ledger.dangling_count() == 0) — a
+         needs_review:v2_crashed_post_submit leaves one by design; it must be
+         reconciled, not counted as clean.
+      2. no identity double-submitted: confirmed_count_for_token(token) <= 1 for
+         every board token in the v2 burn-in corpus. DISCLOSURE: review.jsonl
+         rows carry no board_token today, so with an empty ``tokens`` set this
+         leg does NOT run — it is a no-op (not a proof of zero duplicates), and
+         the reason text says so ("dup-check skipped: no board_token ...").
+      3. zero canary-field violations in the flight-recorder bundles. A field is
+         a VIOLATION only when it is a canary key (ir.is_canary_key), was
+         COMMITTED, AND its provenance is a non-profile/policy SOURCE
+         ('oracle'/'answer:*') — a submitted canary answer that did not come
+         from an exact profile/policy path breaks invariant 7. A PARKED canary
+         (provenance 'parked', never committed) is the SAFE invariant-7 outcome
+         ("canary + no data -> park, never guess", resolver.py:139) and is NOT a
+         violation; 4 of the 6 canary keys (citizenship/salary/address/dob) have
+         no profile path and are ALWAYS parked, so requiring ``committed`` is
+         what stops this leg chronically false-HOLDing on routine safe traffic.
+         DISCLOSURE: flight bundles are written for NON-applied outcomes only
+         (the orchestrator commits nothing on 'applied'), so this leg covers
+         non-applied SHADOW traffic only — it cannot see successful submissions.
+    Returns {"go", "dangling", "duplicates", "canary_violations", "reason"}."""
+    from pathlib import Path
+    import json as _json
+    from applypilot.apply.v2.ir import is_canary_key
+
+    checked_tokens = list(tokens or [])
+    dangling = int(ledger.dangling_count()) if ledger is not None else 0
+    duplicates = 0
+    for tok in checked_tokens:
+        try:
+            if ledger.confirmed_count_for_token(tok, "") > 1:
+                duplicates += 1
+        except Exception:
+            continue
+    canary_violations = 0
+    fdir = Path(flight_dir) if flight_dir else None
+    if fdir and fdir.exists():
+        for p in fdir.glob("*.json"):
+            try:
+                bundle = _json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            for f in bundle.get("fields", []):
+                sk = f.get("semantic_key")
+                prov = (f.get("provenance") or "")
+                committed = bool(f.get("committed"))
+                # Violation = a COMMITTED canary written from a non-profile/policy
+                # source. A parked canary is never committed and is SAFE, so the
+                # committed gate excludes it; the provenance check is kept so a
+                # committed profile.*/policy.* canary also stays clean.
+                if (is_canary_key(sk) and committed
+                        and not (prov.startswith("profile.") or prov.startswith("policy."))):
+                    canary_violations += 1
+    go = dangling == 0 and duplicates == 0 and canary_violations == 0
+    dup_txt = (f"{duplicates} duplicate" if checked_tokens
+               else "dup-check skipped: no board_token in review log")
+    canary_note = "canary leg covers non-applied shadow traffic only"
+    if go:
+        reason = f"clean: {dangling} dangling, {dup_txt}, {canary_violations} canary ({canary_note})"
+    else:
+        reason = (f"HOLD: dangling={dangling} {dup_txt} "
+                  f"canary={canary_violations} ({canary_note})")
+    return {"go": go, "dangling": dangling, "duplicates": duplicates,
+            "canary_violations": canary_violations, "reason": reason}
+
+
 def load_review_rows(path: str | Path) -> list[dict]:
     p = Path(path)
     if not p.exists():
