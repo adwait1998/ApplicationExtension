@@ -162,6 +162,34 @@ _RADIO = """<!doctype html><body><form>
   </fieldset>
 </form></body>"""
 
+# Regression (review-critical): prefix/substring-sharing option groups where the
+# WRONG shorter option appears FIRST. Exact-match priority must beat a naive
+# first-substring find — else intent 'none' commits 'No', and the long
+# 'No, I require sponsorship…' intent commits the bare 'No'.
+_RADIO_PREFIX = """<!doctype html><body><form>
+  <fieldset id="spon-group">
+    <legend>Sponsorship</legend>
+    <label for="sp-no">No</label>
+    <input type="radio" id="sp-no" name="spon" value="no">
+    <label for="sp-none">None</label>
+    <input type="radio" id="sp-none" name="spon" value="none">
+    <label for="sp-full">No, I require sponsorship now or in the future</label>
+    <input type="radio" id="sp-full" name="spon" value="full">
+  </fieldset>
+</form></body>"""
+
+# Prefix-sharing 'Yes' / 'Yes, with conditions' — exact 'Yes' must not commit the
+# longer prefixed option that appears later.
+_RADIO_YES = """<!doctype html><body><form>
+  <fieldset id="cond-group">
+    <legend>Conditions</legend>
+    <label for="y-yes">Yes</label>
+    <input type="radio" id="y-yes" name="cond" value="yes">
+    <label for="y-cond">Yes, with conditions</label>
+    <input type="radio" id="y-cond" name="cond" value="cond">
+  </fieldset>
+</form></body>"""
+
 # A single labeled consent checkbox (unchecked / pre-checked variants).
 _CHECK = """<!doctype html><body><form>
   <label for="consent">I agree to the terms and conditions</label>
@@ -201,6 +229,43 @@ def test_radio_group_no_match_checks_nothing(page):
     assert page.locator("#wa-yes").is_checked() is False
     assert page.locator("#wa-no").is_checked() is False
     assert page.locator("#wa-na").is_checked() is False
+
+
+def test_radio_group_exact_beats_prefix_shorter_first(page):
+    # 'none' shares a substring with the FIRST option 'No'; the exact 'None' comes
+    # later. Exact-match priority must win so the RIGHT radio is checked.
+    page.set_content(_RADIO_PREFIX)
+    f = _field("sponsorship", "radio_group", "Sponsorship", fid="spon-group")
+    pf = PlannedField(f, option_intent="none", driver="radio_group")
+    res = drivers.commit(page, pf)
+    assert res.committed is True
+    assert page.locator("#sp-none").is_checked() is True    # exact 'None', not first 'No'
+    assert page.locator("#sp-no").is_checked() is False
+    assert page.locator("#sp-full").is_checked() is False
+
+
+def test_radio_group_full_intent_not_captured_by_bare_prefix(page):
+    # The full sponsorship phrase must commit its exact option, not the bare 'No'
+    # that appears first and is a substring of the intent.
+    page.set_content(_RADIO_PREFIX)
+    f = _field("sponsorship", "radio_group", "Sponsorship", fid="spon-group")
+    pf = PlannedField(f, option_intent="No, I require sponsorship now or in the future",
+                      driver="radio_group")
+    res = drivers.commit(page, pf)
+    assert res.committed is True
+    assert page.locator("#sp-full").is_checked() is True
+    assert page.locator("#sp-no").is_checked() is False
+    assert page.locator("#sp-none").is_checked() is False
+
+
+def test_radio_group_exact_yes_not_prefixed_variant(page):
+    page.set_content(_RADIO_YES)
+    f = _field("conditions", "radio_group", "Conditions", fid="cond-group")
+    pf = PlannedField(f, option_intent="Yes", driver="radio_group")
+    res = drivers.commit(page, pf)
+    assert res.committed is True
+    assert page.locator("#y-yes").is_checked() is True      # exact 'Yes'
+    assert page.locator("#y-cond").is_checked() is False    # not 'Yes, with conditions'
 
 
 def test_radio_group_no_intent_not_committed(page):

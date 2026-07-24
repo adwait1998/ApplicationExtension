@@ -223,14 +223,13 @@ def _next_token() -> str:
 
 # JS: from an anchor element (whatever heal returned inside the group), gather the
 # radio group, resolve each radio's label (label[for] -> wrapping <label> ->
-# aria-label -> value), match the intent case-insensitively (substring BOTH ways,
-# like the enumerated read-backs elsewhere), and tag the winner so Playwright can
-# .check() exactly it. Returns True iff a real option matched (invariant 6).
-_RADIO_MATCH_JS = r"""
+# aria-label -> value), tag each radio with a unique token, and return the
+# [{token, label}] roster. The intent->label MATCH is done in Python via
+# _match_real_option (exact-first, length-guarded) — NOT a first-substring find()
+# in JS, which would commit the first prefix-sharing option ('none' onto 'No').
+_RADIO_ENUM_JS = r"""
 (anchor, args) => {
   const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  const want = norm(args.intent);
-  if (!want) return false;
   let radios = [];
   if (anchor.matches && anchor.matches('input[type="radio"]')) {
     const nm = anchor.getAttribute('name');
@@ -246,7 +245,7 @@ _RADIO_MATCH_JS = r"""
       if (found.length) { radios = found; break; }
     }
   }
-  if (!radios.length) return false;
+  if (!radios.length) return [];
   const labelOf = el => {
     let t = '';
     if (el.id) { const L = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (L) t = L.textContent; }
@@ -255,13 +254,11 @@ _RADIO_MATCH_JS = r"""
     if (!t) t = el.getAttribute('value') || '';
     return norm(t);
   };
-  const match = radios.find(el => {
-    const lt = labelOf(el);
-    return lt && (lt === want || lt.includes(want) || want.includes(lt));
+  return radios.map((el, i) => {
+    const token = args.token + '-' + i;
+    el.setAttribute('data-applypilot-radio', token);
+    return { token: token, label: labelOf(el) };
   });
-  if (!match) return false;
-  match.setAttribute('data-applypilot-radio', args.token);
-  return true;
 }
 """
 
@@ -271,7 +268,9 @@ def _radio_group(scope, planned: PlannedField) -> CommitResult:
     read back is_checked on the TARGET radio (invariants 5/6). A non-matching
     intent checks NOTHING — never the first radio. The group is located via heal
     on the field's locator_spec; individual radios carry the option labels, so we
-    enumerate + match inside the group scope from that anchor."""
+    enumerate the roster in the DOM then match the intent to a REAL label with the
+    shared _match_real_option ordering (exact -> preferred⊆option -> option⊆
+    preferred, length-guarded) so a prefix-sharing option never wins by accident."""
     intent = (planned.option_intent or "").strip()
     if not intent:                                # optional enumerated field, no data
         return CommitResult(False, error="no_intent")
@@ -280,12 +279,19 @@ def _radio_group(scope, planned: PlannedField) -> CommitResult:
         return CommitResult(False, tier, "not_located")
     token = _next_token()
     try:
-        matched = loc.evaluate(_RADIO_MATCH_JS, {"intent": intent, "token": token})
+        roster = loc.evaluate(_RADIO_ENUM_JS, {"token": token})
     except Exception as e:                        # noqa: BLE001
         return CommitResult(False, tier, str(e))
-    if not matched:                               # intent maps to no real option
+    if not roster:                                # no radios reachable from the anchor
+        return CommitResult(False, tier, "not_located")
+    labels = [(r.get("label") or "") for r in roster]
+    # Exact-first, length-guarded match (same ordering the dropdown drivers use):
+    # never a naive first-substring pick that would commit a WRONG option.
+    winner = _match_real_option((intent,), labels)
+    if winner is None:                            # intent maps to no real option
         return CommitResult(False, tier, "no_matching_option")
-    radio = scope.locator(f'[data-applypilot-radio="{token}"]').first
+    win_token = roster[labels.index(winner)]["token"]
+    radio = scope.locator(f'[data-applypilot-radio="{win_token}"]').first
     try:
         radio.check(timeout=1500)
     except Exception as e:                        # noqa: BLE001
