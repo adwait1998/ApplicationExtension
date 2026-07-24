@@ -1020,6 +1020,179 @@ def gate_cmd(
     console.print(f"Gated [bold]{n}[/bold] jobs at version {GATE_VERSION}.")
 
 
+# ---------------------------------------------------------------------------
+# Operator approve-for-auto-apply path
+# ---------------------------------------------------------------------------
+# The gate sends every sponsorship-'unknown' posting to review (a visa profile
+# means essentially no posting explicitly promises sponsorship, so the auto
+# queue is structurally empty). `approve` is the sanctioned, LOGGED way for the
+# operator — with the user's explicit decision — to promote specific 'unknown'
+# jobs into the auto-apply queue. Review-first stays the default; ineligible
+# rows (hard rejections) can never be approved.
+
+
+def _approval_candidates(conn, *, min_score: int, ats: str | None, limit: int) -> list[dict]:
+    """Rank approvable candidates: gate_result='unknown' + auto + score>=min +
+    has application_url + unapplied + not attempt-capped. Ordered by score then
+    recency. Mirrors queue_policy's non-gate legs so the list matches what the
+    override would actually make dispatchable (minus the approval itself)."""
+    from applypilot import config
+    max_attempts = int(config.DEFAULTS["max_apply_attempts"])
+    params: list = [min_score, max_attempts]
+    ats_clause = ""
+    if ats:
+        ats_clause = "AND LOWER(ats) = ?"
+        params.append(ats.strip().lower())
+    rows = conn.execute(
+        "SELECT url, title, fit_score, ats, discovered_at, operator_approved "
+        "FROM jobs "
+        "WHERE gate_result = 'unknown' "
+        "AND automatability = 'auto' "
+        "AND fit_score >= ? "
+        "AND applied_at IS NULL "
+        "AND (apply_status IS NULL OR apply_status = 'failed') "
+        "AND (apply_attempts IS NULL OR apply_attempts < ?) "
+        "AND application_url IS NOT NULL AND application_url != '' "
+        f"{ats_clause} "
+        "ORDER BY fit_score DESC, discovered_at DESC "
+        "LIMIT ?",
+        params + [limit],
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _print_candidates(rows: list[dict]) -> None:
+    if not rows:
+        console.print("[yellow]No approval candidates match those filters.[/yellow]")
+        return
+    console.print("[bold cyan]Approval candidates[/bold cyan] "
+                  "[dim](gate=unknown, auto, ranked by score then recency)[/dim]")
+    for r in rows:
+        score = r.get("fit_score")
+        marker = " [green](approved)[/green]" if r.get("operator_approved") else ""
+        console.print(
+            f"  [bold]{score if score is not None else '?'}[/bold]  "
+            f"[cyan]{str(r.get('ats') or '-')}[/cyan]  "
+            f"{str(r.get('discovered_at') or '')[:10]}  "
+            f"{str(r.get('title') or '')[:48]}{marker}"
+        )
+        # Full URL on its own soft-wrapped line — never truncated, copy-paste
+        # ready for `applypilot approve <url>`.
+        console.print(f"      {r.get('url') or ''}", soft_wrap=True)
+    console.print(
+        f"[dim]{len(rows)} candidate(s). Approve with "
+        "[bold]applypilot approve <url>[/bold] or [bold]applypilot approve --top N[/bold].[/dim]"
+    )
+
+
+def _approve_one(conn, url: str) -> tuple[str, str]:
+    """Approve a single URL. Returns (status, message). status in
+    {approved, refused, skipped, notfound}. Only gate_result='unknown' rows are
+    approved; 'ineligible' is refused (hard rejection); 'eligible' is a no-op
+    (already dispatchable); ungated rows are refused."""
+    from datetime import datetime, timezone
+    row = conn.execute("SELECT gate_result FROM jobs WHERE url = ?", (url,)).fetchone()
+    if row is None:
+        return ("notfound", "not found in DB")
+    gate = row["gate_result"]
+    if gate == "ineligible":
+        return ("refused", "ineligible (hard rejection) — cannot be approved")
+    if gate == "eligible":
+        return ("skipped", "already eligible — no approval needed")
+    if gate != "unknown":
+        return ("refused", "not gated yet — run `applypilot gate` first")
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE jobs SET operator_approved = 1, approved_at = ? WHERE url = ?",
+        (now, url),
+    )
+    conn.commit()
+    return ("approved", "approved for auto-apply")
+
+
+@app.command("approve")
+def approve(
+    urls: Optional[list[str]] = typer.Argument(
+        None, help="Job URL(s) to approve into the auto-apply queue."),
+    list_candidates: bool = typer.Option(
+        False, "--list", help="Print a ranked table of approval candidates (no changes)."),
+    top: Optional[int] = typer.Option(
+        None, "--top", help="Approve the top-N ranked candidates in one shot."),
+    revoke: Optional[str] = typer.Option(
+        None, "--revoke", help="Un-approve a job URL (clears operator_approved)."),
+    min_score: int = typer.Option(
+        8, "--min-score", help="Minimum fit score for candidate selection."),
+    ats: Optional[str] = typer.Option(
+        None, "--ats", help="Filter candidates to this ATS (e.g. greenhouse, lever, ashby)."),
+    limit: int = typer.Option(
+        20, "--limit", help="Max candidates for --list."),
+) -> None:
+    """Operator override: promote sponsorship-'unknown' jobs into the auto queue.
+
+    Review-first is the default. Approval affects ONLY gate_result='unknown'
+    rows; 'ineligible' rows are hard rejections and can never be approved. Every
+    approval is logged (operator_approved=1 + approved_at ISO stamp).
+
+    Modes:
+      approve <url> [<url>...]   approve specific jobs by URL
+      approve --list             show ranked approval candidates (no changes)
+      approve --top N            approve the top-N ranked candidates
+      approve --revoke <url>     un-approve a job
+    """
+    _bootstrap()
+    from applypilot import database as db
+    conn = db.get_connection()
+
+    if revoke:
+        cur = conn.execute(
+            "UPDATE jobs SET operator_approved = 0 WHERE url = ?", (revoke,))
+        conn.commit()
+        if cur.rowcount:
+            console.print(f"[green]Revoked approval:[/green] {revoke}")
+        else:
+            console.print(f"[yellow]No such job:[/yellow] {revoke}")
+        return
+
+    if list_candidates:
+        rows = _approval_candidates(conn, min_score=min_score, ats=ats, limit=limit)
+        _print_candidates(rows)
+        return
+
+    if top is not None:
+        if top < 1:
+            console.print("[red]--top must be at least 1.[/red]")
+            raise typer.Exit(code=1)
+        rows = _approval_candidates(conn, min_score=min_score, ats=ats, limit=top)
+        if not rows:
+            console.print("[yellow]No approval candidates match those filters — nothing approved.[/yellow]")
+            return
+        approved = 0
+        for r in rows:
+            status, _msg = _approve_one(conn, r["url"])
+            if status == "approved":
+                approved += 1
+                console.print(
+                    f"  [green]approved[/green] score={r.get('fit_score')} {r['url']}")
+        console.print(f"Approved [bold]{approved}[/bold] job(s) for auto-apply.")
+        return
+
+    if not urls:
+        console.print(
+            "[red]Nothing to do.[/red] Provide URL(s), or use "
+            "[bold]--list[/bold] / [bold]--top N[/bold] / [bold]--revoke <url>[/bold].")
+        raise typer.Exit(code=1)
+
+    approved = 0
+    for u in urls:
+        status, msg = _approve_one(conn, u)
+        color = {"approved": "green", "refused": "red",
+                 "skipped": "yellow", "notfound": "yellow"}[status]
+        console.print(f"  [{color}]{status}[/{color}] {u} — {msg}")
+        if status == "approved":
+            approved += 1
+    console.print(f"Approved [bold]{approved}[/bold]/{len(urls)} job(s) for auto-apply.")
+
+
 @app.command("resume")
 def resume_cmd() -> None:
     """Clear a budget/manual pause so the engine can dispatch again."""

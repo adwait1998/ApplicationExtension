@@ -28,7 +28,8 @@ def _conn_with_jobs():
             -- Task 12: acquire_job now filters through queue_policy(), which
             -- requires gate_result='eligible' AND automatability='auto'. Rows
             -- are seeded gated-eligible so the freshness/dedup intent is tested.
-            gate_result TEXT, automatability TEXT, gated_at TEXT
+            gate_result TEXT, automatability TEXT, gated_at TEXT,
+            operator_approved INTEGER DEFAULT 0, approved_at TEXT
         )
     """)
     now = datetime.now(timezone.utc)
@@ -109,7 +110,8 @@ def _conn_with_hybrid_queue():
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
             last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
-            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
+            gate_result TEXT, automatability TEXT, gated_at TEXT,
+            operator_approved INTEGER DEFAULT 0, approved_at TEXT  -- Task 12 queue_policy()
         )
     """)
     now = datetime.now(timezone.utc)
@@ -208,7 +210,8 @@ def _conn_with_string_null_apply_urls():
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, apply_error TEXT, agent_id TEXT,
             last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
-            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
+            gate_result TEXT, automatability TEXT, gated_at TEXT,
+            operator_approved INTEGER DEFAULT 0, approved_at TEXT  -- Task 12 queue_policy()
         )
     """)
     disc = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -282,7 +285,8 @@ def _conn_with_dupes():
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
             last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
-            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
+            gate_result TEXT, automatability TEXT, gated_at TEXT,
+            operator_approved INTEGER DEFAULT 0, approved_at TEXT  -- Task 12 queue_policy()
         )
     """)
     now = datetime.now(timezone.utc)
@@ -347,7 +351,8 @@ def test_dedup_durable_even_when_first_twin_failed(monkeypatch):
             full_description TEXT, cover_letter_path TEXT, apply_status TEXT,
             apply_attempts INTEGER DEFAULT 0, agent_id TEXT,
             last_attempted_at TEXT, applied_at TEXT, discovered_at TEXT,
-            gate_result TEXT, automatability TEXT, gated_at TEXT  -- Task 12 queue_policy()
+            gate_result TEXT, automatability TEXT, gated_at TEXT,
+            operator_approved INTEGER DEFAULT 0, approved_at TEXT  -- Task 12 queue_policy()
         )
     """)
     disc = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
@@ -356,15 +361,15 @@ def test_dedup_durable_even_when_first_twin_failed(monkeypatch):
     # Trailing 'eligible','auto','t' = gate cols (Task 12); positional VALUES.
     conn.execute("INSERT INTO jobs VALUES "
         "('https://www.brex.com/careers/1?gh_jid=1','Staff Product Designer','brex (greenhouse)',"
-        "'https://www.brex.com/careers/1?gh_jid=1',NULL,8,'Remote','d',NULL,'needs_review',1,NULL,?,NULL,?,'eligible','auto','t')",
+        "'https://www.brex.com/careers/1?gh_jid=1',NULL,8,'Remote','d',NULL,'needs_review',1,NULL,?,NULL,?,'eligible','auto','t',0,NULL)",
         (None, disc))
     conn.execute("INSERT INTO jobs VALUES "
         "('https://www.brex.com/careers/2?gh_jid=2','Staff Product Designer','brex (greenhouse)',"
-        "'https://www.brex.com/careers/2?gh_jid=2',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?,'eligible','auto','t')",
+        "'https://www.brex.com/careers/2?gh_jid=2',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?,'eligible','auto','t',0,NULL)",
         (None, disc))
     conn.execute("INSERT INTO jobs VALUES "
         "('https://boards.greenhouse.io/brex/jobs/9','Senior Designer, Brand','brex (greenhouse)',"
-        "'https://boards.greenhouse.io/brex/jobs/9',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?,'eligible','auto','t')",
+        "'https://boards.greenhouse.io/brex/jobs/9',NULL,8,'Remote','d',NULL,NULL,0,NULL,?,NULL,?,'eligible','auto','t',0,NULL)",
         (None, disc))
     conn.commit()
     monkeypatch.setattr(launcher, "get_connection", lambda: conn)

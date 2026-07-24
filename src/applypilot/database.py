@@ -368,6 +368,13 @@ _ALL_COLUMNS: dict[str, str] = {
     "skill_used": "TEXT",
     "replay_duration_ms": "INTEGER",
     "patch_duration_ms": "INTEGER",
+    # Operator approve-for-auto-apply override. gate_result='unknown' rows the
+    # operator explicitly approves (with the user's decision) become
+    # queue-visible; review-first stays the default. NEVER promotes an
+    # 'ineligible' row — queue_policy only honors the override inside the
+    # 'unknown' branch. approved_at is an ISO audit stamp.
+    "operator_approved": "INTEGER DEFAULT 0",  # 0/NULL = not approved, 1 = approved
+    "approved_at": "TEXT",
 }
 
 
@@ -553,13 +560,23 @@ def queue_policy(*, min_score: int = 8, max_age_hours: int | None = None,
     NOTE: Python-level filters (config.is_manual_ats on resolved URLs, live
     location re-check) stay in the callers — this covers the SQL-expressible
     predicate only. Param order is documented and load-bearing: min_score,
-    [max_apply_attempts], [age cutoff]."""
+    [max_apply_attempts], [age cutoff].
+
+    Gate leg: gated-'eligible' rows are always visible; gated-'unknown' rows
+    are visible ONLY when the operator explicitly approved them
+    (operator_approved = 1). 'ineligible' rows (hard rejections — location /
+    seniority / policy) are NEVER visible, approved or not: the override lives
+    strictly inside the 'unknown' branch. NULL/0 operator_approved reads as
+    not-approved, so zero-approval behavior is byte-identical to before. The
+    override adds NO new bound params, keeping the documented param order
+    stable."""
     from applypilot import config
     parts = [
         "fit_score >= ?",
         "applied_at IS NULL",
         "(apply_status IS NULL OR apply_status = 'failed')",
-        "gate_result = 'eligible'",
+        "(gate_result = 'eligible' "
+        "OR (gate_result = 'unknown' AND operator_approved = 1))",
         "automatability = 'auto'",
     ]
     params: list = [min_score]

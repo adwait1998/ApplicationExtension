@@ -35,7 +35,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # closure-local models can't be resolved by FastAPI's type-hint evaluation.
 class JobAction(BaseModel):
     url: str
-    action: str  # park | reset | mark_applied
+    action: str  # park | reset | mark_applied | approve_auto | revoke_auto
 
 
 class RunRequest(BaseModel):
@@ -149,7 +149,10 @@ class RunManager:
 _JOB_COLS = (
     "url, title, site, location, fit_score, apply_status, apply_error, "
     "last_failure_class, discovered_at, applied_at, application_url, "
-    "verification_confidence, apply_attempts, skill_used, score_reasoning"
+    "verification_confidence, apply_attempts, skill_used, score_reasoning, "
+    # Operator approve-for-auto override: surfaced so the triage/queue UI can
+    # show the approved marker and offer the approve/revoke actions.
+    "gate_result, operator_approved, approved_at"
 )
 
 
@@ -343,6 +346,18 @@ def create_app(db_path: Path | None = None, app_dir: Path | None = None) -> Fast
                 "UPDATE jobs SET apply_status='applied', "
                 "applied_at=COALESCE(applied_at, datetime('now')), "
                 "apply_error=NULL WHERE url=?"
+            ),
+            # Operator approve-for-auto override. Guarded to gate_result='unknown'
+            # in the SQL itself so the UI can NEVER promote an 'ineligible' hard
+            # rejection (rowcount 0 -> 404) — mirrors the CLI approve refusal.
+            # queue_policy is the real gate; this only flips the audited flag.
+            "approve_auto": (
+                "UPDATE jobs SET operator_approved=1, "
+                "approved_at=datetime('now') "
+                "WHERE url=? AND gate_result='unknown'"
+            ),
+            "revoke_auto": (
+                "UPDATE jobs SET operator_approved=0 WHERE url=?"
             ),
         }
         sql = updates.get(body.action)

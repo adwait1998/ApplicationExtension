@@ -41,7 +41,9 @@ def _make_jobs_conn():
             -- schema + seed row must carry a gated-eligible verdict.
             gate_result TEXT,
             automatability TEXT,
-            gated_at TEXT
+            gated_at TEXT,
+            operator_approved INTEGER DEFAULT 0,
+            approved_at TEXT
         )
     """)
     conn.execute("""

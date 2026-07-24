@@ -31,7 +31,8 @@ def _conn():
             -- "pending_apply" stage both route through queue_policy(), which
             -- requires gate_result='eligible' AND automatability='auto'. Seed
             -- rows are gated-eligible so the automatable-URL intent is tested.
-            gate_result TEXT, automatability TEXT, gated_at TEXT
+            gate_result TEXT, automatability TEXT, gated_at TEXT,
+            operator_approved INTEGER DEFAULT 0, approved_at TEXT
         )
     """)
     rows = [

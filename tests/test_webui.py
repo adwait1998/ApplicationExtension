@@ -32,7 +32,9 @@ _SCHEMA_COLS = (
     # Task 12: the "eligible" view/count now flows through queue_policy(), which
     # requires gate_result='eligible' AND automatability='auto'. Fixture rows
     # are gated-eligible+auto so they reflect a real queue-visible row.
-    "gate_result TEXT, automatability TEXT, gated_at TEXT"
+    "gate_result TEXT, automatability TEXT, gated_at TEXT, "
+    # Operator approve-for-auto override columns (surfaced in the job payload).
+    "operator_approved INTEGER DEFAULT 0, approved_at TEXT"
 )
 
 
@@ -179,3 +181,74 @@ def test_index_served(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "ApplyPilot" in r.text
+
+
+# ---------------------------------------------------------------------------
+# Operator approve-for-auto override (approve_auto / revoke_auto)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def approval_client(tmp_path):
+    """A DB with one sponsorship-'unknown' row and one 'ineligible' row so the
+    approve/revoke actions and the ineligible guard can be exercised."""
+    db = tmp_path / "applypilot.db"
+    conn = sqlite3.connect(db)
+    conn.execute(f"CREATE TABLE jobs ({_SCHEMA_COLS})")
+    conn.execute(
+        "INSERT INTO jobs (url,title,site,fit_score,gate_result,automatability,"
+        "gated_at,discovered_at,application_url,operator_approved) "
+        "VALUES ('unk','UX Designer','acme (greenhouse)',9,'unknown','auto',"
+        "'2026-07-01T00:00:00','2026-07-20T00:00:00','https://boards.greenhouse.io/acme/1',0)"
+    )
+    conn.execute(
+        "INSERT INTO jobs (url,title,site,fit_score,gate_result,automatability,"
+        "gated_at,discovered_at,application_url,operator_approved) "
+        "VALUES ('bad','Head of Design','x (linkedin)',9,'ineligible','manual',"
+        "'2026-07-01T00:00:00','2026-07-20T00:00:00','https://linkedin.com/jobs/2',0)"
+    )
+    conn.commit()
+    conn.close()
+    (tmp_path / "logs").mkdir()
+    return TestClient(create_app(db_path=db, app_dir=tmp_path))
+
+
+def test_approve_auto_promotes_unknown_into_queue(approval_client):
+    # Not eligible until approved.
+    assert approval_client.get("/api/jobs?view=eligible").json()["count"] == 0
+    r = approval_client.post("/api/job/action", json={"url": "unk", "action": "approve_auto"})
+    assert r.status_code == 200
+    elig = approval_client.get("/api/jobs?view=eligible").json()["jobs"]
+    assert {j["url"] for j in elig} == {"unk"}
+    assert elig[0]["operator_approved"] == 1
+    assert elig[0]["approved_at"] is not None
+
+
+def test_approve_auto_refuses_ineligible(approval_client):
+    # The SQL guard (gate_result='unknown') means an ineligible row matches
+    # nothing -> 404 -> never dispatchable. Paramount invariant, UI edition.
+    r = approval_client.post("/api/job/action", json={"url": "bad", "action": "approve_auto"})
+    assert r.status_code == 404
+    assert approval_client.get("/api/jobs?view=eligible").json()["count"] == 0
+
+
+def test_revoke_auto_clears_approval(approval_client):
+    approval_client.post("/api/job/action", json={"url": "unk", "action": "approve_auto"})
+    assert approval_client.get("/api/jobs?view=eligible").json()["count"] == 1
+    r = approval_client.post("/api/job/action", json={"url": "unk", "action": "revoke_auto"})
+    assert r.status_code == 200
+    assert approval_client.get("/api/jobs?view=eligible").json()["count"] == 0
+
+
+def test_job_payload_exposes_approval_fields(client):
+    row = client.get("/api/jobs?view=eligible").json()["jobs"][0]
+    assert "operator_approved" in row
+    assert "gate_result" in row
+    assert "approved_at" in row
+
+
+def test_index_has_approve_button_wired(client):
+    html = client.get("/").text
+    assert "approve_auto" in html
+    assert "revoke_auto" in html
+    assert "auto-approved" in html

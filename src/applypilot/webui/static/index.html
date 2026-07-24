@@ -43,6 +43,7 @@
   .s9{background:#1a7f37;color:#fff}.s8{background:#2da44e22;color:var(--green)}.s7{background:#d2992222;color:var(--yellow)}
   .pill{display:inline-block;border-radius:10px;padding:1px 8px;font-size:11px;border:1px solid var(--border);color:var(--dim);white-space:nowrap}
   .pill.applied{color:var(--green);border-color:var(--green)}
+  .pill.approved{color:var(--purple);border-color:var(--purple)}
   .pill.needs_review{color:var(--yellow);border-color:var(--yellow)}
   .pill.failed,.pill.expired{color:var(--red);border-color:var(--red)}
   .pill.queued{color:var(--accent);border-color:var(--accent)}
@@ -202,18 +203,26 @@ async function loadJobs(view, tableId, searchId){
     const sc = j.fit_score>=9?'s9':(j.fit_score>=8?'s8':'s7');
     const st = j.apply_status||'queued';
     const age = j.discovered_at ? Math.max(0, Math.round((Date.now()-Date.parse(j.discovered_at))/86400000)) : '?';
+    // Operator approve-for-auto override: sponsorship-'unknown' rows can be
+    // promoted into the auto queue; approved rows show a marker + a revoke.
+    // 'ineligible' hard rejections are never offered an approve button.
+    const approved = !!j.operator_approved;
+    const isUnknown = j.gate_result === 'unknown';
     const acts = [
       `<button onclick="jobAction('${encodeURIComponent(j.url)}','park')">Park</button>`,
       st!=='applied' ? `<button onclick="jobAction('${encodeURIComponent(j.url)}','reset')">Reset</button>` : '',
       isTriage ? `<button onclick="jobAction('${encodeURIComponent(j.url)}','mark_applied')">Mark applied</button>` : '',
+      (isUnknown && !approved) ? `<button title="Promote this sponsorship-unknown job into the auto-apply queue" onclick="jobAction('${encodeURIComponent(j.url)}','approve_auto')">Approve auto</button>` : '',
+      approved ? `<button onclick="jobAction('${encodeURIComponent(j.url)}','revoke_auto')">Revoke auto</button>` : '',
     ].join('');
+    const approvedMark = approved ? ` <span class="pill approved">✓ auto-approved</span>` : '';
     return `<tr>
       <td><span class="score ${sc}">${j.fit_score??''}</span></td>
       <td><a href="${esc(j.application_url||j.url)}" target="_blank">${esc((j.title||'').slice(0,70))}</a></td>
       <td>${esc(j.site||'')}</td>
       <td class="muted">${esc((j.location||'').slice(0,32))}</td>
       <td class="muted">${age}d</td>
-      <td><span class="pill ${esc(st)}">${esc(st)}</span>${j.verification_confidence!=null?` <span class="muted">${Number(j.verification_confidence).toFixed(2)}</span>`:''}</td>
+      <td><span class="pill ${esc(st)}">${esc(st)}</span>${approvedMark}${j.verification_confidence!=null?` <span class="muted">${Number(j.verification_confidence).toFixed(2)}</span>`:''}</td>
       <td class="err-detail" title="${esc(j.apply_error||'')}">${esc(j.last_failure_class||j.apply_error||'')}</td>
       <td class="actions">${acts}</td></tr>`;
   }).join('');
@@ -222,7 +231,7 @@ async function loadJobs(view, tableId, searchId){
     (rows || '<tr><td colspan="8" class="muted" style="padding:20px">empty</td></tr>');
 }
 async function jobAction(encUrl, action){
-  const verb = {park:'Park', reset:'Reset for retry', mark_applied:'Mark as APPLIED'}[action];
+  const verb = {park:'Park', reset:'Reset for retry', mark_applied:'Mark as APPLIED', approve_auto:'Approve for AUTO-APPLY', revoke_auto:'Revoke auto-approval'}[action];
   if(!confirm(verb + ' this job?')) return;
   try{
     await api('/api/job/action', {method:'POST', headers:{'Content-Type':'application/json'},
