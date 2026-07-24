@@ -16,6 +16,7 @@ from applypilot.apply.browser_stream import (
     collect_browser_observation,
     _observation_signature,
 )
+from applypilot.apply.combobox import select_async_combobox_option
 
 
 @dataclass
@@ -445,41 +446,30 @@ def _select_value(page, loc, control: ControlObservation, value: str, timeout_ms
             return
 
     # Greenhouse/react-select controls often expose an input whose raw value can
-    # be changed without committing the selected option. For combobox-style
-    # controls, drive the same click/type/option/Enter path a user would use.
+    # be changed without committing the selected option — and worse, many back
+    # their options with ASYNC remote autocomplete (city type-ahead), where a
+    # blind ArrowDown+Enter mis-selects the first (wrong) row. Drive the shared
+    # async-combobox dance: type -> await options -> pick the BEST match -> read
+    # back the committed selection. require_option=False keeps plain free-text
+    # comboboxes (that simply retain the typed value) working as before.
     if control.role == "combobox" or "select" in (control.selector + " " + control.control_type).lower():
+        selected = select_async_combobox_option(
+            page, loc, value, (value,),
+            require_option=False, timeout_ms=min(timeout_ms, 3000),
+        )
+        if selected is not None:
+            _dispatch_events(loc)
+            return
+        # Best-effort fallback WITHOUT any blind selection: reopen and click a
+        # visible option whose text matches `value` (never the arbitrary first).
         try:
             loc.click(timeout=timeout_ms)
         except Exception:
             _click_control_bbox(page, control)
-        try:
-            loc.fill("", timeout=min(timeout_ms, 1000))
-        except Exception:
-            try:
-                page.keyboard.press("Control+A")
-            except Exception:
-                pass
-        page.keyboard.type(value, delay=10)
         page.wait_for_timeout(120)
         if _click_visible_option(page, value, timeout_ms=min(timeout_ms, 1500)):
             _dispatch_events(loc)
             return
-        try:
-            if loc.input_value(timeout=500).strip() == value.strip():
-                _dispatch_events(loc)
-                return
-        except Exception:
-            pass
-        _click_control_bbox(page, control)
-        page.wait_for_timeout(120)
-        page.keyboard.type(value, delay=10)
-        page.wait_for_timeout(120)
-        if _click_visible_option(page, value, timeout_ms=min(timeout_ms, 1500)):
-            _dispatch_events(loc)
-            return
-        if _combobox_has_open_menu(page, loc):
-            page.keyboard.press("ArrowDown")
-            page.keyboard.press("Enter")
         _dispatch_events(loc)
         return
 
@@ -516,19 +506,6 @@ def _click_visible_option(page, value: str, *, timeout_ms: int) -> bool:
         except Exception:
             continue
     return False
-
-
-def _combobox_has_open_menu(page, loc) -> bool:
-    try:
-        expanded = loc.evaluate("el => el.getAttribute('aria-expanded') === 'true'")
-        if expanded:
-            return True
-    except Exception:
-        pass
-    try:
-        return bool(page.locator('[role="listbox"], [role="option"], [class*="menu"]').filter(has_text="").count())
-    except Exception:
-        return False
 
 
 def _submission_guard(obs: BrowserObservation, control: ControlObservation) -> str | None:
