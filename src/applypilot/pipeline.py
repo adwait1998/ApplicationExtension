@@ -503,12 +503,14 @@ _PENDING_SQL: dict[str, str] = {
         "SELECT COUNT(*) FROM jobs WHERE gated_at IS NULL "
         "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at)"
     ),
-    # Mirror database.get_jobs_by_stage("pending_score"): only gated-eligible
-    # rows (gated after enrichment) are countable pending-score work, else the
-    # streaming score loop would spin forever on ineligible/ungated rows.
+    # Mirror database.get_jobs_by_stage("pending_score") IN LOCKSTEP: gated
+    # 'eligible' OR 'unknown' (sponsorship-review) rows, gated after enrichment,
+    # are countable pending-score work. 'ineligible'/ungated stay excluded, else
+    # the streaming score loop would spin forever on rows it never scores. Keep
+    # this predicate byte-for-byte aligned with the database one.
     "score": (
         "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL "
-        "AND gated_at IS NOT NULL AND gate_result = 'eligible' "
+        "AND gated_at IS NOT NULL AND gate_result IN ('eligible', 'unknown') "
         "AND (detail_scraped_at IS NULL OR gated_at >= detail_scraped_at)"
     ),
     "tailor": (

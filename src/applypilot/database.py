@@ -739,9 +739,15 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
                 "(gated_at IS NULL "
                 "OR (detail_scraped_at IS NOT NULL AND gated_at IS NOT NULL AND detail_scraped_at > gated_at))"
             ),
+            # Score gated-'eligible' AND gated-'unknown' (sponsorship not stated ->
+            # review) rows. For a visa profile ~all postings gate to 'unknown', so
+            # scoring only 'eligible' structurally starves the funnel (nothing ever
+            # reaches score>=8 for the operator-approve path). 'ineligible' (hard
+            # rejections) stay UNSCORED. Mirror kept in lockstep: pipeline
+            # _PENDING_SQL['score'].
             "pending_score": (
                 "full_description IS NOT NULL AND fit_score IS NULL "
-                "AND gated_at IS NOT NULL AND gate_result = 'eligible' "
+                "AND gated_at IS NOT NULL AND gate_result IN ('eligible', 'unknown') "
                 "AND (detail_scraped_at IS NULL OR gated_at >= detail_scraped_at)"
             ),
             "scored": "fit_score IS NOT NULL",
