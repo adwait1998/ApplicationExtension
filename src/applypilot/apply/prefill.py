@@ -20,6 +20,16 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, Page
 
+# Shared async-combobox dance + pure option matcher. `_norm_opt` and
+# `_match_real_option` are re-exported here (imported below) so existing
+# importers of them via `applypilot.apply.prefill` (v2 drivers, the greenhouse
+# adapter, and tests) keep working unchanged.
+from applypilot.apply.combobox import (  # noqa: F401  (re-exported)
+    _match_real_option,
+    _norm_opt,
+    select_async_combobox_option,
+)
+
 logger = logging.getLogger(__name__)
 
 GREENHOUSE_HOSTS = ("greenhouse.io", "boards.greenhouse.io", "job-boards.greenhouse.io")
@@ -477,56 +487,6 @@ def _combobox_committed(root, label_needles: tuple[str, ...], preferred: tuple[s
         return False
 
 
-def _norm_opt(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip().lower()
-
-
-def _match_real_option(preferred: tuple[str, ...], options: list[str]) -> str | None:
-    """Map our intended values to the closest REAL dropdown option.
-
-    Pure + unit-testable. Priority: exact (normalized) → preferred is a
-    substring of an option (our "Yes" inside "Yes, authorized…") → option
-    is a substring of preferred → strong token overlap (≥60% of the
-    shorter side's words). Returns the REAL option text, or None if
-    nothing reasonably matches (caller fails fast instead of blind-typing).
-    """
-    opts = [o for o in (options or []) if o and o.strip()]
-    if not opts:
-        return None
-    npref = [(_norm_opt(p), p) for p in preferred if p]
-    nopts = [(_norm_opt(o), o) for o in opts]
-    # 1. exact normalized
-    for np, _ in npref:
-        for no, orig in nopts:
-            if np and np == no:
-                return orig
-    # 2. preferred ⊆ option  (most common: "yes" ⊂ "yes, i am authorized…")
-    for np, _ in npref:
-        if len(np) < 2:
-            continue
-        for no, orig in nopts:
-            if np in no:
-                return orig
-    # 3. option ⊆ preferred
-    for np, _ in npref:
-        for no, orig in nopts:
-            if len(no) >= 2 and no in np:
-                return orig
-    # 4. token overlap ≥60% of the shorter token set
-    for np, _ in npref:
-        pw = set(re.findall(r"[a-z0-9]+", np))
-        if not pw:
-            continue
-        for no, orig in nopts:
-            ow = set(re.findall(r"[a-z0-9]+", no))
-            if not ow:
-                continue
-            inter = len(pw & ow)
-            if inter and inter / min(len(pw), len(ow)) >= 0.6:
-                return orig
-    return None
-
-
 def _visible_combobox_options(root) -> list[str]:
     """Read the currently-rendered react-select / listbox option texts."""
     try:
@@ -915,6 +875,81 @@ def _set_greenhouse_location(root, value: str) -> bool:
         return False
 
 
+def _find_location_combobox(root):
+    """Locate Greenhouse's Location (City) combobox input.
+
+    Prefers the stable `#candidate-location` id; falls back to tagging the
+    react-select inner input scoped to a location/city label.
+    """
+    try:
+        loc = root.locator("#candidate-location").first
+        if loc.count() > 0:
+            return loc
+    except Exception as e:
+        logger.debug("prefill: #candidate-location lookup failed: %s", e)
+
+    mark = "data-applypilot-loc-combobox"
+    try:
+        tagged = bool(root.evaluate(
+            """({labelNeedles, mark}) => {
+              const needles = labelNeedles.map(s => s.toLowerCase());
+              const norm = s => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+              document.querySelectorAll('[' + mark + ']').forEach(e => e.removeAttribute(mark));
+              for (const label of Array.from(document.querySelectorAll('label, legend'))) {
+                const text = norm(label.innerText || label.textContent);
+                if (!text || !needles.some(n => text.includes(n))) continue;
+                const forId = label.getAttribute('for');
+                const byFor = forId ? document.getElementById(forId) : null;
+                let input = (byFor && byFor.tagName === 'INPUT') ? byFor : null;
+                const container = label.closest('div, fieldset, li') || label.parentElement;
+                if (!input && container) {
+                  input = container.querySelector(
+                    '[class*="select__control" i] input, input[id*="react-select" i], '
+                    + '[role="combobox"], input:not([type=hidden])'
+                  );
+                }
+                if (input) { input.setAttribute(mark, '1'); return true; }
+              }
+              return false;
+            }""",
+            {"labelNeedles": list(GH_LOCATION_LABELS), "mark": mark},
+        ))
+        if tagged:
+            loc = root.locator(f"[{mark}='1']").first
+            if loc.count() > 0:
+                return loc
+    except Exception as e:
+        logger.debug("prefill: location combobox tag lookup failed: %s", e)
+    return None
+
+
+def _fill_greenhouse_location_async(root, city: str, state: str) -> str | None:
+    """Genuine async-combobox dance for Greenhouse's Location (City) field.
+
+    Types the city, WAITS for the async city-autocomplete options to populate,
+    picks the BEST-MATCHING option (never blind-Enters the first), and reads
+    back the SELECTED value. Returns the committed value, or None when no
+    matching option appears — in which case the caller MUST report location
+    UNFILLED (free text is silently dropped by React, which then fails
+    client-side `validation_location_persist`).
+    """
+    loc = _find_location_combobox(root)
+    if loc is None:
+        return None
+    location_value = ", ".join(p for p in (city, state) if p)
+    query = city or location_value
+    preferred = tuple(dict.fromkeys(
+        p for p in (
+            f"{location_value}, United States" if location_value else "",
+            location_value,
+            city,
+        ) if p
+    ))
+    return select_async_combobox_option(
+        root, loc, query, preferred, require_option=True, timeout_ms=5000,
+    )
+
+
 def _force_visible_greenhouse_basics(root, first: str, last: str, email: str, phone: str, location: str) -> list[str]:
     """Final pass for visible Greenhouse fields after React re-renders."""
     try:
@@ -971,29 +1006,13 @@ def _force_visible_greenhouse_basics(root, first: str, last: str, email: str, ph
               if (email && setNative(fieldFor(['email']), email)) changed.push('email');
               if (phone && setNative(fieldFor(['phone']), phone)) changed.push('phone');
 
-              const loc = fieldFor(['location', 'city']);
-              if (loc && location) {
-                setNative(loc, location + ', United States');
-                await new Promise(r => setTimeout(r, 500));
-                const option = Array.from(document.querySelectorAll('[class*="select__option"]'))
-                  .filter(visible)
-                  .find(el => lower(el.textContent).includes('san jose') &&
-                    lower(el.textContent).includes('california') &&
-                    lower(el.textContent).includes('united states'));
-                if (option) {
-                  option.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-                  option.click();
-                  await new Promise(r => setTimeout(r, 250));
-                } else {
-                  loc.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true}));
-                  loc.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
-                  await new Promise(r => setTimeout(r, 250));
-                }
-                const locText = selectedText(loc);
-                if (locText.includes('san jose') && locText.includes('united states')) {
-                  changed.push('location');
-                }
-              }
+              // NOTE: location is intentionally NOT handled here. The Location
+              // (City) field is a react-select combobox backed by async
+              // autocomplete and is committed earlier by the dedicated
+              // async-combobox dance (_fill_greenhouse_location_async). Setting
+              // free text here (the old hardcoded-city blind ArrowDown/Enter
+              // path) would clobber that committed selection with text React
+              // drops on blur, re-triggering validation_location_persist.
               return changed;
             }""",
             {
@@ -1405,18 +1424,24 @@ def prefill_application(
             except Exception as e:
                 logger.debug("prefill: failed to fill %s: %s", short, e)
 
-        location_value = ", ".join(
-            part for part in [
-                personal.get("city", ""),
-                personal.get("province_state", ""),
-            ]
-            if part
-        )
-        if location_value:
+        location_city = personal.get("city", "") or ""
+        location_state = personal.get("province_state", "") or ""
+        if location_city or location_state:
             try:
-                if _set_greenhouse_location(root, f"{location_value}, United States") or \
-                        _fill_text_by_label(root, GH_LOCATION_LABELS, location_value):
+                # Greenhouse's Location (City) field is a react-select combobox
+                # backed by ASYNC city autocomplete. Free text does NOT persist
+                # (React drops it on blur -> validation_location_persist). Do the
+                # genuine dance: type -> await options -> pick best match -> read
+                # back the SELECTED value. If nothing matches, report UNFILLED
+                # rather than fake success via a free-text fallback.
+                selected = _fill_greenhouse_location_async(root, location_city, location_state)
+                if selected:
                     _remember(result, "location")
+                else:
+                    logger.debug(
+                        "prefill: location not committed (no matching async option) "
+                        "— reporting location UNFILLED (no fake free-text success)",
+                    )
             except Exception as e:
                 logger.debug("prefill: failed to fill location: %s", e)
 
