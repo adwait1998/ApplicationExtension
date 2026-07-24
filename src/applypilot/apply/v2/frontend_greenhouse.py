@@ -38,6 +38,21 @@ _SEMANTIC_SYNONYMS: list[tuple[str, tuple[str, ...]]] = [
 
 _CUSTOM_PREFIX = "custom."
 
+# Free-text IDENTITY/PROFILE keys that describe the applicant themselves. A
+# checkbox is NEVER one of these — a first name / email / LinkedIn URL is not a
+# boolean. When a checkbox's observation label bleeds concatenated container
+# text (a GDPR consent paragraph mentioning 'First name'; a 'How did you hear'
+# option reading 'LinkedIn'/'Portfolio'), _semantic_key substring-matches one of
+# these and mis-keys the checkbox. Guard: identity key + checkbox kind -> bleed
+# -> fall back to custom.*. Deliberately EXCLUDES work_auth/sponsorship/eeo.*,
+# which legitimately appear as checkboxes ("I require visa sponsorship").
+_IDENTITY_KEYS = frozenset({
+    "first_name", "last_name", "email", "phone", "location",
+    "linkedin", "portfolio", "resume",
+})
+
+_SELECT_PLACEHOLDER_RE = re.compile(r"select[\s.…]*$")
+
 
 def _norm(s: str | None) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip().lower()
@@ -51,6 +66,15 @@ def _semantic_key(label: str, question: str) -> str | None:
         if any(n in hay for n in needles):
             return key
     return None
+
+
+def _is_checkbox_like(ctrl, kind: str) -> bool:
+    """True when the control represents a checkbox — whether observed as the
+    <input type=checkbox> itself (widget kind 'checkbox') OR as its wrapping
+    <label>/ARIA node (control_type 'label' but role 'checkbox'). The identity-
+    key bleed guard keys off this so both duplicate observations of one checkbox
+    are covered."""
+    return kind == "checkbox" or (ctrl.role or "").lower() == "checkbox"
 
 
 def _custom_key(question: str) -> str:
@@ -137,11 +161,66 @@ def _locator_spec(ctrl) -> dict:
     }
 
 
+def _bbox_contains(outer: dict, inner: dict) -> bool:
+    """True when inner's center point sits inside outer's box (small pad for
+    rounding). Used to tie a react-select's internal typeahead <input> to the
+    combobox wrapper that geometrically contains it. Degenerate/missing boxes
+    (zero area) fail closed -> no suppression."""
+    if not outer or not inner:
+        return False
+    try:
+        ox, oy = float(outer["x"]), float(outer["y"])
+        ow, oh = float(outer["width"]), float(outer["height"])
+        ix, iy = float(inner["x"]), float(inner["y"])
+        iw, ih = float(inner["width"]), float(inner["height"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if ow <= 0 or oh <= 0:
+        return False
+    cx, cy = ix + iw / 2.0, iy + ih / 2.0
+    pad = 2.0
+    return (ox - pad <= cx <= ox + ow + pad) and (oy - pad <= cy <= oy + oh + pad)
+
+
+def _is_react_select_inner(ctrl, react_selects: list) -> bool:
+    """Conservatively identify react-select's INTERNAL typeahead <input> so it is
+    not ingested as a phantom custom.* text field beside the real combobox.
+
+    react-select renders the styled control (classified react_select via
+    role=combobox / a select__ selector) AND a bare inner <input> used only for
+    typeahead. That inner input surfaces as a text control whose signals are all
+    distinctively non-field: it classifies 'text', its selector is the bare tag
+    'input' (no id/name/aria-label — a real field always has one) or carries a
+    select__ token, and its label is empty or the 'Select…' placeholder. We only
+    suppress it when it is geometrically CONTAINED by a sibling react_select in
+    the same frame — so the phantom is dropped exactly when its parent combobox
+    is already represented, and a lone stray input is never touched."""
+    if _widget_kind(ctrl) != "text":
+        return False
+    sel = (ctrl.selector or "").strip().lower()
+    if sel != "input" and "select__" not in sel:
+        return False
+    lbl = _norm(ctrl.label)
+    if lbl and not _SELECT_PLACEHOLDER_RE.fullmatch(lbl):
+        return False
+    for rs in react_selects:
+        if rs is ctrl or rs.frame_index != ctrl.frame_index:
+            continue
+        if _bbox_contains(rs.bbox, ctrl.bbox):
+            return True
+    return False
+
+
 def _to_field(ctrl) -> ir.Field:
     label = ctrl.label or ""
     question = ctrl.label or ""
-    sem = _semantic_key(label, question) or _custom_key(question)
     kind = _widget_kind(ctrl)
+    sem = _semantic_key(label, question)
+    # Checkbox label-bleed guard: an identity/profile key on a checkbox is a
+    # sibling-text bleed, never a real binding -> fall back to a custom.* key.
+    if sem in _IDENTITY_KEYS and _is_checkbox_like(ctrl, kind):
+        sem = None
+    sem = sem or _custom_key(question)
     # char_limit is ALWAYS None at parse: _OBSERVE_JS / ControlObservation do not
     # capture maxlength, so there is nothing to read here. The oracle length-clamps
     # free-text answers (§6.5) and the textarea DRIVER (Task 6) clamps only when
@@ -166,9 +245,14 @@ def parse_observation(obs, *, company: str, url: str) -> ir.FormSchema:
     Greenhouse is a one-page form, so exactly one terminal Step is emitted with
     the submit button as its advance_control. The executor (Task 7) still loops
     over steps so multi-step ATSes drop in later without an executor rewrite."""
+    candidates = [c for c in obs.controls if c.visible and (c.label or c.control_id)]
+    # react-select inner-input suppression: drop the combobox's internal typeahead
+    # <input> (a phantom text field) when a sibling react_select geometrically
+    # contains it, so exactly one react_select field remains per combobox.
+    react_selects = [c for c in candidates if _widget_kind(c) == "react_select"]
     fields = [
-        _to_field(c) for c in obs.controls
-        if c.visible and (c.label or c.control_id)
+        _to_field(c) for c in candidates
+        if not _is_react_select_inner(c, react_selects)
     ]
     advance = None
     if obs.submit_buttons:
