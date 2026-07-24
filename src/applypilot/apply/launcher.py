@@ -606,6 +606,78 @@ def _classify_failure_class(result: str, reason: str | None = None, hint: str | 
     return "transient_unknown"
 
 
+# ---------------------------------------------------------------------------
+# Apply-time posting-drift guard (recycled / re-mapped job ids)
+# ---------------------------------------------------------------------------
+# A wrapper apply URL that embeds a Greenhouse ?gh_jid=<id> can silently serve a
+# DIFFERENT posting than the one the operator approved when the underlying id is
+# recycled or the vanity wrapper re-maps it (2026-07-24 live near-miss: an
+# approved "Sr. Product Designer, AI/BI" URL served "Engineering Manager - UI
+# Platform"; the whole form was filled for the wrong job and only a client-side
+# validation error stopped submission). The freshness pre-check
+# (freshness.is_greenhouse_expired_redirect) only catches redirect-to-board
+# expiry — a recycled id on a LIVE form evades it. This guard compares the LIVE
+# page's job title against the DB row's title, cheaply, BEFORE any form fill.
+#
+# Pure functions below so the decision is unit-testable at $0.
+
+# Non-informative wrapper tokens that appear in a browser <title> ("Job
+# Application for X at Company", "Careers - X") but carry no role identity.
+# Dropped from BOTH sides so they can neither create nor mask a match.
+_TITLE_DRIFT_STOPWORDS: frozenset[str] = frozenset({
+    "job", "jobs", "application", "applications", "apply", "for", "at",
+    "the", "a", "an", "to", "of", "careers", "career", "posting", "opening",
+    "position", "role", "hiring", "we", "re", "join", "us",
+})
+
+# Token-overlap (relative to the shorter informative title) at or above this
+# fraction counts as the SAME posting. 0.6 lets wrapper/suffix noise and minor
+# word drift pass while a clear role change ("Designer" -> "Engineering
+# Manager", overlap 0.0) is caught. Fail-open on an unreadable live title.
+POSTING_DRIFT_SIMILARITY_THRESHOLD: float = 0.6
+
+
+def _normalize_title(text: str | None) -> str:
+    """Lowercase, replace every punctuation/whitespace run with one space."""
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _title_tokens(text: str | None) -> set[str]:
+    """Informative token SET of a title (stopwords + 1-char noise dropped)."""
+    return {
+        tok for tok in _normalize_title(text).split()
+        if len(tok) > 1 and tok not in _TITLE_DRIFT_STOPWORDS
+    }
+
+
+def posting_title_similarity(db_title: str | None, live_title: str | None) -> float | None:
+    """Token-overlap similarity of two titles, relative to the SHORTER title's
+    informative token set. Returns None when either side has no informative
+    tokens (undecidable — the caller fails open). A shorter title fully
+    contained in the longer one (the "Job Application for <title> at <co>"
+    wrapper case, or a title that is a prefix of the other) scores 1.0."""
+    db_t = _title_tokens(db_title)
+    live_t = _title_tokens(live_title)
+    if not db_t or not live_t:
+        return None
+    shorter = min(len(db_t), len(live_t))
+    return len(db_t & live_t) / shorter
+
+
+def is_posting_drift(db_title: str | None, live_title: str | None) -> tuple[bool, float | None]:
+    """Decide whether the LIVE page shows a DIFFERENT posting than the DB row.
+
+    Returns (drift, similarity). similarity is None when the check could not run
+    (missing/empty live or DB title) — in that case drift is False (fail open:
+    this is a targeting guard, not a submit gate). Otherwise drift is True iff
+    the token overlap is below POSTING_DRIFT_SIMILARITY_THRESHOLD.
+    """
+    similarity = posting_title_similarity(db_title, live_title)
+    if similarity is None:
+        return False, None
+    return similarity < POSTING_DRIFT_SIMILARITY_THRESHOLD, similarity
+
+
 _DRY_RUN_SUBMIT_BLOCKER_JS = """
 (() => {
   if (window.__applypilotDryRunBlocker) return;
@@ -2010,11 +2082,46 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
         raise
 
 
+def _resolve_canonical_url(url: str) -> str:
+    """Resolve any accepted URL form to the row's canonical primary key
+    ``jobs.url``, so status writeback lands on the correct row regardless of
+    which URL form the run/operator was launched with.
+
+    An aggregator-discovered row stores the listing URL in ``url`` and the direct
+    ATS apply link in ``application_url``. The acquire/queue path matches EITHER
+    form (``url = ? OR application_url = ?``), but every writeback keys on
+    ``WHERE url = ?``; a run/mark launched via ``--url <application_url>`` (or an
+    operator ``--mark-*`` with the apply link) would UPDATE a key that matches NO
+    row (2026-07-24: an approved posting's apply_status stayed NULL for exactly
+    this reason — url != application_url).
+
+    Prefers an EXACT ``url`` match (unambiguous; the auto-apply worker always
+    passes the acquired ``job['url']``, so this is a no-op fast path). Only when
+    no row carries that ``url`` does it fall back to a UNIQUE ``application_url``
+    match. Ambiguous (0 or >1 application_url matches) -> returns the input
+    unchanged, preserving prior behavior (the UPDATE simply matches nothing)."""
+    if not url:
+        return url
+    conn = get_connection()
+    row = conn.execute("SELECT url FROM jobs WHERE url = ? LIMIT 1", (url,)).fetchone()
+    if row is not None:
+        return row[0]
+    rows = conn.execute(
+        "SELECT url FROM jobs WHERE application_url = ? LIMIT 2", (url,)
+    ).fetchall()
+    if len(rows) == 1:
+        return rows[0][0]
+    return url
+
+
 def mark_result(url: str, status: str, error: str | None = None,
                 permanent: bool = False, duration_ms: int | None = None,
                 task_id: str | None = None) -> None:
     """Update a job's apply status in the database."""
     conn = get_connection()
+    # Land on the canonical jobs.url even when called with the application_url
+    # form (aggregator rows where url != application_url). See _resolve_canonical_url.
+    url = _resolve_canonical_url(url)
     now = datetime.now(timezone.utc).isoformat()
     if status == "applied":
         conn.execute("""
@@ -2176,6 +2283,9 @@ def mark_job(url: str, status: str, reason: str | None = None) -> None:
         reason: Failure reason (only for status='failed').
     """
     conn = get_connection()
+    # Accept either URL form: an operator marking an aggregator row by its ATS
+    # apply link must still land on the canonical jobs.url primary key.
+    url = _resolve_canonical_url(url)
     now = datetime.now(timezone.utc).isoformat()
     if status == "applied":
         conn.execute("""
@@ -2530,6 +2640,51 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         prefill_status["error"], prefill_status["duration_ms"],
         prefill_status.get("resolved_url"),
     )
+
+    # --- Apply-time posting-drift guard (see is_posting_drift docstring) ---
+    # The apply page is now loaded + URL-resolved (prefill navigated Chrome). The
+    # LIVE <title> is already captured by the browser stream, so this costs no
+    # extra page load. Compare it to the DB row's title BEFORE the deterministic
+    # adapter full-fill/submit and the LLM run below. This is the single guard
+    # site for the direct run_job path AND the skill-playbook dispatcher tiers,
+    # which all funnel their form-filling through this function (dispatch_apply
+    # calls run_job); the separate v2 Form-Compiler engine is guarded at its own
+    # early page-load site in _make_v2_production_fn. Fail-OPEN when the live
+    # title can't be read — this is a targeting guard, not a submit gate.
+    drift_obs = _latest_stream_observation(browser_stream, refresh=True)
+    live_title = (drift_obs.title if drift_obs else "") or ""
+    drift, similarity = is_posting_drift(job.get("title"), live_title)
+    if drift:
+        duration_ms = int((time.time() - run_started) * 1000)
+        job_meta["failure_class"] = "expired_posting_drift"
+        drift_detail = {
+            "status": "needs_review",
+            "reason": "posting_drift",
+            "db_title": job.get("title"),
+            "live_title": live_title[:300],
+            "title_similarity": similarity,
+        }
+        job_meta["apply_result_json"] = drift_detail
+        _write_job_runtime_metadata(
+            job["url"],
+            last_failure_class=job_meta["failure_class"],
+            apply_result_json=drift_detail,
+            checkpoint=_checkpoint(
+                CHECKPOINT_PAGE_REACHED, posting_drift=True,
+                db_title=job.get("title"), live_title=live_title[:300],
+                title_similarity=similarity),
+        )
+        add_event(
+            f"[W{worker_id}] posting drift: DB '{str(job.get('title'))[:40]}' "
+            f"!= live '{live_title[:40]}' (sim={similarity})")
+        update_state(worker_id, status="needs_review", last_action="posting_drift")
+        # No submit POST happened — free the open INTENT so the row is retryable
+        # once the drift is understood (this is not a dangling mid-submit crash).
+        _resolve_ledger_intent(ledger, identity_id, {"verified": False}, job_meta)
+        return "needs_review:posting_drift", duration_ms, prefill_status
+    if similarity is None:
+        logger.info("posting-drift check skipped (no live title captured)")
+        add_event(f"[W{worker_id}] posting-drift check skipped (no live title)")
 
     # Dry-run defense-in-depth (iter 17 incident): DOM-level submit blocker.
     # The stream MCP server already refuses submits server-side in dry-run,
@@ -3238,6 +3393,7 @@ NEEDS_REVIEW_REASONS: set[str] = {
     "unverified_submission",
     "legal_attestation_ambiguous",
     "stream_snapshot_needed",
+    "posting_drift",
 }
 
 
@@ -3472,6 +3628,33 @@ def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port)
             _release_presubmit_intent(dec.ledger, identity_id, dry_run,
                                       reason="v2_expired")
             return "failed:expired", int((time.time() - started) * 1000), None
+
+        # (2.6) POSTING-DRIFT SHORT-CIRCUIT (bucket B, irreducible). A live req
+        #     whose recycled/re-mapped gh_jid now serves a DIFFERENT posting than
+        #     the operator approved (2026-07-24 near-miss). Same early page-load
+        #     site as the expired-req check: drive_page is loaded, its <title> is
+        #     the live posting, and this runs BEFORE run_form_compiler fills or
+        #     submits anything. Provably PRE-submit -> release the INTENT exactly
+        #     like the expired-req path. Fail-OPEN if the title can't be read.
+        try:
+            v2_live_title = drive_page.title() or ""
+        except Exception:
+            v2_live_title = ""
+        v2_drift, v2_similarity = is_posting_drift(job.get("title"), v2_live_title)
+        if v2_drift:
+            logger.info("v2 posting-drift: db=%r live=%r sim=%s",
+                        job.get("title"), v2_live_title, v2_similarity)
+            meta["failure_class"] = "expired_posting_drift"
+            meta["apply_result_json"] = {
+                "status": "needs_review", "reason": "posting_drift",
+                "db_title": job.get("title"), "live_title": v2_live_title[:300],
+                "title_similarity": v2_similarity,
+            }
+            _close_cdp(pw, browser)
+            _release_presubmit_intent(dec.ledger, identity_id, dry_run,
+                                      reason="v2_posting_drift")
+            return ("needs_review:posting_drift",
+                    int((time.time() - started) * 1000), None)
 
         evidence = NetworkEvidence(ats="greenhouse", company=company)
         try:
