@@ -217,3 +217,149 @@ def test_frame_path_gates_on_depth_and_strips_query_and_fragment():
     assert fe._frame_path(emb) == ("https://apply.example.com/embed/form",)
     # Embedded but no frame_url -> nothing to stamp.
     assert fe._frame_path(ControlObservation(frame_index=1, frame_url="")) == ()
+
+
+# --------------------------------------------------------------------------
+# Modern Greenhouse React frontend parse fixes (empirical: live-DOM probe of a
+# real job-boards.greenhouse.io form). Two observed defects modelled here with a
+# synthetic DOM that reproduces the REAL control shapes through the same
+# collect_browser_observation pipeline:
+#   (1) CHECKBOX LABEL-BLEED: a checkbox's observation label concatenates sibling
+#       container text, so _semantic_key substring-matches an unrelated PROFILE
+#       field -> the GDPR consent checkbox keys 'first_name' and the 'How did you
+#       hear' options key 'linkedin'/'portfolio'. A checkbox is NEVER an identity
+#       field, so those must fall back to custom.*.
+#   (2) REACT-SELECT INNER INPUT: react-select emits the wrapper/control AND its
+#       internal typeahead <input> (selector literally 'input', label empty or
+#       'Select...', bbox contained by the wrapper) which was ingested as a bogus
+#       custom.* text field beside the real combobox field.
+_REACT_FORM = """
+<!doctype html><html><body>
+<form id="application_form">
+  <!-- (c) guard precision: a LEGIT 'First name' text input in a cluttered
+       container (sibling noise text mentioning LinkedIn) must STILL key
+       first_name -- the guard must fire only on checkbox kinds. -->
+  <div class="field">
+    <div class="hint">Enter your legal details. LinkedIn/portfolio optional.</div>
+    <label for="fn">First name</label>
+    <input id="fn" name="first_name" type="text" required class="gh-in a1">
+  </div>
+
+  <!-- (b) 'How did you hear' checkbox group: option labels bleed the question
+       text; 'LinkedIn'/'Portfolio' would substring-match the linkedin/portfolio
+       profile keys. -->
+  <fieldset id="hdyh">
+    <legend>How did you hear about Twilio?</legend>
+    <div><label><input type="checkbox" name="src_linkedin" value="linkedin"> LinkedIn</label></div>
+    <div><label><input type="checkbox" name="src_portfolio" value="portfolio"> Portfolio site</label></div>
+    <div><label><input type="checkbox" name="src_referral" value="referral"> Referral</label></div>
+  </fieldset>
+
+  <!-- (a) GDPR consent checkbox: the surrounding consent paragraph bleeds
+       'First name' into the observation label -> would key first_name. -->
+  <div class="consent-block">
+    <p>By submitting this application including your First name, email and
+       resume, you consent to Twilio processing your personal data under GDPR.</p>
+    <label><input type="checkbox" name="gdpr_consent" required> I agree to the data processing policy</label>
+  </div>
+
+  <!-- (d) react-select: wrapper[role=combobox] + inner select__input <input>.
+       The wrapper is the REAL combobox field; the inner input is the phantom. -->
+  <label for="prod">Which product are you most interested in?</label>
+  <div class="select__control" role="combobox" id="prod" tabindex="0">
+    <div class="select__value-container">
+      <div class="select__placeholder">Select...</div>
+      <div class="select__input-container">
+        <input class="select__input" value="" autocomplete="off" type="text">
+      </div>
+    </div>
+  </div>
+
+  <button id="sub" type="button">Submit application</button>
+</form></body></html>
+"""
+
+
+def _react_schema(page):
+    page.set_content(_REACT_FORM)
+    obs = collect_browser_observation(page)
+    return fe.parse_observation(
+        obs, company="twilio", url="https://job-boards.greenhouse.io/twilio/jobs/1")
+
+
+def test_gdpr_checkbox_bleed_never_keys_identity(page):
+    # (a) The GDPR consent checkbox's label concatenates 'First name' from the
+    # surrounding consent copy. A checkbox is never an identity field, so it MUST
+    # fall back to custom.* and NEVER key first_name (else the resolver binds the
+    # profile first name to a consent checkbox and pollutes fingerprints).
+    schema = _react_schema(page)
+    fields = [f for s in schema.steps for f in s.fields]
+    consent = [f for f in fields
+               if "by submitting this application" in f.label_text.lower()]
+    assert consent, "GDPR consent checkbox field not observed"
+    for f in consent:
+        assert f.widget.kind == "checkbox" or (f.semantic_key or "").startswith("custom.")
+        assert f.semantic_key != "first_name"
+        assert (f.semantic_key or "").startswith("custom.")
+    # No checkbox anywhere in the schema may carry the first_name identity key.
+    assert not any(f.semantic_key == "first_name" and f.widget.kind == "checkbox"
+                   for f in fields)
+
+
+def test_how_did_you_hear_options_key_custom_not_profile(page):
+    # (b) The 'How did you hear' option labels bleed the question, so 'LinkedIn'
+    # and 'Portfolio site' would substring-match the linkedin/portfolio profile
+    # keys. As checkbox options they must key custom.* instead.
+    schema = _react_schema(page)
+    fields = [f for s in schema.steps for f in s.fields]
+    hdyh = [f for f in fields
+            if "how did you hear" in f.label_text.lower()]
+    assert hdyh, "How-did-you-hear checkbox options not observed"
+    for f in hdyh:
+        assert f.semantic_key not in ("linkedin", "portfolio"), (
+            f"checkbox option {f.label_text!r} mis-keyed {f.semantic_key}")
+        assert (f.semantic_key or "").startswith("custom.")
+    # And no checkbox in the schema keeps a linkedin/portfolio identity key.
+    assert not any(f.widget.kind == "checkbox"
+                   and f.semantic_key in ("linkedin", "portfolio") for f in fields)
+
+
+def test_legit_first_name_text_input_still_keys_first_name(page):
+    # (c) Guard precision: a real 'First name' TEXT input in a cluttered
+    # container (sibling noise mentioning LinkedIn/portfolio) must be UNAFFECTED
+    # by the checkbox guard -- it still keys first_name.
+    schema = _react_schema(page)
+    by_key = {f.semantic_key: f for s in schema.steps for f in s.fields}
+    assert "first_name" in by_key
+    assert by_key["first_name"].widget.kind == "text"
+    assert by_key["first_name"].label_text.lower() == "first name"
+
+
+def test_react_select_inner_input_suppressed_single_combobox(page):
+    # (d) react-select emits the wrapper (real combobox) AND its inner
+    # select__input typeahead <input>. Exactly ONE react_select field survives
+    # for that combobox and the phantom inner-input text field is suppressed
+    # (no empty-label / custom.unnamed text field, no bare-'input' selector).
+    schema = _react_schema(page)
+    fields = [f for s in schema.steps for f in s.fields]
+    react = [f for f in fields if f.widget.kind == "react_select"]
+    assert len(react) == 1
+    assert react[0].label_text.lower() == "which product are you most interested in?"
+    # The bogus inner input must be gone: no empty-label text field, no phantom
+    # custom.unnamed, and no field seeded from the bare 'input' selector.
+    assert not any(f.widget.kind == "text" and not f.label_text.strip() for f in fields)
+    assert not any(f.semantic_key == "custom.unnamed" for f in fields)
+    assert not any((f.locator_spec.get("selector") or "").strip().lower() == "input"
+                   for f in fields)
+
+
+def test_react_select_real_input_not_suppressed(page):
+    # Guard precision for suppression: the ORIGINAL fixture's react-select is the
+    # inner input#wa-i that itself carries role=combobox (there is no separate
+    # wrapper). It classifies as react_select, NOT text, so the inner-input
+    # suppression must NOT drop it -- work_auth survives exactly once.
+    schema = _schema(page)
+    react = [f for s in schema.steps for f in s.fields
+             if f.widget.kind == "react_select"]
+    assert len(react) == 1
+    assert react[0].semantic_key == "work_auth"
