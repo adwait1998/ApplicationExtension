@@ -11,3 +11,4 @@ from __future__ import annotations
 
 V2_ENGINE_ENV = "APPLYPILOT_V2_ENGINE"
 V2_TIER_LABEL = "v2_greenhouse"          # written to prefill_status["tier_used"]
+V2_FLIGHT_ENV = "APPLYPILOT_V2_FLIGHT"   # fresh-read gate; OFF => zero flight-recorder cost

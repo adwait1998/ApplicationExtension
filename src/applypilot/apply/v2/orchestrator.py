@@ -18,11 +18,13 @@ launcher._safety_prologue — the orchestrator NEVER constructs them here.
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 
-from applypilot.apply.v2 import V2_TIER_LABEL
+from applypilot.apply.v2 import V2_FLIGHT_ENV, V2_TIER_LABEL
 from applypilot.apply.v2 import ir, resolver
+from applypilot.apply.v2.flight_recorder import FlightRecorder
 from applypilot.apply.v2.operator import FieldResolutionRequest, FieldSpec
 
 # The dispatch seam (Task 10) reads this sentinel status to run legacy run_job.
@@ -190,6 +192,89 @@ def _default_stages(verify_threshold: float = 0.75,
     )
 
 
+# --- flight-recorder shim (off-hot-path; invariant 3/15) ------------------
+
+def _flight_enabled() -> bool:
+    """Fresh-read the env gate every call (invariant 15) — OFF => zero cost."""
+    return (os.environ.get(V2_FLIGHT_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class _Flight:
+    """OFF-hot-path recorder shim (invariant 15). Constructed only when the gate
+    is on; every method is exception-guarded so a recorder fault can never change
+    an apply outcome. Captures PRE-FILL DOM only (privacy, invariant 3)."""
+
+    def __init__(self, *, ats, company, job_url):
+        self._rec = None
+        if not _flight_enabled():
+            return
+        try:
+            from applypilot import config
+            self._rec = FlightRecorder(run_dir=config.APP_DIR / "flight",
+                                       job_url=job_url, ats=ats, company=company)
+        except Exception:                                # noqa: BLE001 — never sink the apply
+            self._rec = None
+
+    @property
+    def active(self) -> bool:
+        return self._rec is not None
+
+    def capture_prefill_dom(self, page) -> None:
+        """Capture the raw DOM BEFORE any field is filled — the only place raw
+        answers could leak, so it MUST run before the fill stage."""
+        if self._rec is None:
+            return
+        try:
+            self._rec.set_dom(page.content())            # pre-fill: no PII in inputs yet
+        except Exception:                                # noqa: BLE001 — bare object() in tests raises
+            pass
+
+    def set_schema(self, schema) -> None:
+        if self._rec is None:
+            return
+        try:
+            self._rec.set_schema(schema)
+        except Exception:                                # noqa: BLE001
+            pass
+
+    def phase(self, name: str, ms: int) -> None:
+        if self._rec is None:
+            return
+        try:
+            self._rec.record_phase(name, ms)
+        except Exception:                                # noqa: BLE001
+            pass
+
+    def fields_from(self, plan, report) -> None:
+        """Map field records from plan (binding/driver) + report (committed keys).
+        provenance = the binding, or 'parked'/'oracle' when the resolver had none;
+        committed = the field's key is in report.committed_keys (invariant 3:
+        BINDING strings only, never the answer value)."""
+        if self._rec is None or plan is None:
+            return
+        committed = set(getattr(report, "committed_keys", []) or [])
+        for pf in getattr(plan, "planned", []) or []:
+            try:
+                key = pf.field.semantic_key or pf.field.field_id
+                prov = pf.binding or ("parked" if pf.park else "oracle")
+                self._rec.record_field(
+                    field_fp=ir.field_fp(pf.field), semantic_key=pf.field.semantic_key,
+                    provenance=prov, driver=pf.driver, committed=(key in committed),
+                    locator_tier=None)               # per-field tier lives in mapping_cache
+            except Exception:                            # noqa: BLE001
+                continue
+
+    def commit(self, status: str) -> None:
+        """Commit a bundle ONLY for non-'applied' outcomes (hot path stays clean).
+        Fully guarded: a write fault demotes to a no-op, the apply result stands."""
+        if self._rec is None or status == "applied":
+            return
+        try:
+            self._rec.commit(status=status)
+        except Exception:                                # noqa: BLE001 — invariant 15
+            pass
+
+
 # --- the stage conductor --------------------------------------------------
 
 def run_form_compiler(*, job, page, profile, conn, company, operator,
@@ -204,9 +289,19 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
     into the resolve stage so the Resume/CV file field binds deterministically —
     a file widget the Operator cannot answer never lands in needs_oracle."""
     started = time.monotonic()
+    _last = started
 
     def _ms() -> int:
         return int((time.monotonic() - started) * 1000)
+
+    def _phase_ms() -> int:
+        """Delta since the previous phase boundary (per-phase timing, distinct
+        from _ms()'s total elapsed)."""
+        nonlocal _last
+        now = time.monotonic()
+        d = int((now - _last) * 1000)
+        _last = now
+        return d
 
     prefill = {"ats": "greenhouse", "tier_used": V2_TIER_LABEL,
                "fields_filled": [], "error": None}
@@ -226,6 +321,14 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
     except Exception:                                # noqa: BLE001 — FAIL OPEN (invariant 2)
         return FALLBACK_SENTINEL, _ms(), None
 
+    # Flight recorder built AFTER a successful parse so its ats is the REAL parsed
+    # ATS (Greenhouse/Ashby/Lever), not a hardcoded guess. No-op unless the env
+    # gate is on. DOM is captured pre-fill below (privacy, invariant 3/15).
+    flight = _Flight(ats=schema.ats, company=company, job_url=url)
+    flight.phase("parse", _phase_ms())
+    flight.set_schema(schema)
+    flight.capture_prefill_dom(page)                 # BEFORE any fill (invariant 3/15)
+
     # RESOLVE -> ORACLE -> FILL — all still PRE-submit: a crash here is safe to
     # fail open (nothing has been submitted) -> hand back to legacy (invariant 2).
     try:
@@ -233,17 +336,21 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
         plan = st.run_oracle(plan, schema, operator)
 
         report = st.execute(page, schema, plan, conn)
+        flight.phase("fill", _phase_ms())
+        flight.fields_from(plan, report)
         prefill["fields_filled"] = list(getattr(report, "committed_keys", []))
         if not getattr(report, "ready_to_submit", False):
             # required-completeness interlock failed -> park, never submit an
             # incomplete form (invariant 9).
             ms = _ms()
             prefill["duration_ms"] = ms                # write_review_log reads this
+            flight.commit("needs_review:v2_incomplete_required")
             return "needs_review:v2_incomplete_required", ms, prefill
         if dry_run:
             # Submit is structurally impossible in dry-run; park BEFORE any click.
             ms = _ms()
             prefill["duration_ms"] = ms
+            flight.commit("needs_review:v2_dry_run")
             return "needs_review:v2_dry_run", ms, prefill
     except Exception:                                # noqa: BLE001 — FAIL OPEN (pre-submit only)
         return FALLBACK_SENTINEL, _ms(), None
@@ -257,15 +364,20 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
         if network_evidence is None or not getattr(network_evidence, "submitted", False):
             dom = _dom_signals(page)                 # Tier-2 fallback (live only)
         v = st.verify(network_evidence, conn, dom)
+        flight.phase("verify", _phase_ms())
     except Exception:                                # noqa: BLE001 — post-submit crash: DO NOT re-apply
         ms = _ms()
         prefill["duration_ms"] = ms
+        flight.commit("needs_review:v2_crashed_post_submit")
         return "needs_review:v2_crashed_post_submit", ms, prefill
 
     ms = _ms()
     prefill["duration_ms"] = ms                       # stamped on the dict return paths
     if getattr(v, "verified", False):
+        flight.commit("applied")                      # no-op by policy (non-applied-only)
         return "applied", ms, prefill
     if getattr(v, "needs_review", False) or not clicked:
+        flight.commit("needs_review:unverified_submission")
         return "needs_review:unverified_submission", ms, prefill
+    flight.commit("v2_unclear")
     return FALLBACK_SENTINEL, ms, None               # totally unclear -> prefill dropped, let legacy try
