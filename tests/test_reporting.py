@@ -25,6 +25,10 @@ def test_classify_removable_vs_irreducible():
     assert classify_failure_bucket(_row(status="needs_review", failure_class="blocker_email_verification_required")) == "B"
     assert classify_failure_bucket(_row(status="failed", failure_class="policy_sso_required")) == "B"
     assert classify_failure_bucket(_row(status="expired", failure_class=None, error="expired")) == "B"
+    # posting-drift guard (recycled/re-mapped gh_jid served a different posting)
+    # is a targeting problem, not a form-fill bug -> irreducible.
+    assert classify_failure_bucket(_row(status="needs_review", failure_class="expired_posting_drift")) == "B"
+    assert classify_failure_bucket(_row(status="needs_review:posting_drift", failure_class=None)) == "B"
     # (A) removable — our stochastic agent / pipeline
     assert classify_failure_bucket(_row(status="needs_review", failure_class="transient_timeout")) == "A"
     assert classify_failure_bucket(_row(status="failed", failure_class="validation_skill_flow_attributeerror")) == "A"

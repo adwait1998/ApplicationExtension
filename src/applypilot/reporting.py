@@ -28,6 +28,10 @@ _IRREDUCIBLE_MARKERS = (
     "not_a_job_application",
     "account_required",
     "expired",
+    # Apply-time posting-drift guard: the wrapper URL served a DIFFERENT posting
+    # than the approved one (recycled/re-mapped gh_jid). A targeting problem we
+    # can't engineer away by better form-filling -> irreducible, route to human.
+    "posting_drift",
     "site_blocked",
     "cloudflare",
     "blocked_by",
