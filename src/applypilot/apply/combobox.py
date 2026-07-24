@@ -128,15 +128,69 @@ def _read_async_options(root) -> list[str]:
         return []
 
 
-def _poll_async_options(root, timeout_ms: int, poll_ms: int = 100) -> list[str]:
-    """Poll (retry-on-empty) up to `timeout_ms` for the async options to appear."""
+# A menu/listbox container in the DOM (even hidden/empty), or aria wiring on the
+# control itself, is the "this is really an async combobox" signal. Its presence
+# means options may still be en route, so we keep the full bounded wait; its
+# ABSENCE after a short window means the control is a plain free-text / native
+# input that will never render a menu, so we can fast-exit.
+_MENU_CONTAINER_SELECTOR = (
+    '[role="listbox"], [class*="select__menu" i], [class*="Select__menu" i], '
+    '[class*="Select-menu" i], [class*="menu-list" i], [class*="-menu"]'
+)
+
+
+def _menu_signal(root, loc=None) -> bool:
+    """Is there any sign an async options menu exists or is opening?"""
+    try:
+        if root.evaluate(
+            "(sel) => !!document.querySelector(sel)", _MENU_CONTAINER_SELECTOR
+        ):
+            return True
+    except Exception:
+        pass
+    if loc is not None:
+        try:
+            if loc.evaluate(
+                """el => {
+                  const expanded = (el.getAttribute('aria-expanded') || '')
+                    .toLowerCase() === 'true';
+                  const ctrl = el.getAttribute('aria-controls')
+                    || el.getAttribute('aria-owns');
+                  const wired = ctrl ? !!document.getElementById(ctrl) : false;
+                  return expanded || wired;
+                }"""
+            ):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _poll_async_options(
+    root, timeout_ms: int, *, loc=None, poll_ms: int = 100, fast_exit_ms: int = 700
+) -> list[str]:
+    """Poll (retry-on-empty) up to `timeout_ms` for the async options to appear.
+
+    Fast-exit: if after a short initial window (`fast_exit_ms`) NO options have
+    rendered AND no menu/listbox container is present or has appeared, stop early
+    — a plain free-text / native input will never render a menu, so burning the
+    full bounded wait only adds latency (measured ~3s per select on live forms).
+    The full bounded wait is preserved the moment a menu container exists or
+    shows up mid-poll (the genuine async case), so no options are ever missed.
+    """
     deadline = time.monotonic() + max(0.0, timeout_ms / 1000.0)
+    fast_deadline = time.monotonic() + max(0.0, fast_exit_ms / 1000.0)
+    saw_menu = False
     while time.monotonic() < deadline:
         opts = _read_async_options(root)
         if opts:
             # Let a still-streaming async list finish populating, then re-read.
             time.sleep(0.12)
             return _read_async_options(root) or opts
+        if not saw_menu and _menu_signal(root, loc):
+            saw_menu = True
+        if not saw_menu and time.monotonic() >= fast_deadline:
+            return []
         time.sleep(max(0.02, poll_ms / 1000.0))
     return []
 
@@ -173,13 +227,16 @@ def _click_async_option(root, target: str) -> bool:
         return False
 
 
-def _read_committed_value(loc) -> str:
-    """Read the SELECTED value from a combobox, NOT the typed free text.
+def _read_selected_value(loc) -> str:
+    """Read the COMMITTED selected value — the react-select single-value / chip,
+    a committed hidden input, or (for div-style comboboxes) the control's own
+    textContent.
 
-    Checks, in order: a rendered react-select single-value / chip in a bounded
-    ancestor container, a committed hidden input, the control's own input value,
-    then (for div-style comboboxes) its own textContent. Placeholder strings
-    ("Select...") are treated as empty.
+    Deliberately does NOT read the search <input>'s own `.value`: on a
+    react-select desync (option click swallowed) that input still holds the
+    leftover SEARCH text, which is a substring of the target — trusting it would
+    fake a commit and re-introduce the exact `validation_location_persist` bug.
+    Placeholder strings ("Select...") are treated as empty.
     """
     try:
         return str(loc.evaluate(
@@ -197,17 +254,41 @@ def _read_committed_value(loc) -> str:
                 const hid = container.querySelector('input[type="hidden"]');
                 if (hid) { const v = norm(hid.value); if (v && !placeholder(v)) return v; }
               }
-              if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-                const v = norm(el.value);
-                if (!placeholder(v)) return v;
+              // Div-style combobox: the value renders as the control's own text.
+              if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
+                const own = norm(el.textContent);
+                if (!placeholder(own)) return own;
               }
-              const own = norm(el.textContent);
-              if (!placeholder(own)) return own;
               return '';
             }"""
         ) or "")
     except Exception:
         return ""
+
+
+def _read_input_value(loc) -> str:
+    """The combobox input's own `.value` (for plain free-text comboboxes)."""
+    try:
+        return (loc.input_value(timeout=500) or "").strip()
+    except Exception:
+        return ""
+
+
+def _verify_commit(loc, target: str) -> str | None:
+    """Return the committed value iff the widget genuinely committed `target`.
+
+    Trusts a structural selected-value (chip / hidden / div text) on a fuzzy
+    reflect, but a value living in the input's own `.value` only on an EXACT
+    match — so leftover react-select search text (a mere substring of target)
+    can never masquerade as a commit.
+    """
+    selected = _read_selected_value(loc)
+    if selected and _reflects(selected, target):
+        return selected
+    typed = _read_input_value(loc)
+    if typed and _norm_opt(typed) == _norm_opt(target):
+        return typed
+    return None
 
 
 def _type_query(loc, query: str, timeout_ms: int) -> None:
@@ -232,14 +313,11 @@ def _type_query(loc, query: str, timeout_ms: int) -> None:
 
 
 def _commit_by_click(root, loc, target: str, settle_ms: int) -> str | None:
-    """Click the matching option element; return the read-back value if it commits."""
+    """Click the matching option element; return the value iff it truly commits."""
     if not _click_async_option(root, target):
         return None
     time.sleep(max(0.0, settle_ms / 1000.0))
-    readback = _read_committed_value(loc)
-    if readback and _reflects(readback, target):
-        return readback
-    return None
+    return _verify_commit(loc, target)
 
 
 def _commit_by_keyboard(root, loc, target: str, timeout_ms: int, settle_ms: int) -> str | None:
@@ -257,7 +335,7 @@ def _commit_by_keyboard(root, loc, target: str, timeout_ms: int, settle_ms: int)
         loc.type(target[:40], delay=20, timeout=min(timeout_ms, 3000))
     except Exception:
         return None
-    opts = _poll_async_options(root, min(timeout_ms, 2500))
+    opts = _poll_async_options(root, min(timeout_ms, 2500), loc=loc)
     if not opts or not _reflects(opts[0], target):
         return None
     try:
@@ -266,9 +344,9 @@ def _commit_by_keyboard(root, loc, target: str, timeout_ms: int, settle_ms: int)
     except Exception:
         pass
     time.sleep(max(0.0, settle_ms / 1000.0))
-    readback = _read_committed_value(loc)
-    if readback and _reflects(readback, target):
-        return readback
+    committed = _verify_commit(loc, target)
+    if committed:
+        return committed
     # Last resort: click the option element directly by its (now distinctive) text.
     return _commit_by_click(root, loc, target, settle_ms)
 
@@ -307,7 +385,7 @@ def select_async_combobox_option(
 
     _type_query(loc, query, timeout_ms)
 
-    options = _poll_async_options(root, timeout_ms)
+    options = _poll_async_options(root, timeout_ms, loc=loc)
     if options:
         target = _match_real_option(prefs, options)
         if target is None:
@@ -327,8 +405,8 @@ def select_async_combobox_option(
     if require_option:
         return None
     # Plain free-text combobox: accept only if the control genuinely retained
-    # the typed value (a committed single-value / input value that matches).
-    readback = _read_committed_value(loc)
+    # the typed value (a rendered single-value, or the input's own value).
+    readback = _read_selected_value(loc) or _read_input_value(loc)
     if readback and _reflects(readback, query):
         return readback
     return None
