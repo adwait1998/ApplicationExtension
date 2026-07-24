@@ -12,49 +12,43 @@ from applypilot.apply.v2 import mapping_cache as mc
 
 log = logging.getLogger(__name__)
 
-# Reuse the safety kernel's host + mutation-method definitions so "submit POST"
-# is defined ONCE across the codebase (browser_stream._guard uses the same pair:
-# `_ATS_HOST_RE.search(_request_host(req.url))` gated on `_MUTATION_METHODS`).
+# Reuse the safety kernel's request-time submit classifier so "the application
+# submit" is defined ONCE across the codebase. browser_stream._guard consumes the
+# one-shot broker ticket on exactly is_submit_request(method, url); the passive
+# success signal below layers a 2xx/3xx status check on the same predicate.
 try:
-    from applypilot.apply.browser_stream import (
-        _ATS_HOST_RE,
-        _MUTATION_METHODS as _MUTATION,
-        _request_host,
-    )
+    from applypilot.apply.browser_stream import is_submit_request
 except Exception:                                # pragma: no cover - import guard
     _ATS_HOST_RE = re.compile(
         r"(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com)$", re.I)
     _MUTATION = {"POST", "PUT", "PATCH"}
+    _NOT_SUBMIT = re.compile(r"/(resume|cv)/?parse|/validate|analytics|/collect|/track|/log", re.I)
+    _SUBMIT_HINT = re.compile(r"/applications?\b|/apply\b|/submit\b", re.I)
 
-    def _request_host(url):
+    def is_submit_request(method: str, url: str) -> bool:
+        if (method or "").upper() not in _MUTATION:
+            return False
         m = re.match(r"https?://([^/:]+)", url or "")
-        return (m.group(1) if m else "").lower()
-
-# Endpoints that are NOT the application submit even though they POST to an ATS
-# host (resume/cv parse, analytics, validation, tracking, logging).
-_NOT_SUBMIT = re.compile(r"/(resume|cv)/?parse|/validate|analytics|/collect|/track|/log", re.I)
-# The Greenhouse application submit path hint.
-_SUBMIT_HINT = re.compile(r"/applications?\b|/apply\b|/submit\b", re.I)
+        host = (m.group(1) if m else "").lower()
+        if not _ATS_HOST_RE.search(host):
+            return False
+        if _NOT_SUBMIT.search(url or ""):
+            return False
+        return bool(_SUBMIT_HINT.search(url or ""))
 
 
 def is_submit_post(method: str, url: str, status: int) -> bool:
     """True only for the language-independent success signal: a mutating request
-    to an ATS host that hits the application-submit path, succeeded (2xx/3xx),
-    and is NOT a resume-parse / analytics / validation XHR (invariant 8)."""
-    if (method or "").upper() not in _MUTATION:
-        return False
+    to an ATS host that hits the application-submit path (is_submit_request),
+    succeeded (2xx/3xx), and is NOT a resume-parse / analytics / validation XHR
+    (invariant 8)."""
     try:
         code = int(status)
     except (TypeError, ValueError):
         return False
     if not (200 <= code < 400):                      # rejected/validation != success
         return False
-    host = _request_host(url)
-    if not _ATS_HOST_RE.search(host or ""):
-        return False
-    if _NOT_SUBMIT.search(url or ""):
-        return False
-    return bool(_SUBMIT_HINT.search(url or ""))
+    return is_submit_request(method, url)
 
 
 class NetworkEvidence:
