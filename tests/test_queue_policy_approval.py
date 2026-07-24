@@ -142,6 +142,23 @@ def test_approved_unknown_still_respects_attempt_cap(tmp_path):
     assert _selected(conn) == {"under"}
 
 
+def test_expired_twin_does_not_hide_live_sibling_from_policy(tmp_path):
+    # queue_policy is the single authority: a confirmed-EXPIRED row is blocked
+    # by its own apply_status leg, but it must NOT hide a LIVE same-title twin.
+    # (The launcher's durable-dedup carve-out enforces the same rule so the
+    # preview never diverges from dispatch — see test_apply_freshness_gate.)
+    db.init_db(tmp_path / "twin.db")
+    conn = db.get_connection(tmp_path / "twin.db")
+    _seed(conn, [
+        _row("live", "unknown", operator_approved=1, apply_status=None,
+             app_url="https://job-boards.greenhouse.io/twilio/jobs/7985808"),
+        _row("dead", "unknown", operator_approved=1, apply_status="expired",
+             app_url="https://job-boards.greenhouse.io/twilio/jobs/1111111"),
+    ])
+    # Live IN, expired OUT — the expired row is blocked, the live one survives.
+    assert _selected(conn) == {"live"}
+
+
 def test_approved_unknown_still_respects_age_and_score(tmp_path):
     db.init_db(tmp_path / "age.db")
     conn = db.get_connection(tmp_path / "age.db")

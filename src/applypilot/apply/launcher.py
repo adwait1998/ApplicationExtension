@@ -1577,13 +1577,22 @@ def _fetch_apply_candidates(
                 FROM jobs
                 WHERE {policy_frag}
                   AND site NOT IN (SELECT site FROM jobs WHERE apply_status = 'in_progress')
+                  -- Durable de-dup twin-suppression. A confirmed-EXPIRED twin
+                  -- (apply_status='expired', parked by the freshness pre-check)
+                  -- is a DEAD link, not an application — it must NEVER suppress
+                  -- its LIVE sibling (the req the operator actually wants). Only
+                  -- a real attempt (applied / in_progress / needs_review /
+                  -- failed / manual) on a twin excludes the others. Expired
+                  -- blocks ITSELF via queue_policy's apply_status leg, never its
+                  -- twin — keeping preview and dispatch in lockstep.
                   AND NOT EXISTS (
                       SELECT 1 FROM jobs d
                       WHERE d.site = jobs.site
                         AND d.url != jobs.url
                         AND LOWER(TRIM(d.title)) = LOWER(TRIM(jobs.title))
                         AND (d.applied_at IS NOT NULL
-                             OR d.apply_status IS NOT NULL)
+                             OR (d.apply_status IS NOT NULL
+                                 AND d.apply_status != 'expired'))
                   )
                   {site_clause}
                   {site_contains_clause}
@@ -1863,13 +1872,21 @@ def acquire_job(target_url: str | None = None, min_score: int = 8,
                           -- recruiter regardless of outcome. The d.url !=
                           -- jobs.url guard means a job never excludes itself,
                           -- so a genuine single-listing retry still works.
+                          -- A confirmed-EXPIRED twin (apply_status='expired',
+                          -- parked by the freshness pre-check) is a DEAD link,
+                          -- not an application — it must NEVER suppress its LIVE
+                          -- sibling. Expired blocks ITSELF via queue_policy's
+                          -- apply_status leg, never its twin. This carve-out is
+                          -- IDENTICAL to the one in _fetch_apply_candidates so
+                          -- preview and dispatch stay in lockstep.
                           AND NOT EXISTS (
                               SELECT 1 FROM jobs d
                               WHERE d.site = jobs.site
                                 AND d.url != jobs.url
                                 AND LOWER(TRIM(d.title)) = LOWER(TRIM(jobs.title))
                                 AND (d.applied_at IS NOT NULL
-                                     OR d.apply_status IS NOT NULL)
+                                     OR (d.apply_status IS NOT NULL
+                                         AND d.apply_status != 'expired'))
                           )
                           {site_clause}
                           {site_contains_clause}
