@@ -28,6 +28,13 @@ _SAFE_MUTATION_HOSTS = _re.compile(
     r"(google-analytics\.com|googletagmanager\.com|doubleclick\.net|"
     r"segment\.(io|com)|sentry\.io|datadoghq\.com|cloudflareinsights\.com|"
     r"fullstory\.com|hotjar\.com|fonts\.googleapis\.com|gstatic\.com)$", _re.I)
+# Endpoints that are NOT the application submit even though they POST to an ATS
+# host (resume/cv parse, analytics, validation, tracking, logging). Defined here
+# (the safety kernel) so both the ticket-consume gate below and v2.verify's
+# passive success signal classify "submit" from one source of truth.
+_NOT_SUBMIT = _re.compile(r"/(resume|cv)/?parse|/validate|analytics|/collect|/track|/log", _re.I)
+# The application-submit path hint (Greenhouse et al.).
+_SUBMIT_HINT = _re.compile(r"/applications?\b|/apply\b|/submit\b", _re.I)
 
 
 def _request_host(url: str) -> str:
@@ -52,6 +59,28 @@ def should_block_request(method: str, url: str, *, ticket_open: bool, dry_run: b
     if not _ATS_HOST_RE.search(host):
         return False
     return not ticket_open
+
+
+def is_submit_request(method: str, url: str) -> bool:
+    """Pure request-time classifier for THE application submit.
+
+    True only for a mutating request to a known ATS host whose path looks like
+    the application submit (POST .../applications, /apply, /submit) and is NOT a
+    resume/cv-parse, analytics, validation, or tracking XHR. Reads method+url
+    only (no status) so the CDP guard can decide at request time.
+
+    Scopes the one-shot broker-ticket consume to the real submit: a real form
+    POSTs prefill uploads (e.g. /attachments/upload) to the same ATS host before
+    submitting, and those must NOT burn the ticket. Also the request-time half of
+    v2.verify.is_submit_post, which layers the 2xx/3xx success check on top."""
+    if (method or "").upper() not in _MUTATION_METHODS:
+        return False
+    host = _request_host(url)
+    if not _ATS_HOST_RE.search(host):
+        return False
+    if _NOT_SUBMIT.search(url or ""):
+        return False
+    return bool(_SUBMIT_HINT.search(url or ""))
 
 
 @dataclass
@@ -671,11 +700,12 @@ class BrowserStateStream:
                                                      error=f"BLOCKED_SUBMIT {req.method} {req.url}"))
                     route.abort()
                     return
-                # consume the one-shot ticket on the actual submit POST (single
-                # submit flow per identity, so the consume TOCTOU flagged in
-                # Task 9 is benign).
-                if (open_ and (req.method or "").upper() in _MUTATION_METHODS
-                        and _ATS_HOST_RE.search(_request_host(req.url))):
+                # Consume the one-shot ticket ONLY on the actual submit-shaped
+                # request. A real form POSTs prefill uploads (resume/attachments)
+                # to the same ATS host before submitting; consuming on any ATS
+                # mutation burned the ticket at prefill time and the real submit
+                # was then refused (live bug 2026-07-24).
+                if open_ and is_submit_request(req.method, req.url):
                     self.broker.consume(self.identity_id)
                 route.continue_()
 
