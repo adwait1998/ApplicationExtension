@@ -3432,11 +3432,30 @@ def _v2_enabled() -> bool:
 
 
 def _is_greenhouse(job: dict) -> bool:
-    """Greenhouse-only gate for v2 (Lever/Ashby/Workday are Phase 4). Reuses
-    prefill._detect_ats — the SAME detection the legacy prefill uses — rather
-    than re-parsing the URL, so vanity ?gh_jid= hosts route identically."""
+    """Greenhouse-only gate — kept as a thin back-compat alias (the dispatch gate
+    is now _v2_supported_ats). Reuses prefill._detect_ats — the SAME detection the
+    legacy prefill uses — rather than re-parsing the URL, so vanity ?gh_jid= hosts
+    route identically."""
     from applypilot.apply.prefill import _detect_ats
     return _detect_ats(job.get("application_url") or job.get("url") or "") == "greenhouse"
+
+
+def _v2_supported_ats(job: dict) -> bool:
+    """Per-ATS v2 gate (invariant 11). The master flag APPLYPILOT_V2_ENGINE must
+    be on; then APPLYPILOT_V2_ATS (fresh-read comma allowlist) scopes WHICH ATSes
+    v2 handles. Unset allowlist => 'greenhouse' only (the Phase-3 shadow, byte-
+    for-byte). An ATS with no front-end (parser_for is None) is never supported."""
+    if not _v2_enabled():
+        return False
+    from applypilot.apply.prefill import _detect_ats
+    from applypilot.apply.v2 import V2_ATS_ENV
+    from applypilot.apply.v2.frontends import parser_for
+    ats = _detect_ats(job.get("application_url") or job.get("url") or "")
+    if parser_for(ats) is None:
+        return False
+    raw = (os.environ.get(V2_ATS_ENV) or "").strip()
+    allow = {a.strip().lower() for a in raw.split(",") if a.strip()} or {"greenhouse"}
+    return ats in allow
 
 
 def _v2_connect_page(port: int, apply_url: str):
@@ -3507,6 +3526,17 @@ def _release_presubmit_intent(ledger, identity_id, dry_run, *,
         logger.warning("v2 pre-submit INTENT release failed for %s; legacy re-entry "
                        "will park as needs_review:dangling_submission_intent (safe, "
                        "not a double-submit)", identity_id, exc_info=True)
+
+
+# Pre-flight PROBE terminals the orchestrator returns BEFORE parse (no submit can
+# have fired): captcha / login_issue, plus the failed:* family (failed:expired).
+# _make_v2_production_fn releases the recorded INTENT for these — they are provably
+# pre-submit and _reconcile_v2_ledger has no branch for them (would dangle).
+_V2_PROBE_TERMINALS: frozenset[str] = frozenset({"captcha", "login_issue"})
+
+
+def _is_v2_probe_terminal(status: str) -> bool:
+    return bool(status) and (status in _V2_PROBE_TERMINALS or status.startswith("failed:"))
 
 
 def _reconcile_v2_ledger(ledger, identity_id, status, *, dry_run,
@@ -3656,7 +3686,9 @@ def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port)
             return ("needs_review:posting_drift",
                     int((time.time() - started) * 1000), None)
 
-        evidence = NetworkEvidence(ats="greenhouse", company=company)
+        from applypilot.apply.prefill import _detect_ats
+        ats = _detect_ats(dec.apply_url) or "greenhouse"
+        evidence = NetworkEvidence(ats=ats, company=company)
         try:
             drive_page.on("response", evidence.on_response)     # invariant 8 (page-level)
         except Exception:
@@ -3689,6 +3721,16 @@ def _make_v2_production_fn(*, worker_id, run_started, identity_id, broker, port)
         if status == _orch.FALLBACK_SENTINEL:
             # PRE-SUBMIT fail-open: release so the legacy re-entry APPLIES.
             _release_presubmit_intent(dec.ledger, identity_id, dry_run)
+        elif _is_v2_probe_terminal(status):
+            # PRE-FLIGHT PROBE TERMINAL (Task 3 dependency, wired here): the
+            # orchestrator's preflight (captcha / login_issue / failed:expired &c.)
+            # short-circuits BEFORE parse — provably no submit fired. worker_loop
+            # promotes these to permanent buckets, but _reconcile_v2_ledger has no
+            # branch for them, so the recorded INTENT would DANGLE forever and block
+            # the next apply on the dangling-INTENT guard. Release it here, exactly
+            # like the expired-redirect short-circuit above (both are pre-submit).
+            _release_presubmit_intent(dec.ledger, identity_id, dry_run,
+                                      reason="v2_probe_terminal")
         else:
             _reconcile_v2_ledger(dec.ledger, identity_id, status,
                                  dry_run=dry_run, verify_threshold=verify_threshold)
@@ -3720,7 +3762,7 @@ def _dispatch_apply_v2_aware(*, job, page, conn, company, operator, broker,
         run_form_compiler_fn = _make_v2_production_fn(
             worker_id=worker_id, run_started=run_started, identity_id=identity_id,
             broker=broker, port=port)
-    if _v2_enabled() and _is_greenhouse(job):
+    if _v2_supported_ats(job):
         status, ms, prefill = run_form_compiler_fn(
             job=job, page=page, conn=conn, company=company, operator=operator,
             dry_run=dry_run, verify_threshold=verify_threshold)
@@ -3730,10 +3772,16 @@ def _dispatch_apply_v2_aware(*, job, page, conn, company, operator, broker,
         logger.info("v2 outcome: status=%s fields_filled=%s duration_ms=%s",
                     status, _fields, ms)
         if status != FALLBACK_SENTINEL:
-            # A/B labeling is free: v2 results carry tier_used=v2_greenhouse
-            # (setdefault — never clobber a tier the engine already stamped).
+            # A/B labeling is free: v2 results carry the per-ATS tier label
+            # (v2_greenhouse / v2_ashby / v2_lever), setdefault — never clobber a
+            # tier the engine already stamped. The engine (run_form_compiler) sets
+            # this from schema.ats after parse; this fallback covers a prefill dict
+            # that reached here without it.
             if isinstance(prefill, dict):
-                prefill.setdefault("tier_used", "v2_greenhouse")
+                from applypilot.apply.prefill import _detect_ats
+                from applypilot.apply.v2 import V2_TIER_LABELS
+                _ats = _detect_ats(job.get("application_url") or job.get("url") or "")
+                prefill.setdefault("tier_used", V2_TIER_LABELS.get(_ats, "v2_greenhouse"))
             return status, ms, prefill
         # FALLBACK_SENTINEL: v2 failed open (pre-submit) -> legacy runs as the
         # counted fallback (its own prologue re-enters the SAME ledger identity).
@@ -3923,11 +3971,12 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 
                 # v2 dispatch seam (Task 10). With APPLYPILOT_V2_ENGINE unset the
                 # wrapper is a byte-for-byte passthrough to _legacy_dispatch — the
-                # v2 operator/conn are built only when the flag is ON and the job
-                # is Greenhouse. The SAME broker/identity/browser_stream the worker
-                # constructed are threaded through (invariant 1); v2 fails open to
-                # legacy on the FALLBACK_SENTINEL (invariant 2).
-                _v2_gate = _v2_enabled() and _is_greenhouse(job)
+                # v2 operator/conn are built only when the flag is ON and the job's
+                # ATS is in the per-ATS allowlist (APPLYPILOT_V2_ATS; unset =>
+                # greenhouse only). The SAME broker/identity/browser_stream the
+                # worker constructed are threaded through (invariant 1); v2 fails
+                # open to legacy on the FALLBACK_SENTINEL (invariant 2).
+                _v2_gate = _v2_supported_ats(job)
                 result, duration_ms, prefill_status = _dispatch_apply_v2_aware(
                     job=job, page=None,
                     conn=get_connection() if _v2_gate else None,

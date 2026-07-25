@@ -139,6 +139,65 @@ def test_lever_label_bleed_twins_dropped_no_phantom_text(page):
     assert sum(f.widget.kind == "radio_group" for f in fields) == 2
 
 
+def test_lever_bare_name_input_keyed_full_name(page):
+    # Task 7 addendum: the Lever shape input[name="name"] with a BARE "Name" label
+    # (no separate first/last inputs) is promoted to full_name by the single-name-
+    # input heuristic, so the whole name is bound rather than a single split token.
+    html = """
+    <form>
+      <label for="name">Name</label>
+      <input id="name" name="name" type="text" required />
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" required />
+      <button type="submit">Submit application</button>
+    </form>
+    """
+    page.set_content(html)
+    obs = collect_browser_observation(page)
+    schema = fe.parse_observation(obs, company="acme", url="https://jobs.lever.co/acme/1")
+    by_key = {f.semantic_key: f for s in schema.steps for f in s.fields}
+    assert "full_name" in by_key
+    assert by_key["full_name"].widget.kind == "text"
+    assert "last_name" not in by_key and "first_name" not in by_key
+
+
+def test_lever_first_and_last_name_label_is_full_name(page):
+    # Precedence pin (mirrors the Ashby shape): "First and Last Name" must resolve
+    # to full_name, never the 'last name' substring.
+    html = """
+    <form>
+      <label for="name">First and Last Name</label>
+      <input id="name" name="name" type="text" required />
+      <button type="submit">Submit application</button>
+    </form>
+    """
+    page.set_content(html)
+    obs = collect_browser_observation(page)
+    schema = fe.parse_observation(obs, company="acme", url="https://jobs.lever.co/acme/1")
+    keys = {f.semantic_key for s in schema.steps for f in s.fields}
+    assert "full_name" in keys and "last_name" not in keys
+
+
+def test_lever_split_first_last_form_not_promoted(page):
+    # Guard: on a (rare) Lever form that DOES render separate First/Last inputs the
+    # single-name-input heuristic must NOT fire — the split fields own the name.
+    html = """
+    <form>
+      <label for="fn">First Name</label>
+      <input id="fn" name="fn" type="text" required />
+      <label for="ln">Last Name</label>
+      <input id="ln" name="ln" type="text" required />
+      <button type="submit">Submit application</button>
+    </form>
+    """
+    page.set_content(html)
+    obs = collect_browser_observation(page)
+    schema = fe.parse_observation(obs, company="acme", url="https://jobs.lever.co/acme/1")
+    keys = {f.semantic_key for s in schema.steps for f in s.fields}
+    assert {"first_name", "last_name"} <= keys
+    assert "full_name" not in keys
+
+
 def test_lever_office_location_native_select(page):
     # The confirmed ground truth: the location dropdown is a NATIVE
     # <select name="opportunityLocationId"> -> native_select (never react_select),

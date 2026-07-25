@@ -22,7 +22,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from applypilot.apply.v2 import V2_FLIGHT_ENV, V2_TIER_LABEL
+from applypilot.apply.v2 import V2_FLIGHT_ENV, V2_TIER_LABEL, V2_TIER_LABELS
 from applypilot.apply.v2 import ir, preflight, resolver
 from applypilot.apply.v2.flight_recorder import FlightRecorder
 from applypilot.apply.v2.operator import FieldResolutionRequest, FieldSpec
@@ -149,10 +149,19 @@ def _dom_signals(page):
 # --- real (live) stage wiring ---------------------------------------------
 
 def _default_parse(page, company, url):
+    """Route the observation to the right ATS front-end via the registry (Task 7).
+    An unrecognized ATS falls back to the Greenhouse parser — the dispatch gate
+    (_v2_supported_ats) has already scoped WHICH ATSes reach here, so this default
+    only ever fires for a URL whose front-end exists; the fallback is belt-and-
+    suspenders so a detection miss degrades to the historical behavior, never a
+    KeyError."""
     from applypilot.apply.browser_stream import collect_browser_observation
+    from applypilot.apply.prefill import _detect_ats
     from applypilot.apply.v2 import frontend_greenhouse
+    from applypilot.apply.v2.frontends import parser_for
     obs = collect_browser_observation(page)
-    return frontend_greenhouse.parse_observation(obs, company=company, url=url)
+    parse = parser_for(_detect_ats(url)) or frontend_greenhouse.parse_observation
+    return parse(obs, company=company, url=url)
 
 
 def _default_execute(page, schema, plan, conn):
@@ -334,6 +343,13 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
         schema = st.parse(page, company, url)
     except Exception:                                # noqa: BLE001 — FAIL OPEN (invariant 2)
         return FALLBACK_SENTINEL, _ms(), None
+
+    # Stamp the REAL parsed ATS onto the telemetry (Task 7): ats + the per-ATS
+    # tier label (v2_greenhouse / v2_ashby / v2_lever) so the A/B metric buckets
+    # each front-end independently. Placed after parse — the pre-parse default is
+    # only ever seen on a None-prefill fail-open return.
+    prefill["ats"] = schema.ats
+    prefill["tier_used"] = V2_TIER_LABELS.get(schema.ats, V2_TIER_LABEL)
 
     # Flight recorder built AFTER a successful parse so its ats is the REAL parsed
     # ATS (Greenhouse/Ashby/Lever), not a hardcoded guess. No-op unless the env

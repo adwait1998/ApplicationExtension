@@ -46,15 +46,16 @@ from __future__ import annotations
 import re
 
 from applypilot.apply.v2 import ir
+# The name keys (full_name/first_name/last_name) are owned by the shared word-
+# boundary matcher (_name_semantic_key) with full_name precedence + a single-name-
+# input heuristic (promote_full_name) — see frontend_greenhouse (Task 7 addendum).
+from applypilot.apply.v2.frontend_greenhouse import _name_semantic_key, promote_full_name
 
 # Lever-tuned synonym table (grounded in the probe labels). Order matters: most-
-# specific first. 'full_name' precedes first/last so a "Full name" label can never
-# be hijacked. first_name/last_name are kept as defensive fallbacks (no Lever
-# probe splits the name, but a custom Lever form theoretically could).
+# specific first. The name fields are NOT in this table — _name_semantic_key owns
+# them so Lever's single input[name="name"] ("Full name") always binds the WHOLE
+# personal.full_name, never a split token.
 _SEMANTIC_SYNONYMS: list[tuple[str, tuple[str, ...]]] = [
-    ("full_name", ("full name", "full legal name")),
-    ("first_name", ("legal first name", "first name")),
-    ("last_name", ("legal last name", "last name", "surname")),
     ("email", ("email",)),
     ("phone", ("phone", "mobile")),
     ("location", ("current location", "location", "city", "where are you")),
@@ -199,7 +200,9 @@ def _to_field(ctrl) -> ir.Field:
     label = ctrl.label or ""
     question = ctrl.label or ""
     kind = _widget_kind(ctrl)
-    sem = _semantic_key(label, question)
+    # Name matcher FIRST (full_name > first_name > last_name, word-boundary), then
+    # the Lever synonym table for everything else (Task 7 addendum).
+    sem = _name_semantic_key(label, question) or _semantic_key(label, question)
     # Checkbox/radio label-bleed guard: an identity/profile key on a choice
     # control is a sibling-text bleed, never a real binding -> fall back custom.*.
     if sem in _IDENTITY_KEYS and _is_checkbox_like(ctrl, kind):
@@ -236,10 +239,10 @@ def parse_observation(obs, *, company: str, url: str) -> ir.FormSchema:
     emitted with the submit button as its advance_control. A closed/expired
     posting (0 controls, 0 submit buttons) yields an empty terminal step with
     advance_control=None — no crash; the orchestrator names the terminal."""
-    fields = [
+    fields = promote_full_name([
         _to_field(c) for c in obs.controls
         if c.visible and not _is_label_twin(c) and (c.label or c.control_id)
-    ]
+    ])
     advance = None
     if obs.submit_buttons:
         b = obs.submit_buttons[0]

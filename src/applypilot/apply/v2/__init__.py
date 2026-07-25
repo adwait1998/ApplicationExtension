@@ -10,5 +10,7 @@ APPLYPILOT_V2_ENGINE; cutover only at v2 >= v1 on 100+ live rows."""
 from __future__ import annotations
 
 V2_ENGINE_ENV = "APPLYPILOT_V2_ENGINE"
+V2_ATS_ENV = "APPLYPILOT_V2_ATS"         # fresh-read per-ATS allowlist (comma list); unset => greenhouse only
 V2_TIER_LABEL = "v2_greenhouse"          # written to prefill_status["tier_used"]
+V2_TIER_LABELS = {"greenhouse": "v2_greenhouse", "ashby": "v2_ashby", "lever": "v2_lever"}
 V2_FLIGHT_ENV = "APPLYPILOT_V2_FLIGHT"   # fresh-read gate; OFF => zero flight-recorder cost
