@@ -3532,11 +3532,21 @@ def _release_presubmit_intent(ledger, identity_id, dry_run, *,
 # have fired): captcha / login_issue, plus the failed:* family (failed:expired).
 # _make_v2_production_fn releases the recorded INTENT for these — they are provably
 # pre-submit and _reconcile_v2_ledger has no branch for them (would dangle).
-_V2_PROBE_TERMINALS: frozenset[str] = frozenset({"captcha", "login_issue"})
+_V2_PROBE_TERMINALS: frozenset[str] = frozenset({"captcha", "login_issue", "failed:expired"})
 
 
 def _is_v2_probe_terminal(status: str) -> bool:
-    return bool(status) and (status in _V2_PROBE_TERMINALS or status.startswith("failed:"))
+    """Is `status` a PROVABLY-PRE-SUBMIT preflight terminal (no submit fired)?
+
+    EXPLICIT enum, NOT a `failed:` prefix match. The v2 preflight short-circuits
+    BEFORE parse and emits only captcha / login_issue / failed:expired (preflight.py)
+    — all provably pre-submit, so the recorded INTENT is RELEASED here. A prefix
+    match on `failed:*` was a naming-convention trap: a FUTURE post-submit
+    `failed:<x>` status would silently release an INTENT that MUST dangle (the
+    double-submit guard). With the enum, any unknown `failed:*` falls through to
+    _reconcile_v2_ledger, which has no branch for it and correctly LEAVES IT
+    DANGLING. Every entry here is a deliberate 'this status is pre-submit' claim."""
+    return bool(status) and status in _V2_PROBE_TERMINALS
 
 
 def _reconcile_v2_ledger(ledger, identity_id, status, *, dry_run,

@@ -153,6 +153,68 @@ def test_resume_key_on_non_file_widget_falls_through_not_bound(tmp_path):
     assert {f.field_id for f in plan.needs_oracle} == {"rq1", "rq2"}
 
 
+# --- live gap #2: Greenhouse labels its resume dropzone "Attach" -> custom.attach,
+# so the key=='resume' rung never claimed the REQUIRED resume upload. The rung now
+# binds the first NON-cover-letter file widget (identity, not key). Both polarities.
+
+def test_unlabeled_attach_file_binds_resume(tmp_path):
+    conn = _conn(tmp_path)
+    # The live GH case: the resume dropzone label is "Attach" -> semantic_key
+    # 'custom.attach', widget kind 'file'. The FIRST non-cover-letter file widget
+    # binds the resume even with no resume-ish label (the required blocker).
+    schema = _schema([_field("custom.attach", kind="file", label="Attach", fid="fz1")])
+    plan = rz.resolve(schema, PROFILE, conn=conn, resume_path=r"C:\x\resume.pdf")
+    byk = {pf.field.field_id: pf for pf in plan.planned}
+    pf = byk["fz1"]
+    assert pf.driver == "file"
+    assert pf.value == r"C:\x\resume.pdf"               # bound the resume path
+    assert pf.binding == "profile.resume_path"
+    assert pf.park is False
+    assert plan.needs_oracle == []                      # never oracle a file widget
+
+
+def test_cover_letter_file_does_not_bind_resume(tmp_path):
+    conn = _conn(tmp_path)
+    # A file widget explicitly labeled a cover letter is NEVER the resume target.
+    schema = _schema([_field("custom.cover_letter", kind="file",
+                             label="Cover Letter", required=False, fid="cl1")])
+    plan = rz.resolve(schema, PROFILE, conn=conn, resume_path=r"C:\x\resume.pdf")
+    # nothing bound the resume path; the cover-letter file falls through to oracle.
+    assert all(pf.binding != "profile.resume_path" for pf in plan.planned)
+    assert all(pf.value != r"C:\x\resume.pdf" for pf in plan.planned)
+    assert {f.field_id for f in plan.needs_oracle} == {"cl1"}
+
+
+def test_attach_and_cover_letter_only_attach_binds_resume(tmp_path):
+    conn = _conn(tmp_path)
+    # Two "file" dropzones: an ambiguous "Attach" and an explicit "Cover Letter".
+    # ONLY the attach binds the resume; the cover letter is left to the ladder.
+    attach = _field("custom.attach", kind="file", label="Attach", fid="fz1")
+    cover = _field("custom.cover_letter", kind="file", label="Cover Letter",
+                   required=False, fid="cl1")
+    schema = _schema([attach, cover])
+    plan = rz.resolve(schema, PROFILE, conn=conn, resume_path=r"C:\x\resume.pdf")
+    byk = {pf.field.field_id: pf for pf in plan.planned}
+    assert byk["fz1"].binding == "profile.resume_path"  # the attach got the resume
+    # the cover-letter file is NOT bound to the resume path (oracle-bound instead).
+    assert "cl1" not in byk
+    assert {f.field_id for f in plan.needs_oracle} == {"cl1"}
+
+
+def test_explicit_resume_file_wins_over_attach(tmp_path):
+    conn = _conn(tmp_path)
+    # When a resume-KEYED file widget exists, it wins even if an "Attach" file
+    # appears FIRST — the explicit resume label is the strongest signal.
+    attach = _field("custom.attach", kind="file", label="Attach", fid="fz1")
+    resume = _field("resume", kind="file", label="Resume/CV", fid="rz1")
+    schema = _schema([attach, resume])
+    plan = rz.resolve(schema, PROFILE, conn=conn, resume_path=r"C:\x\resume.pdf")
+    byk = {pf.field.field_id: pf for pf in plan.planned}
+    assert byk["rz1"].binding == "profile.resume_path"  # explicit resume file wins
+    assert "fz1" not in byk                              # the stray attach -> oracle
+    assert {f.field_id for f in plan.needs_oracle} == {"fz1"}
+
+
 def test_build_element_spec_maps_locator_dict():
     from applypilot.apply.healing import ElementSpec
     spec = rz.build_element_spec({"label": "Email", "role": "textbox",

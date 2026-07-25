@@ -40,6 +40,43 @@ _DECLINE = "decline to self-identify"
 # Labels that are legal attestations the profile cannot cover -> park, never guess.
 _HARD_REFUSAL_MARKERS = ("penalty of perjury", "i attest", "i certify under", "felony")
 
+# A file widget is a COVER LETTER (not the resume target) when its label/question/
+# key mentions a cover letter. Greenhouse labels BOTH its dropzones "Attach", so a
+# real cover-letter upload is only distinguishable when the label is explicit;
+# an ambiguous "Attach" is treated as a resume candidate (the required blocker).
+_COVER_LETTER_MARKERS = ("cover letter", "coverletter", "cover_letter")
+
+
+def _is_cover_letter_file(f) -> bool:
+    hay = f"{f.label_text or ''} {f.question_text or ''} {f.semantic_key or ''}".lower()
+    return any(m in hay for m in _COVER_LETTER_MARKERS)
+
+
+def _pick_resume_file_field(schema):
+    """Choose the SINGLE file widget that should receive the resume (live gap #2).
+
+    Greenhouse labels its Resume/CV and Cover Letter dropzones identically
+    ("Attach"), so both parse as semantic_key='custom.attach' and the old
+    key=='resume' rung never claimed the required resume upload. Selection:
+      1. an explicit resume-keyed file widget wins (label matched 'resume'/'cv');
+      2. else the FIRST non-cover-letter file widget (an 'Attach'/'custom.*'
+         dropzone with no resume-ish label still binds the resume — the required
+         blocker);
+      3. a cover-letter-labeled file widget is NEVER the resume target.
+    Returns the chosen Field (object identity), or None if no eligible file
+    widget exists. Only ONE file widget is ever chosen, so a form with a resume
+    AND a cover-letter dropzone binds the resume once and leaves the cover letter
+    to the normal ladder (oracle/park)."""
+    file_fields = [f for step in schema.steps for f in step.fields
+                   if f.widget.kind == "file"]
+    for f in file_fields:
+        if f.semantic_key == "resume":
+            return f
+    for f in file_fields:
+        if not _is_cover_letter_file(f):
+            return f
+    return None
+
 
 @dataclass
 class PlannedField:
@@ -117,10 +154,14 @@ def resolve(schema: ir.FormSchema, profile: dict, *, conn=None,
     reaches needs_oracle."""
     plan = FillPlan()
     ats = schema.ats
+    # Pick the ONE file widget that binds the resume BEFORE walking the ladder, so
+    # the required Resume/CV upload is claimed even when Greenhouse labels its
+    # dropzone "Attach" (custom.attach), not "Resume" (live gap #2).
+    resume_field = _pick_resume_file_field(schema)
     for step in schema.steps:
         for f in step.fields:
             pf = _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache,
-                                resume_path)
+                                resume_path, resume_field)
             if pf is None:
                 plan.needs_oracle.append(f)
             else:
@@ -128,7 +169,8 @@ def resolve(schema: ir.FormSchema, profile: dict, *, conn=None,
     return plan
 
 
-def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache, resume_path=None):
+def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache, resume_path=None,
+                   resume_field=None):
     key = f.semantic_key
     driver = _driver_for(f.widget.kind)
 
@@ -148,13 +190,15 @@ def _resolve_field(f, profile, ats, conn, answer_lookup, answer_cache, resume_pa
     # values provenance: binding names it, value carries the concrete path, same
     # shape as the personal.* rungs); with no path, park-don't-guess. Placed
     # before the mapping-cache / answer-bank / oracle rungs. resume is not canary.
-    # GATE ON THE FILE WIDGET: the frontend keys 'resume' by substring ('resume',
-    # 'cv', 'resume/cv'), so a non-file custom question (e.g. text 'Link to your
-    # resume', textarea 'gap in your CV') can share the key. Only the actual file
-    # input binds here — a mis-keyed non-file field falls through the normal ladder
-    # (as it did before this rung existed) rather than getting a filesystem path
-    # typed into a screening box, or parked out of the Operator's reach.
-    if key == "resume" and f.widget.kind == "file":
+    # GATE ON THE FILE WIDGET (identity, not key): _pick_resume_file_field chose
+    # the single file widget that should receive the resume — an explicit
+    # resume-keyed file OR the first non-cover-letter file widget (Greenhouse
+    # labels its dropzone "Attach" -> custom.attach, so the required resume upload
+    # has no resume-ish label). A non-file custom question (text 'Link to your
+    # resume', textarea 'gap in your CV') is never chosen, so it falls through the
+    # normal ladder rather than getting a filesystem path typed into a screening
+    # box; a cover-letter file widget is never chosen either.
+    if f.widget.kind == "file" and resume_field is not None and f is resume_field:
         if resume_path:
             return PlannedField(f, binding="profile.resume_path",
                                 value=str(resume_path), driver=driver)

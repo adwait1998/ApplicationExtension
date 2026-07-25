@@ -60,7 +60,8 @@ _SELECT_PLACEHOLDER_RE = re.compile(r"select[\s.…]*$")
 # the surname. Precedence full_name > first_name > last_name, WORD-BOUNDARY so a
 # longer phrase can't be split by an inner match. These are the single owner of
 # the name keys for every ATS front-end that opts in via _name_semantic_key.
-_FULL_NAME_RE = re.compile(r"\b(full name|full legal name|first and last name|legal name)\b")
+_FULL_NAME_RE = re.compile(
+    r"\b(full name|full legal name|first (?:and|&) last name|legal name)\b")
 _FIRST_NAME_RE = re.compile(r"\b(legal first name|first name|given name)\b")
 _LAST_NAME_RE = re.compile(r"\b(legal last name|last name|surname|family name)\b")
 # A BARE 'name' text box (label just "Name"/"Full name", or the field's DOM

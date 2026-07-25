@@ -2,7 +2,7 @@ import pytest
 
 from applypilot.apply.v2 import drivers
 from applypilot.apply.v2 import ir
-from applypilot.apply.v2.resolver import PlannedField, build_element_spec
+from applypilot.apply.v2.resolver import PlannedField
 
 
 @pytest.fixture
@@ -105,7 +105,8 @@ def test_textarea_driver_truncates_to_char_limit(page):
 
 def test_file_driver_uploads_and_reads_back(page, tmp_path):
     page.set_content(_TEXT)
-    pdf = tmp_path / "r.pdf"; pdf.write_bytes(b"%PDF-1.4 x")
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF-1.4 x")
     f = _field("resume", "file", "Resume/CV", fid="rz")
     pf = PlannedField(f, value=str(pdf), driver="file")
     res = drivers.commit(page, pf)
@@ -142,6 +143,62 @@ def test_react_select_no_matching_option_not_committed(page):
     pf = PlannedField(f, option_intent="maybe someday", driver="react_select")  # no real match
     res = drivers.commit(page, pf)
     assert res.committed is False                          # never blind-types a non-option
+
+
+# --- ASYNC react-select (GH Location typeahead) — live gap #1 (Task 8) ---------
+# The react_select driver now runs the SHARED combobox dance, so an ASYNC remote-
+# options combobox (Greenhouse Location: options ~300ms after typing, a DECOY
+# first row) commits the CORRECT option with a genuine read-back — the live
+# `validation_location_persist` blocker (committed:false ×2 on Twilio). Mirrors
+# the fixture in test_location_async_combobox.
+_ASYNC_LOC = """<!doctype html><body><form onsubmit="event.preventDefault()">
+  <label for="candidate-location">Location (City)</label>
+  <div class="select__control" id="ctl">
+    <span class="select__single-value" id="chip"></span>
+    <input id="candidate-location" role="combobox" aria-invalid="true" autocomplete="off" value="">
+    <input type="hidden" id="loc_hidden" name="location" value="">
+  </div>
+  <div id="menu" role="listbox" style="display:none"></div>
+<script>
+  const input=document.getElementById('candidate-location'),menu=document.getElementById('menu'),
+        chip=document.getElementById('chip'),hidden=document.getElementById('loc_hidden');
+  const OPTIONS=["Valencia, Venezuela","San Francisco, California, United States","San Jose, California, United States"];
+  let timer=null;
+  function populate(){menu.innerHTML='';const q=input.value.trim().toLowerCase();
+    OPTIONS.filter(t=>!q||t.toLowerCase().includes(q)).forEach(text=>{
+      const o=document.createElement('div');o.setAttribute('role','option');o.className='select__option';
+      o.textContent=text;o.addEventListener('mousedown',e=>e.preventDefault());
+      o.addEventListener('click',()=>{chip.textContent=text;hidden.value=text;input.value='';
+        input.setAttribute('aria-invalid','false');menu.style.display='none';});
+      menu.appendChild(o);});
+    menu.style.display='block';}
+  input.addEventListener('input',()=>{if(timer)clearTimeout(timer);
+    menu.style.display='none';menu.innerHTML='';timer=setTimeout(populate,300);});
+  input.addEventListener('blur',()=>{if(!hidden.value)input.value='';});
+</script></form></body>"""
+
+
+def test_react_select_async_location_commits_correct_option(page):
+    # GH location arrives as a react_select with value from profile.personal.city.
+    page.set_content(_ASYNC_LOC)
+    f = _field("location", "react_select", "Location (City)", fid="candidate-location")
+    pf = PlannedField(f, value="San Francisco, California",
+                      option_intent="san francisco, california", driver="react_select")
+    res = drivers.commit(page, pf)
+    assert res.committed is True                           # async options awaited, real pick
+    assert page.locator("#loc_hidden").input_value() == "San Francisco, California, United States"
+    assert "venezuela" not in page.locator("#chip").inner_text().lower()  # never the decoy
+
+
+def test_react_select_async_location_unfilled_when_no_match(page):
+    # An intent that matches no rendered async option must report UNFILLED, never
+    # a fake commit (require_option=True — React drops free text on blur).
+    page.set_content(_ASYNC_LOC)
+    f = _field("location", "react_select", "Location (City)", fid="candidate-location")
+    pf = PlannedField(f, value="Atlantis", option_intent="atlantis", driver="react_select")
+    res = drivers.commit(page, pf)
+    assert res.committed is False
+    assert page.locator("#loc_hidden").input_value() == ""
 
 
 # --- radio_group / checkbox / date drivers (close the Task 6 registry gap) -----

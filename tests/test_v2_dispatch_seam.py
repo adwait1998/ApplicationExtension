@@ -119,6 +119,38 @@ def test_v2_greenhouse_vanity_ghjid_gate():
     assert not launcher._is_greenhouse({"url": "https://example.com/apply"})
 
 
+def test_dispatch_gate_uses_v2_supported_ats_not_is_greenhouse(monkeypatch):
+    # PIN the ACTUAL gate call site in _dispatch_apply_v2_aware to _v2_supported_ats
+    # (Task 8 carryover). With the ATS allowlist opened to Lever, an allowlisted
+    # Lever job MUST route to v2. A silent revert to the Greenhouse-only
+    # _is_greenhouse would send it to LEGACY and fail this test.
+    monkeypatch.setenv("APPLYPILOT_V2_ENGINE", "1")
+    monkeypatch.setenv("APPLYPILOT_V2_ATS", "greenhouse,lever")
+    calls = {"v2": 0, "legacy": 0}
+    launcher._dispatch_apply_v2_aware(
+        job={"application_url": "https://jobs.lever.co/acme/jid", "url": "u"},
+        page=object(), conn=object(), company="acme", operator=None,
+        broker=object(), identity_id="id1", browser_stream=object(), dry_run=False,
+        verify_threshold=0.75,
+        run_form_compiler_fn=lambda **k: (calls.__setitem__("v2", 1),
+                                          ("applied", 1, {"ats": "lever"}))[1],
+        legacy_dispatch_fn=lambda **k: (calls.__setitem__("legacy", 1),
+                                        ("applied", 1, {"tier_used": "legacy_llm"}))[1])
+    assert calls["v2"] == 1 and calls["legacy"] == 0   # allowlisted Lever -> v2
+
+
+def test_worker_loop_gate_call_site_is_v2_supported_ats():
+    # PIN the SECOND literal gate call site: worker_loop builds the v2
+    # operator/conn only when _v2_supported_ats(job) is true. The worker loop is
+    # not unit-drivable end-to-end, so pin the exact call-site expression against a
+    # silent revert to _is_greenhouse (which would drop Ashby/Lever support and
+    # desync the two gates).
+    import inspect
+    src = inspect.getsource(launcher.worker_loop)
+    assert "_v2_gate = _v2_supported_ats(job)" in src
+    assert "_is_greenhouse" not in src                 # the Greenhouse-only alias never gates here
+
+
 def test_v2_tier_used_setdefault_does_not_clobber(monkeypatch):
     # The wrapper labels v2 results but must NOT overwrite a tier the engine
     # already set (setdefault, not assignment) — the A/B tier is authoritative.
@@ -477,14 +509,28 @@ def test_production_fn_releases_intent_on_probe_terminal(monkeypatch, terminal):
 
 
 def test_is_v2_probe_terminal_classifier():
+    # EXPLICIT enum of provably-pre-submit preflight terminals (Task 8 hardening).
     assert launcher._is_v2_probe_terminal("captcha")
     assert launcher._is_v2_probe_terminal("login_issue")
     assert launcher._is_v2_probe_terminal("failed:expired")
-    assert launcher._is_v2_probe_terminal("failed:anything")
     # Non-probe v2 terminals reconcile via _reconcile_v2_ledger, not the release.
     assert not launcher._is_v2_probe_terminal("applied")
     assert not launcher._is_v2_probe_terminal("needs_review:v2_incomplete_required")
     assert not launcher._is_v2_probe_terminal("")
+
+
+def test_is_v2_probe_terminal_rejects_unknown_failed_star():
+    # ADVERSARIAL (the carryover): a future post-submit `failed:*` status must NOT
+    # be treated as pre-submit — releasing its INTENT could mask a fired submit and
+    # allow a double-submit. Only the enumerated `failed:expired` is pre-submit; any
+    # OTHER `failed:*` falls through to _reconcile_v2_ledger and dangles by design.
+    assert not launcher._is_v2_probe_terminal("failed:anything")
+    assert not launcher._is_v2_probe_terminal("failed:post_submit_network_error")
+    assert not launcher._is_v2_probe_terminal("failed:unverified_submission")
+    assert not launcher._is_v2_probe_terminal("failed:unknown")
+    # And the enum is exactly the preflight's pre-submit vocabulary (preflight.py).
+    assert launcher._V2_PROBE_TERMINALS == frozenset(
+        {"captcha", "login_issue", "failed:expired"})
 
 
 # ===========================================================================
