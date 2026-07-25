@@ -237,7 +237,7 @@ def test_stream_executor_checks_label_proxy_checkbox(page):
     assert page.locator("#terms").is_checked() is True
 
 
-def test_stream_executor_guards_submit_until_required_fields_complete(page):
+def test_stream_executor_guards_submit_until_required_fields_complete(page, tmp_path: Path):
     submit_id = _control_id(page, "Submit application")
 
     blocked = execute_stream_actions_on_page(
@@ -249,7 +249,34 @@ def test_stream_executor_guards_submit_until_required_fields_complete(page):
     assert blocked["ok"] is False
     assert "submit_guard_required_missing" in blocked["results"][0]["message"]
 
+    # Resume must be attached too — the pre-submit interlock refuses a final
+    # submit on a form that has a file control while resume_present is False.
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4\n")
+
     allowed = execute_stream_actions_on_page(
+        page,
+        [
+            {"action": "fill", "label": "First name", "value": "Nida"},
+            {"action": "fill", "label": "Email", "value": "nida@example.com"},
+            {"action": "select", "label": "Level", "value": "Senior"},
+            {"action": "select", "label": "Country", "value": "United States"},
+            {"action": "upload", "label": "Resume", "value": str(resume)},
+            {"action": "submit", "selector": "#submit"},
+        ],
+        allow_submit=True,
+    )
+
+    assert allowed["ok"] is True
+    assert "Thank you for applying" in allowed["observation"]["page_text_sample"]
+
+
+def test_stream_executor_refuses_final_submit_when_resume_missing(page):
+    # Pre-submit attachment interlock (live attempt #5, 2026-07-24): all other
+    # required fields are satisfied and client-side validation passes, but the
+    # form has a file control and no resume is attached -> refuse rather than
+    # fire a submit the ATS server will reject for a missing attachment.
+    result = execute_stream_actions_on_page(
         page,
         [
             {"action": "fill", "label": "First name", "value": "Nida"},
@@ -261,8 +288,190 @@ def test_stream_executor_guards_submit_until_required_fields_complete(page):
         allow_submit=True,
     )
 
-    assert allowed["ok"] is True
-    assert "Thank you for applying" in allowed["observation"]["page_text_sample"]
+    assert result["ok"] is False
+    assert result["results"][-1]["message"] == "submit_refused_resume_missing"
+    # The submit was never dispatched (onsubmit would set this dataset flag).
+    assert page.evaluate("document.body.dataset.submitted") is None
+
+
+_HIDDEN_RESUME_FORM = """
+<!doctype html>
+<html><body>
+  <label for="resume">Resume/CV *</label>
+  <input id="resume" name="resume" type="file" style="opacity:0; width:0; height:0"
+         onchange="document.getElementById('chip').textContent = this.files.length ? this.files[0].name : '';">
+  <div id="chip"></div>
+  <button id="submit" type="submit">Submit application</button>
+</body></html>
+"""
+
+
+def test_reattach_resume_uploads_and_confirms_chip(page, tmp_path: Path):
+    # Greenhouse-shaped: the real file input is visually hidden and an attachment
+    # "chip" (the filename) renders on upload. reattach_resume must upload via
+    # the shared helper and read back the registered attachment.
+    page.set_content(_HIDDEN_RESUME_FORM)
+    resume = tmp_path / "Nida_Shah_Resume.pdf"
+    resume.write_bytes(b"%PDF-1.4\n")
+
+    result = execute_stream_actions_on_page(
+        page,
+        [{"action": "reattach_resume", "value": str(resume)}],
+    )
+
+    assert result["ok"] is True
+    res0 = result["results"][0]
+    assert res0["ok"] is True
+    assert res0["message"] == "ok"
+    assert page.locator("#resume").evaluate("el => el.files[0].name") == "Nida_Shah_Resume.pdf"
+    assert ".pdf" in page.locator("#chip").inner_text().lower()
+    assert result["observation"]["resume_present"] is True
+
+
+def test_reattach_resume_without_file_input_fails_structurally(page, tmp_path: Path):
+    page.set_content(
+        "<!doctype html><html><body>"
+        "<label for='x'>Name</label><input id='x' name='name'>"
+        "<button id='submit' type='submit'>Submit application</button>"
+        "</body></html>"
+    )
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4\n")
+
+    result = execute_stream_actions_on_page(
+        page,
+        [{"action": "reattach_resume", "value": str(resume)}],
+    )
+
+    assert result["ok"] is False
+    assert result["results"][0]["message"] == "reattach_no_file_input"
+
+
+def test_reattach_resume_missing_path_fails_structurally(page):
+    page.set_content(_HIDDEN_RESUME_FORM)
+
+    result = execute_stream_actions_on_page(
+        page,
+        [{"action": "reattach_resume"}],
+    )
+
+    assert result["ok"] is False
+    assert result["results"][0]["message"] == "missing_file_path"
+
+
+def test_reattach_resume_found_but_upload_fails_is_distinct(page, tmp_path: Path):
+    # A resume input IS present but the upload raises (nonexistent file path):
+    # the reason must be reattach_upload_failed, NOT reattach_no_file_input, so
+    # the agent knows the field exists and can retry rather than give up.
+    page.set_content(_HIDDEN_RESUME_FORM)
+    missing = tmp_path / "does_not_exist.pdf"  # never written
+
+    result = execute_stream_actions_on_page(
+        page,
+        [{"action": "reattach_resume", "value": str(missing)}],
+    )
+
+    assert result["ok"] is False
+    assert result["results"][0]["message"] == "reattach_upload_failed"
+
+
+_RESUME_PLUS_COVER_FORM = """
+<!doctype html>
+<html><body>
+  <form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'; document.body.innerHTML='<p>Thank you for applying</p>';">
+    <label for="first">First name *</label>
+    <input id="first" name="first_name" required>
+    <label for="email">Email *</label>
+    <input id="email" name="email" type="email" required>
+    <label for="resume">Resume/CV *</label>
+    <input id="resume" name="resume" type="file">
+    <label for="cover">Cover Letter (optional)</label>
+    <input id="cover" name="cover_letter" type="file">
+    <button id="submit" type="submit">Submit application</button>
+  </form>
+</body></html>
+"""
+
+
+def test_interlock_allows_submit_with_resume_attached_and_empty_cover_letter(page, tmp_path: Path):
+    # (a) Resume attached, Cover Letter file input present but EMPTY -> the empty
+    # optional cover-letter upload must NOT cause a false refusal.
+    page.set_content(_RESUME_PLUS_COVER_FORM)
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4\n")
+
+    result = execute_stream_actions_on_page(
+        page,
+        [
+            {"action": "fill", "label": "First name", "value": "Nida"},
+            {"action": "fill", "label": "Email", "value": "nida@example.com"},
+            {"action": "upload", "label": "Resume/CV", "value": str(resume)},
+            {"action": "submit", "selector": "#submit"},
+        ],
+        allow_submit=True,
+    )
+
+    assert result["ok"] is True
+    assert "Thank you for applying" in result["observation"]["page_text_sample"]
+
+
+_COVER_ONLY_FORM = """
+<!doctype html>
+<html><body>
+  <form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'; document.body.innerHTML='<p>Thank you for applying</p>';">
+    <label for="name">Full name *</label>
+    <input id="name" name="name" required>
+    <label for="cover">Cover Letter (optional)</label>
+    <input id="cover" name="cover_letter" type="file">
+    <button id="submit" type="submit">Submit application</button>
+  </form>
+</body></html>
+"""
+
+
+def test_interlock_ignores_form_with_only_cover_letter_file_input(page):
+    # (b) The ONLY file input is a cover letter (no resume field). The interlock
+    # is not applicable -> submit proceeds even though resume_present is False.
+    page.set_content(_COVER_ONLY_FORM)
+
+    result = execute_stream_actions_on_page(
+        page,
+        [
+            {"action": "fill", "label": "Full name", "value": "Nida Shah"},
+            {"action": "submit", "selector": "#submit"},
+        ],
+        allow_submit=True,
+    )
+
+    assert result["ok"] is True
+    assert "Thank you for applying" in result["observation"]["page_text_sample"]
+
+
+def test_interlock_exempts_nonfinal_continue_button(page):
+    # A submit action aimed at a mislabeled intermediate "Continue" button must
+    # not be refused for a missing resume (mirrors _submission_guard's exemption).
+    page.set_content(
+        """
+        <!doctype html>
+        <html><body>
+          <label for="name">Full name *</label>
+          <input id="name" name="name">
+          <label for="resume">Resume/CV *</label>
+          <input id="resume" name="resume" type="file">
+          <button id="cont" type="button" onclick="document.body.dataset.cont='yes'">Continue</button>
+        </body></html>
+        """
+    )
+
+    result = execute_stream_actions_on_page(
+        page,
+        [{"action": "submit", "label": "Continue"}],
+        allow_submit=True,
+    )
+
+    assert result["ok"] is True
+    assert result["results"][0]["message"] != "submit_refused_resume_missing"
+    assert page.evaluate("document.body.dataset.cont") == "yes"
 
 
 def test_stream_executor_refuses_submit_without_allow_submit(page):

@@ -83,6 +83,34 @@ def is_submit_request(method: str, url: str) -> bool:
     return bool(_SUBMIT_HINT.search(url or ""))
 
 
+def ats_mutation_telemetry_row(method: str, url: str, *, ticket_open: bool) -> dict[str, Any] | None:
+    """Pure decision for passive submit-endpoint capture (live attempt #5).
+
+    On 2026-07-24 a submit POST fired but `is_submit_request` returned False, so
+    the one-shot broker ticket was never consumed — the real Greenhouse submit
+    path is not covered by `_SUBMIT_HINT`. This returns a `{method, url, ts}`
+    row (url = PATH ONLY, no query) for a mutating, non-safe request to a known
+    ATS host that slips through while a submit ticket is OPEN yet is NOT
+    submit-shaped — i.e. a candidate for the real submit endpoint we're missing.
+    Returns None for everything else. Telemetry only; drives no behavior."""
+    if not ticket_open:
+        return None
+    if (method or "").upper() not in _MUTATION_METHODS:
+        return None
+    host = _request_host(url)
+    if _SAFE_MUTATION_HOSTS.search(host):
+        return None
+    if not _ATS_HOST_RE.search(host):
+        return None
+    if is_submit_request(method, url):
+        return None
+    return {
+        "method": (method or "").upper(),
+        "url": urlparse(url or "").path,
+        "ts": time.time(),
+    }
+
+
 @dataclass
 class ControlObservation:
     control_id: str = ""
@@ -707,6 +735,12 @@ class BrowserStateStream:
                 # was then refused (live bug 2026-07-24).
                 if open_ and is_submit_request(req.method, req.url):
                     self.broker.consume(self.identity_id)
+                elif open_:
+                    # Passive submit-endpoint capture: a mutating ATS request
+                    # slipping through while the ticket is open but NOT matching
+                    # is_submit_request is a candidate for the real (uncovered)
+                    # submit path. Log it so the next run can extend _SUBMIT_HINT.
+                    self._record_ats_mutation(req.method, req.url)
                 route.continue_()
 
             _routed: set[int] = set()
@@ -754,6 +788,24 @@ class BrowserStateStream:
                     pw.stop()
             except Exception:
                 pass
+
+    def _record_ats_mutation(self, method: str, url: str) -> None:
+        """Append one telemetry line for a non-submit ATS mutation seen while a
+        ticket is open (submit-endpoint capture, live attempt #5). Bounded: the
+        pure decision fires only for non-safe ATS-host mutations, and this is
+        only reached while a ticket is open — low volume. Never raises."""
+        row = ats_mutation_telemetry_row(method, url, ticket_open=True)
+        if not row:
+            return
+        try:
+            from applypilot import config
+
+            path = config.LOG_DIR / f"ats_mutations_{self.cdp_port}.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception:
+            log.debug("ats mutation telemetry write failed", exc_info=True)
 
     def _publish(self, obs: BrowserObservation, *, force: bool = False) -> None:
         signature = _observation_signature(obs)

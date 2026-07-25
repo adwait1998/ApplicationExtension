@@ -104,6 +104,13 @@ def build_server(cdp_port: int, dry_run: bool = False,
         {"action":"fill","control_id":"f0:control:0:...","value":"Ada"}
         {"action":"select","label":"Country *","value":"United States"}
         {"action":"submit","control_id":"...","allow_submit":true}
+        {"action":"reattach_resume","value":"/path/to/Resume.pdf"}
+
+        reattach_resume re-uploads the resume PDF to the form's file input and
+        confirms the attachment registered (returns ok, or reattach_no_file_input
+        / reattach_readback_failed). Use it when stream_latest shows
+        resume_present=false, or after a submit is refused with
+        submit_refused_resume_missing.
         """
         from applypilot.apply.stream_executor import effective_allow_submit
 
