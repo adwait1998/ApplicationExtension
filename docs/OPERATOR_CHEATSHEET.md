@@ -275,7 +275,7 @@ legacy path before a submit fires. Status: **Phases 0–3 complete + verified @ 
 $env:APPLYPILOT_V2_ENGINE = "1"     # also accepts true / yes / on (case-insensitive)
 ```
 - Read fresh on every dispatch (`launcher._v2_enabled`) — no restart needed, flip it and the next job picks it up.
-- Only routes when BOTH the flag is on AND the job is Greenhouse (`launcher._is_greenhouse`) — Lever/Ashby/Workday/LinkedIn always run the legacy path regardless of the flag.
+- Only routes when BOTH the flag is on AND the job's ATS passes the per-ATS gate (`launcher._v2_supported_ats`). Default (no `APPLYPILOT_V2_ATS` set) = **Greenhouse only**, byte-identical to Phase 3. Set `APPLYPILOT_V2_ATS=greenhouse,ashby,lever` (comma allowlist) to widen the v2 shadow to the Phase-4A front-ends. Workday/LinkedIn/unknown ATSes always run the legacy path regardless of both flags.
 - Unset (default): byte-for-byte legacy passthrough — the v2 closure is built but never invoked.
 
 Turn it back off:

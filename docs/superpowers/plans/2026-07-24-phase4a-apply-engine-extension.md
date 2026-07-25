@@ -2014,3 +2014,17 @@ semantic key to the taxonomy with matcher precedence ABOVE first_name/last_name
 text input when no separate first/last inputs exist on the form), resolved from
 `profile.personal.full_name` verbatim. Pin with tests for both the Ashby and
 Lever name-field shapes.
+
+## Task 8/9 review-carryover items (from Task 7 READY review)
+- IMPORTANT: `_is_v2_probe_terminal` treats any `failed:*` as provably-pre-submit by
+  naming convention. Harden to an explicit enum of known pre-submit terminals
+  (currently only failed:expired) so a future post-submit failed:* can never
+  silently release an INTENT that should dangle. Add the adversarial test.
+- IMPORTANT: pin the two literal gate call sites (`_dispatch_apply_v2_aware`,
+  worker_loop `_v2_gate`) with tests exercising the actual call sites, so a
+  silent revert to `_is_greenhouse` is caught.
+- NIT: `_FULL_NAME_RE` misses "first & last name" (ampersand variant) — falls to
+  last_name and reproduces the bug; add the variant + test.
+- NIT: registry-miss path in `_default_parse` lacks a dedicated regression test.
+- NIT: frontend_lever duplicates ATS-neutral helpers instead of importing from
+  frontend_greenhouse (asymmetry vs frontend_ashby) — cleanup candidate.
