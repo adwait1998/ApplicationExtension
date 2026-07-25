@@ -1,0 +1,155 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application",
+  "captured_at": "2026-07-25T02:30:19.411603+00:00",
+  "page_text_sample": "Senior / Staff Fullstack Engineer Location Europe Employment Type Full time Location Type Remote Department Product Overview Application Autofill from resume Upload your resume here to autofill key application fields. Upload file Contact Details Name Email Resume Upload File or drag and drop here Cover letter Tell us why you want to join our team! Links Github Please provide your GitHub username. We'll need this info to host final interview rounds. LinkedIn Please provide the link to your LinkedIn profile. Twitter Please provide the link to your Twitter profile. Location Are you based in a EU or equivalent timezone? Yes No What country are you based in? Notice Period What is your expected notice period? Tell us more We would like to learn more about your motivations, interests, and strengths. Please answer each question in 500 words or less. What would you want to work on? Tell us about the features you would want to implement in your first month. Tell us of a time you had to put your PM hat on to solve a complex product problem. What are you extremely good at? What could you teach the team? Submit Application Powered by Privacy PolicySecurityVulnerability Disclosure\nprotected by reCAPTCHA",
+  "counts": {
+    "controls": 13,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Cover letter",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\31 ed7df4b-e6d4-484e-92c3-4a5f5e07fd0c",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Github",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\31 c843a13-4fe3-43df-afcf-37a69d88591b",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "LinkedIn",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#ca5c9d78-ec13-4bf2-86b8-bce6ff32e45e",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Twitter",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\32 165840e-d858-4ff0-ad26-bd48832fe3a7",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "What country are you based in?",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#b617d074-3a16-46ec-bb02-550e30cb0e50",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Notice Period",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#ce587bdf-31fa-4768-9e92-7741b7ad2317",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "What would you want to work on? Tell us about the features you would want to implement in your first month.",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\37 d3da580-9e6d-494f-a63b-0a889e0a157a",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "Tell us of a time you had to put your PM hat on to solve a complex product problem.",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#e8a6b6ee-0550-4c69-85ab-05bd9b26c702",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    },
+    {
+      "label": "What are you extremely good at? What could you teach the team?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#c4b19ee4-d084-47fa-89df-ca00e63a7721",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff/application"
+    }
+  ],
+  "validation_errors": []
+}

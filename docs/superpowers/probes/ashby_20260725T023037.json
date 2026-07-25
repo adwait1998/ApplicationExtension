@@ -1,0 +1,125 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application",
+  "captured_at": "2026-07-25T02:30:37.069937+00:00",
+  "page_text_sample": "Product Support Specialist, Pacific/Mountain Time Location North America Employment Type Full time Location Type Remote Department GTM Overview Application Autofill from resume Upload your resume here to autofill key application fields. Upload file Name Email Resume Upload File or drag and drop here Location City, State, Country Why Linear? Role Specific Questions This is a highly competitive role. Please take some time to answer the following questions to help determine a potential fit. We’re looking for no more than 1-2 paragraphs for each question. How would you prioritize and share user feedback and pain points from across multiple channels (email, Slack, and X) to Linear’s Product team? Please provide examples of relevant cross-functional project work you've done. Links LinkedIn Please provide your LinkedIn profile link. X/Twitter Github or personal website Submit Application Powered by Privacy PolicySecurityVulnerability Disclosure\nprotected by reCAPTCHA",
+  "counts": {
+    "controls": 10,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "Why Linear?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#e5e33a6e-c4eb-4611-ba37-407ccebc8b08",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "How would you prioritize and share user feedback and pain points from across multiple channels (email, Slack, and X) to Linear’s Product team?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\34 8810ff4-a873-436f-a193-f48b00f4397c",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "Please provide examples of relevant cross-functional project work you've done.",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\30 7a89abc-028e-486c-8e2b-10bb12b1f410",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "LinkedIn",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\33 cbad04e-9006-4fcb-9d8d-6ad50b3298e9",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "X/Twitter",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#de1a00cd-ceba-4002-8cbf-d98e16362de3",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    },
+    {
+      "label": "Github or personal website",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\30 c454bbc-8db0-42a7-a9e6-c5b991968988",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/d062065e-05bb-42ce-a430-ec205695cc2e/application"
+    }
+  ],
+  "validation_errors": []
+}

@@ -1,0 +1,105 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application",
+  "captured_at": "2026-07-25T02:30:42.917124+00:00",
+  "page_text_sample": "Account Executive, Startups Location North America Employment Type Full time Location Type Remote Department GTM Overview Application Autofill from resume Upload your resume here to autofill key application fields. Upload file Name Email Resume Upload File or drag and drop here Why Linear? This is a highly competitive role. Please take some time to answer the following questions to help determine a potential fit. We’re looking for no more than a few sentences for each question. Why do you think Linear is poised to succeed in the market today? What challenges would you expect to encounter selling Linear? Do you have 3+ years of experience selling a SaaS product to technical personas? Yes No Links LinkedIn profile Please provide a link to your LinkedIn profile. Twitter handle Please provide a link to your Twitter profile. Location Are you based in a US or EU equivalent timezone? Yes No What country are you based in? Submit Application Powered by Privacy PolicySecurityVulnerability Disclosure\nprotected by reCAPTCHA",
+  "counts": {
+    "controls": 8,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    },
+    {
+      "label": "Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    },
+    {
+      "label": "Why Linear?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\38 ba81727-339e-45a7-b335-8da578788fc2",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    },
+    {
+      "label": "LinkedIn profile",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\30 8836a37-5a31-4e75-a4f3-a7044f6786a2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    },
+    {
+      "label": "Twitter handle",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#da97dada-a244-400d-941c-86b869b46b0d",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    },
+    {
+      "label": "What country are you based in?",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\37 4c899d1-efee-492f-9061-3bb71bff1a49",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/linear/c21af93e-210f-4969-8eaa-90fb16a5b720/application"
+    }
+  ],
+  "validation_errors": []
+}
