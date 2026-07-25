@@ -6,6 +6,7 @@ Playwright MCP for a browser_snapshot element ref.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -246,7 +247,7 @@ def _execute_one(page, raw: dict[str, Any], *, allow_submit: bool, timeout_ms: i
         # for a missing attachment. Refuse the doomed submit so the agent can
         # reattach (action=reattach_resume) and retry, instead of burning the
         # one-shot submit on a form the server will reject.
-        if _resume_missing_on_form(obs, page):
+        if _resume_missing_on_form(obs, page, control=control):
             return StreamActionResult(False, action, target, "submit_refused_resume_missing", control_id=control.control_id)
 
     value = raw.get("value")
@@ -521,21 +522,43 @@ def _click_visible_option(page, value: str, *, timeout_ms: int) -> bool:
     return False
 
 
-def _resume_missing_on_form(obs: BrowserObservation, page=None) -> bool:
+# A file control is treated as the RESUME field only when its selector/label/name
+# names resume/cv/curriculum-vitae. Scoping matters: an unscoped
+# `control_type == "file"` match false-refuses a submit-ready form that merely has
+# an optional empty Cover Letter / portfolio upload (mirrors the reasoning in
+# resume_attach.RESUME_FILE_SELECTORS). `cv` is word-boundary matched so it does
+# not fire on "cvs", "recveiver", etc.
+_RESUME_CONTROL_RE = re.compile(r"resume|curriculum\s*vitae|\bcv\b", re.I)
+
+
+def _is_resume_file_control(control: ControlObservation) -> bool:
+    if control.control_type != "file":
+        return False
+    return bool(_RESUME_CONTROL_RE.search(f"{control.selector} {control.label}"))
+
+
+def _resume_missing_on_form(
+    obs: BrowserObservation, page=None, *, control: ControlObservation | None = None
+) -> bool:
     """True when the form expects a resume attachment but none is attached.
 
-    Signal for the pre-submit interlock. `obs.resume_present` covers a file
-    input holding a filename AND the rendered ".pdf" chip in the page text.
-    "Form expects a resume" is detected from either a file control in the
-    observation OR a resume/cv file input in the live DOM — the latter catches
-    Greenhouse, whose real `input[type=file]#resume` is often visually replaced
-    by an "Attach" widget and therefore absent from the (visible-only)
-    observation controls. Returns False when no resume input exists at all, so
-    forms with no attachment field are never blocked.
+    Signal for the pre-submit interlock. `obs.resume_present` is True when EITHER
+    a file control holds a filename OR the rendered ".pdf" chip appears in the
+    page text. "Form expects a resume" is detected from either a resume-SCOPED
+    file control in the observation OR a resume/cv file input in the live DOM —
+    the latter catches Greenhouse, whose real `input[type=file]#resume` is often
+    visually replaced by an "Attach" widget and therefore absent from the
+    (visible-only) observation controls. Both signals are scoped to resume/cv so
+    an optional empty Cover Letter / portfolio upload never triggers a refusal.
+    Returns False when no resume-scoped input exists, so forms with no resume
+    attachment field are never blocked. A control that looks like a non-final
+    Next/Continue is exempt (mirrors `_submission_guard`).
     """
+    if control is not None and _looks_nonfinal_next(control):
+        return False
     if obs.resume_present:
         return False
-    if any(c.control_type == "file" for c in obs.controls):
+    if any(_is_resume_file_control(c) for c in obs.controls):
         return True
     if page is None:
         return False
@@ -574,16 +597,22 @@ def _reattach_resume(page, raw: dict[str, Any], *, tabs, timeout_ms: int) -> Str
 
     from applypilot.apply.resume_attach import find_resume_file_input, upload_resume_to_form
 
+    found_input = False
     used_sel: str | None = None
     for frame in _safe_frames(page):
         loc, _sel = find_resume_file_input(frame)
         if loc is None:
             continue
+        found_input = True
         used_sel = upload_resume_to_form(frame, str(value), timeout_ms=timeout_ms)
         if used_sel:
             break
     if not used_sel:
-        return StreamActionResult(False, action, {}, "reattach_no_file_input")
+        # Distinguish "no resume input on the page" from "input found but the
+        # upload raised" so the agent recovers correctly instead of concluding
+        # there is nothing to attach to.
+        reason = "reattach_upload_failed" if found_input else "reattach_no_file_input"
+        return StreamActionResult(False, action, {}, reason)
 
     # Let Greenhouse re-render and register the attachment chip, then read back
     # from a fresh observation (not the possibly-detached upload locator).

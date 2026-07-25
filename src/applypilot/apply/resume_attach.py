@@ -55,19 +55,24 @@ def find_resume_file_input(root):
 def upload_resume_to_form(root, resume_pdf_path: str, *, timeout_ms: int = 2500) -> str | None:
     """Set the resume PDF on the form's resume file input.
 
-    Returns the selector that accepted the file on success, or ``None`` when no
-    resume input matched or the upload raised. Does not read back — the input
-    may be detached by a React re-render immediately after; the caller must
-    re-observe the page to confirm the attachment registered.
+    Tries each resume selector in order and, on an upload exception, falls
+    through to the NEXT matching selector (Greenhouse can present more than one
+    resume-shaped input, and the primary can be detached/hidden in a way that
+    rejects the upload). Returns the selector that accepted the file, or
+    ``None`` when no resume input matched or every attempt raised. Does not read
+    back — the input may be detached by a React re-render immediately after; the
+    caller must re-observe the page to confirm the attachment registered.
     """
     if not resume_pdf_path:
         return None
-    loc, sel = find_resume_file_input(root)
-    if loc is None:
-        return None
-    try:
-        loc.set_input_files(resume_pdf_path, timeout=timeout_ms)
-        return sel
-    except Exception as e:
-        logger.debug("resume_attach: upload via %s failed: %s", sel, e)
-        return None
+    for sel in RESUME_FILE_SELECTORS:
+        try:
+            loc = root.locator(sel).first
+            if loc.count() <= 0:
+                continue
+            loc.set_input_files(resume_pdf_path, timeout=timeout_ms)
+            return sel
+        except Exception as e:
+            logger.debug("resume_attach: upload via %s failed: %s", sel, e)
+            continue
+    return None
