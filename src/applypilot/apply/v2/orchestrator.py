@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass, field
 
 from applypilot.apply.v2 import V2_FLIGHT_ENV, V2_TIER_LABEL
-from applypilot.apply.v2 import ir, resolver
+from applypilot.apply.v2 import ir, preflight, resolver
 from applypilot.apply.v2.flight_recorder import FlightRecorder
 from applypilot.apply.v2.operator import FieldResolutionRequest, FieldSpec
 
@@ -314,6 +314,20 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
         lambda schema, profile, conn: resolver.resolve(
             schema, profile, conn=conn, resume_path=resume_path))
     url = job.get("application_url") or job.get("url") or ""
+
+    # PRE-FLIGHT PROBE (spec §6.2) — classify before spending parse budget. A
+    # terminal probe state short-circuits to a NAMED bucket-B/irreducible status
+    # (never the sentinel: these are true terminals, not fail-open-to-legacy —
+    # legacy would just re-hit the same wall). Guarded: a probe crash proceeds
+    # to parse (which fails open on its own).
+    try:
+        pr = preflight.probe(page, intended_url=url)
+    except Exception:                                # noqa: BLE001
+        pr = None
+    if pr is not None and pr.terminal:
+        ms = _ms()
+        if pr.terminal.startswith("failed:") or pr.terminal in ("captcha", "login_issue"):
+            return pr.terminal, ms, None             # worker_loop promotes these to permanent buckets
 
     # PARSE — pre-submit, safe to fail open (no submit fired).
     try:
