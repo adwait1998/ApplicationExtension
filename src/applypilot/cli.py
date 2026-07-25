@@ -1352,5 +1352,28 @@ def probe_form(
     console.print(f"Probe written to [bold]{path}[/bold]")
 
 
+@app.command("canary-parse")
+def canary_parse_cmd(
+    limit: int = typer.Option(20, "--limit", help="Live forms sampled per ATS."),
+    ats: str = typer.Option("greenhouse,ashby,lever", "--ats", help="Comma list of ATSes."),
+    min_parse_rate: float = typer.Option(0.90, "--min-parse-rate"),
+    headless: bool = typer.Option(True, "--headless/--headed"),
+) -> None:
+    """Nightly canary parse: sample live forms per ATS, parse through the v2
+    front-ends, report parse-rate + alarm on churn. Manual/cron; never submits."""
+    _bootstrap()
+    from applypilot.apply import canary_parse as cp
+    from applypilot.database import get_connection
+    conn = get_connection()
+    report = cp.run_live(conn, atses=tuple(a.strip() for a in ats.split(",") if a.strip()),
+                         limit=limit, headless=headless)
+    typer.echo(cp.format_report(report))
+    fired = cp.alarms(report, min_parse_rate=min_parse_rate)
+    if fired:
+        typer.echo(f"ALARM: parse-rate below {min_parse_rate:.0%} for: {', '.join(fired)} "
+                   f"— promote a fixture from a failing form (applypilot fixtures promote).")
+        raise typer.Exit(code=1)          # non-zero so cron/CI notices
+
+
 if __name__ == "__main__":
     app()
