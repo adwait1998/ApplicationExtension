@@ -5,8 +5,8 @@ option values are a type error, invariant 6); one retry; no browser access.
 Built over llm.get_client() so provider swap needs zero engine changes
 (acceptance #4). Spend is metered because get_client()/MeteredClient wraps it.
 
-Phase 3 implements resolve_fields fully; score/label_controls are declared for
-transport-agnosticism and stubbed (see plan Open Decisions)."""
+Phase 3 implements resolve_fields fully; Phase 4A (§6.8 degraded tier) implements
+label_controls; score stays declared for transport-agnosticism and stubbed."""
 from __future__ import annotations
 
 import json
@@ -139,8 +139,31 @@ class LLMOperator:
     def score(self, job, rubric, anchors):
         raise NotImplementedError("score is Phase 4 (compile-then-score matching)")
 
-    def label_controls(self, snapshot):
-        raise NotImplementedError("label_controls is the Phase-4 degraded tier")
+    def label_controls(self, snapshot) -> dict:
+        """Degraded tier (spec §6.8): label a batch of unlabeled controls in ONE
+        JSON call. Input: [{control_id, selector, widget_hint?, nearby_text?}, ...].
+        Output: {control_id: {label, widget}}. Best-effort — invalid JSON returns
+        {} so the caller degrades to 'unknown' fields, never crashes. Sees NO
+        canary field (the generic front-end filters those out before calling)."""
+        messages = [
+            {"role": "system", "content":
+                'Label form controls. Return ONLY JSON: {"labels":[{"control_id":str,'
+                '"label":str,"widget":"text|textarea|native_select|react_select|'
+                'radio_group|checkbox|file|date"}]}. Use the selector and nearby text.'},
+            {"role": "user", "content": json.dumps({"controls": list(snapshot)})},
+        ]
+        raw = self._json_call(messages)
+        try:
+            data = json.loads(raw)
+            out = {}
+            for item in data.get("labels", []):
+                cid = item.get("control_id")
+                if cid:
+                    out[cid] = {"label": item.get("label") or "",
+                                "widget": item.get("widget") or "text"}
+            return out
+        except Exception:                                # noqa: BLE001 — best-effort
+            return {}
 
 
 class ClaudeCLIOperator(LLMOperator):
