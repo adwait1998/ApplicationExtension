@@ -1488,3 +1488,35 @@ causes found, 5 structural fixes (4 merged + 1 in flight), 2 safety guards
 added (ticket scope, posting drift), 1 near-miss caught before harm. The form
 is now provably completable end-to-end; only attachment persistence stands
 between the pipeline and a verified submission.
+
+## Phase 4A COMPLETE (overnight 2026-07-24→25, verified)
+
+All 11 tasks implemented, adversarially reviewed where live-path-adjacent, and
+merged in one overnight session on top of the day's five live-campaign fixes.
+Task 11 verification: ALL LEGS PASSED (full suite 950 passed + 1 intentional
+skip; ruff clean; 33/33 e2e synthetic composition checks; posture greps clean).
+
+Invariants re-proven: (a) flags-off = byte-identical legacy passthrough
+(runtime-proven); (b) engine-on default = greenhouse-only, per-ATS shadow via
+APPLYPILOT_V2_ATS is independent per ATS; (c) canary keys never oracle-answered
+(resolver short-circuit + degraded tier never sends canary controls to
+label_controls); (d) zero safety-kernel construction in v2 modules; explicit
+frozenset of pre-submit probe terminals (a future post-submit failed:* can
+never release a dangling INTENT).
+
+What Phase 4A delivered: flight recorder; auto-computed cutover audit;
+preflight probe; probe-form harness + 19 committed ground-truth probes across
+12 tenants; probe-grounded Ashby + Lever front-ends (unobserved widgets =
+named terminals, never guessed); ATS routing registry + per-ATS gate;
+full_name matcher precedence (single-name-field bug killed for both shapes);
+driver long-tail hardening (combobox dance in v2 react_select, resume-rung
+custom.attach fix); capped canary-safe degraded tier; canary-parse drift
+scorer + CLI.
+
+Operational next steps: (1) next live window (judgment turn) = fresh GH job on
+legacy path, or Twilio 7985808 after multi-day cooldown — ATS-mutation
+telemetry will capture the real submit endpoint; (2) first Ashby/Lever shadow
+dry-runs via APPLYPILOT_V2_ATS=greenhouse,ashby,lever; (3) schedule
+canary-parse (cron/manual) so parse-rate churn alarms before the live queue
+feels it; (4) Phase 4B/C/D plans (matching, trust layer, queue controller)
+remain unauthored.
