@@ -1,0 +1,635 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application",
+  "captured_at": "2026-07-25T02:41:58.390433+00:00",
+  "page_text_sample": "Researcher, Robustness & Safety Training Location San Francisco Employment Type Full time Department Safety Systems Compensation $295K – $445K • Offers Equity The base pay offered may vary depending on multiple individualized factors, including market location, job-related knowledge, skills, and experience. If the role is non-exempt, overtime pay will be provided consistent with applicable laws. In addition to the salary range listed above, total compensation also includes generous equity, performance-related bonus(es) for eligible employees, and the following benefits. Medical, dental, and vision insurance for you and your family, with employer contributions to Health Savings Accounts Pre-tax accounts for Health FSA, Dependent Care FSA, and commuter expenses (parking and transit) 401(k) retirement plan with employer match Paid parental leave (up to 24 weeks for birth parents and 20 weeks for non-birthing parents), plus paid medical and caregiver leave (up to 8 weeks) Paid time off: flexible PTO for exempt employees and up to 15 days annually for non-exempt employees 13+ paid company holidays, and multiple paid coordinated company office closures throughout the year for focus and recharge, plus paid sick or safe time (1 hour per 30 hours worked, or more, as required by applicable state or local law) Mental health and wellness support Employer-paid basic life and disability coverage Annual learning and development stipend to fuel your professional growth Daily meals in our offices, and meal delivery credits as eligible Relocation support for eligible employees Additional taxable fringe benefits, such as charitable donation matching and wellness stipends, may also be provided. More details about our benefits are available to candidates during the hiring process. This role is at-will and OpenAI reserves the right to modify base pay and other compensation components at any time based on individual performance, team or company results, or market conditions. Overview Appl",
+  "counts": {
+    "controls": 61,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Phone",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#phone",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Cover Letter",
+      "role": "",
+      "control_type": "file",
+      "selector": "#cover_letter",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "What is your most significant technical achievement?",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_8963590004",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Where can we find samples of your code?",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_8963591004",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Additional Information",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_8963593004",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Are you authorized to work lawfully in the US? - Other",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_8963595004-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Are you authorized to work lawfully in the US? - No",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_8963595004-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Are you authorized to work lawfully in the US? - Yes",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_8963595004-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "When can you start a new role?",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_8963596004",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Where can we learn more about you?",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_8963597004",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Please provide an example or evidence of your exceptional ability.",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_8963598004",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Other source (indicate in Additional Information)",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Wonder Women Tech",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Underdog",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Twitter",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-3",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - The Plug - TP Insights",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-4",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Techqueria",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-5",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - OpenAI Employee",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - OpenAI Blog",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-7",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - LinkedIn",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-8",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Jopwell",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-9",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Hacker News",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-10",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Glassdoor",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-11",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - GirlGeekX",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-12",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - DiversityX",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-13",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Conference - other",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-14",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Conference - Scale Transform 2021",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-15",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Conference - NeurIPS",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-16",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Conference - ICPR",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-17",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Conference - ICML",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-18",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Conference - ICLR",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-19",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Conference - AI for Good",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-20",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - Breakout List",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-21",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How did you hear about OpenAI? - 80,000 Hours",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9220939004\\[\\]-labeled-checkbox-22",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How many years of relevant experience do you have outside internships/academia? - 7+",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9734631004-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How many years of relevant experience do you have outside internships/academia? - 5-7",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9734631004-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How many years of relevant experience do you have outside internships/academia? - 2-4",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9734631004-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "How many years of relevant experience do you have outside internships/academia? - 0-1",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_question_9734631004-labeled-radio-3",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Applicant Arbitration Agreement Acknowledgement - I acknowledge that I have opened, read, and understood the Arbitration Agreement. I understand that by submitting my application, I am agreeing to be bound by the terms of the Arbitration Agreement.",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_a90e16d2-baaf-4c31-b3e5-70b53f261040-labeled-checkbox-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "I hereby certify that I have not knowingly withheld any information that might adversely affect my chances for employment and that the answers given by me are true and correct to the best of my knowledge. I further certify that I, the undersigned applicant, have personally completed this application. I understand that, to the extent permitted by applicable law, any omission or misstatement of material fact on this application or on any document used to secure employment shall be grounds for rejection of this application or for immediate discharge if I am employed, regardless of the time elapsed before discovery. - I confirm I have read the above.",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#\\31 6e3cded-943a-4adb-8dbf-32dd48d39835_7fe82de7-a1d7-4d8a-95a5-e5cc9adc84ea-labeled-checkbox-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Gender - Male",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_gender-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Gender - Female",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_gender-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Gender - Decline to self-identify",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_gender-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - Hispanic or Latino",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - White (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - Black or African American (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-3",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - Asian (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-4",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - American Indian or Alaska Native (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-5",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - Two or More Races (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Race - Decline to self-identify",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_race-labeled-radio-7",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Veteran Status - I identify as one or more of the classifications of protected veteran listed above",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_veteran_status-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Veteran Status - I am not a protected veteran",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_veteran_status-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Veteran Status - I decline to self-identify for protected veteran status",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_veteran_status-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Disability Status - Yes, I have a disability, or have had one in the past",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_disability_status-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Disability Status - No, I don't have a disability and have not had one in the past",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_disability_status-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    },
+    {
+      "label": "Disability Status - I do not want to answer",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\31 2090e1f-b455-43ef-a3df-0410db1bce9c__systemfield_eeoc_disability_status-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/openai/2560ed50-5535-42b8-b069-9ebc28ce7493/application"
+    }
+  ],
+  "validation_errors": []
+}

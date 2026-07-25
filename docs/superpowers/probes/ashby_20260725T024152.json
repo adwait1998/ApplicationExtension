@@ -1,0 +1,205 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application",
+  "captured_at": "2026-07-25T02:41:52.233312+00:00",
+  "page_text_sample": "A/NZ Country Marketing Specialist (Contractor) Location Sydney, Australia Employment Type Contract Department Marketing Overview Application Autofill from resume Upload your resume here to autofill key application fields. Upload file Full Name Email Phone Location Resume Upload File or drag and drop here LinkedIn Profile What pronouns would you like our team to use when addressing you? He/Him She/Her They/Them Prefer not to say Not represented here We work from our offices on Mondays, Tuesdays, and Thursdays (Anchor Days). If you need an accommodation, we’ll partner with you and explore reasonable options consistent with applicable law. Are you able to commit to working from one of our offices on Anchor Days each week? Yes No Will you now or in the future require Notion to sponsor an immigration case in order to employ you? Yes No How did you hear about this opportunity? (select all that apply) LinkedIn Glassdoor Notion Blog Notion Employee Notion Website Billboard/Outdoor Ads Conference or Meetup Recruiting Privacy Policy Submit Application Powered by Privacy PolicySecurityVulnerability Disclosure\nprotected by reCAPTCHA",
+  "counts": {
+    "controls": 18,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "Full Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "Phone",
+      "role": "textbox",
+      "control_type": "tel",
+      "selector": "#\\38 039f8aa-c269-467e-bdea-dec068474224",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "LinkedIn Profile",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#dbb7e595-3d7b-4a1f-b0b6-76497b74b4cb",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "What pronouns would you like our team to use when addressing you? - He/Him",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_b0a5aba8-dbb7-41a9-b548-f72cc3e48956-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "What pronouns would you like our team to use when addressing you? - She/Her",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_b0a5aba8-dbb7-41a9-b548-f72cc3e48956-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "What pronouns would you like our team to use when addressing you? - They/Them",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_b0a5aba8-dbb7-41a9-b548-f72cc3e48956-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "What pronouns would you like our team to use when addressing you? - Prefer not to say",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_b0a5aba8-dbb7-41a9-b548-f72cc3e48956-labeled-radio-3",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "What pronouns would you like our team to use when addressing you? - Not represented here",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_b0a5aba8-dbb7-41a9-b548-f72cc3e48956-labeled-radio-4",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "How did you hear about this opportunity? (select all that apply) - LinkedIn",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_0b3b7773-f6d9-4032-9ab1-368c4164e95a-labeled-checkbox-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "How did you hear about this opportunity? (select all that apply) - Glassdoor",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_0b3b7773-f6d9-4032-9ab1-368c4164e95a-labeled-checkbox-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "How did you hear about this opportunity? (select all that apply) - Notion Blog",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_0b3b7773-f6d9-4032-9ab1-368c4164e95a-labeled-checkbox-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "How did you hear about this opportunity? (select all that apply) - Notion Employee",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_0b3b7773-f6d9-4032-9ab1-368c4164e95a-labeled-checkbox-3",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "How did you hear about this opportunity? (select all that apply) - Notion Website",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_0b3b7773-f6d9-4032-9ab1-368c4164e95a-labeled-checkbox-4",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "How did you hear about this opportunity? (select all that apply) - Billboard/Outdoor Ads",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_0b3b7773-f6d9-4032-9ab1-368c4164e95a-labeled-checkbox-5",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    },
+    {
+      "label": "How did you hear about this opportunity? (select all that apply) - Conference or Meetup",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#fabb9daf-ee83-4d1b-a88b-dae599b175e3_0b3b7773-f6d9-4032-9ab1-368c4164e95a-labeled-checkbox-6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/notion/03143d98-a561-44c6-96a5-fc9bfaf8d18d/application"
+    }
+  ],
+  "validation_errors": []
+}

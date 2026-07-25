@@ -1,0 +1,295 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application",
+  "captured_at": "2026-07-25T02:42:10.187252+00:00",
+  "page_text_sample": "Sales Development Representative, Upmarket Location New York, NY Employment Type Full time Location Type Hybrid Department Revenue Compensation Cash Range $95K – $112K • Offers Equity • This role is also eligible for medical benefits, 401(k) plan, and other company perk programs. Overview Application Autofill from resume Upload your resume here to autofill key application fields. Upload file This job has application limits Please note: To ensure that candidates select the most relevant jobs for their skills, we have set up limits for applications across roles. Candidates may not apply to more than 2 roles within 60 days. Full Name Email Resume Upload File or drag and drop here LinkedIn Profile Phone Number Check Yes or No to indicate your agreement to receive text message updates from Vanta Inc. regarding your job application. Frequency may vary. Message and data rates may apply. Reply STOP to opt out of future messaging. View our privacy policy here: Privacy Policy Yes - I consent to receiving text messages No - I do not consent to receiving text messages Current/Most Recent Company Name Current/Most Recent Job Title Location Are you legally authorized to work in the location where this role is based? Yes No Will you now or in the future require visa sponsorship? Yes No What are your pronouns? (Optional) U.S. EQUAL EMPLOYMENT OPPORTUNITY INFORMATION (Completion is voluntary and will not subject you to adverse treatment) Vanta provides equal employment and affirmative action opportunities to applicants and employees without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, protected veteran status, or disability. We invite all applicants to voluntarily self-identify their race, ethnicity, and gender. Submission of the information on this form is strictly voluntary and refusal to provide it will not subject you to any adverse treatment. Information obtained will be retained in a confidential file and separate from personnel r",
+  "counts": {
+    "controls": 27,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Full Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "LinkedIn Profile",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\34 b728746-d0b1-4c26-bdc6-2e9448185100",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Phone Number",
+      "role": "textbox",
+      "control_type": "tel",
+      "selector": "#\\33 3978498-52b3-41a7-9997-dea48dc2c864",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Check Yes or No to indicate your agreement to receive text message updates from Vanta Inc. regarding your job application. Frequency may vary. Message and data rates may apply. Reply STOP to opt out of future messaging. View our privacy policy here: Privacy Policy - Yes - I consent to receiving text messages",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label._label_1rwuy_6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Check Yes or No to indicate your agreement to receive text message updates from Vanta Inc. regarding your job application. Frequency may vary. Message and data rates may apply. Reply STOP to opt out of future messaging. View our privacy policy here: Privacy Policy - Yes - I consent to receiving text messages",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"communicationConsent\"][value=\"given\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Yes - I consent to receiving text messages - No - I do not consent to receiving text messages",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label._label_1rwuy_6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Yes - I consent to receiving text messages - No - I do not consent to receiving text messages",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"communicationConsent\"][value=\"notGiven\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Current/Most Recent Company Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#a4b8539e-9475-41dc-a284-a949fbe28936",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Current/Most Recent Job Title",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#a173ff67-d65b-4735-b14e-cfc78c7c765f",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "What are your pronouns? (Optional)",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\35 4c58d42-3b4c-4c69-92f7-9ee6c585c1e4",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Gender - Male",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_gender-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Gender - Female",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_gender-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Gender - Decline to self-identify",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_gender-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - Hispanic or Latino",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - White (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - Black or African American (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-3",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - Asian (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-4",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - American Indian or Alaska Native (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-5",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - Two or More Races (Not Hispanic or Latino)",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Race - Decline to self-identify",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_race-labeled-radio-7",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Veteran Status - I identify as one or more of the classifications of protected veteran listed above",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_veteran_status-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Veteran Status - I am not a protected veteran",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_veteran_status-labeled-radio-1",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    },
+    {
+      "label": "Veteran Status - I decline to self-identify for protected veteran status",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\34 3a7882b-dae9-4d1a-8943-3bc66fef06c3__systemfield_eeoc_veteran_status-labeled-radio-2",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/vanta/028c7d0b-73a6-431a-843b-2c0da068de1b/application"
+    }
+  ],
+  "validation_errors": []
+}

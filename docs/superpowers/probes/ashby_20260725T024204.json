@@ -1,0 +1,175 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application",
+  "captured_at": "2026-07-25T02:42:04.378434+00:00",
+  "page_text_sample": "Product Designer Location New York, NY (HQ) Employment Type Full time Location Type Hybrid Department Design Compensation Estimated Base Salary $172K – $440K • Offers Equity The final compensation will depend on the location and level at which the candidate is hired. Overview Application Autofill from resume Upload your resume here to autofill key application fields. Upload file Legal Name Email Phone Check Yes or No to indicate your agreement to receive text message updates from Ramp Business Corporation regarding your job application. Frequency may vary. Message and data rates may apply. Reply STOP to opt out of future messaging. View our privacy policy here: Privacy Policy and our terms and conditions here: Terms and Conditions Yes - I consent to receiving text messages No - I do not consent to receiving text messages LinkedIn Profile Resume Upload File or drag and drop here Website or portfolio (please share any relevant passwords) Cover Letter Upload File or drag and drop here Have you partnered with Engineers and PMs to build software products? Yes No What’s a project you’re most proud of? What does “AI-first” mean in your day-to-day workflow? We believe exceptional performance in one area is a good indication of performance in other areas. Do you have any examples of exceptional performance you want to highlight? Are you based in NYC or open to relocating to NYC? Yes No Recruiting Privacy Policy Submit Application Powered by Privacy PolicySecurityVulnerability Disclosure\nprotected by reCAPTCHA",
+  "counts": {
+    "controls": 15,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Legal Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Phone",
+      "role": "textbox",
+      "control_type": "tel",
+      "selector": "#\\31 21372a0-aedc-424d-8d19-6fd345da249e",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Check Yes or No to indicate your agreement to receive text message updates from Ramp Business Corporation regarding your job application. Frequency may vary. Message and data rates may apply. Reply STOP to opt out of future messaging. View our privacy policy here: Privacy Policy and our terms and conditions here: Terms and Conditions - Yes - I consent to receiving text messages",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label._label_1rwuy_6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Check Yes or No to indicate your agreement to receive text message updates from Ramp Business Corporation regarding your job application. Frequency may vary. Message and data rates may apply. Reply STOP to opt out of future messaging. View our privacy policy here: Privacy Policy and our terms and conditions here: Terms and Conditions - Yes - I consent to receiving text messages",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"communicationConsent\"][value=\"given\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Yes - I consent to receiving text messages - No - I do not consent to receiving text messages",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label._label_1rwuy_6",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Yes - I consent to receiving text messages - No - I do not consent to receiving text messages",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"communicationConsent\"][value=\"notGiven\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "LinkedIn Profile",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_23343518002",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Website or portfolio (please share any relevant passwords)",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#question_23343519002",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "Cover Letter",
+      "role": "",
+      "control_type": "file",
+      "selector": "#cover_letter",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "What’s a project you’re most proud of?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\36 87a4abb-d628-45ab-a6d3-f38b2f2cbfb8",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "What does “AI-first” mean in your day-to-day workflow?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\35 74cba97-bc07-4beb-bca4-7b771987f047",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    },
+    {
+      "label": "We believe exceptional performance in one area is a good indication of performance in other areas. Do you have any examples of exceptional performance you want to highlight?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\39 f5a972b-0064-4c91-b05d-a9f7d4595812",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/ramp/eca54d0e-232a-4c3e-bfcc-d6c6add393f5/application"
+    }
+  ],
+  "validation_errors": []
+}
