@@ -12,5 +12,7 @@ from __future__ import annotations
 V2_ENGINE_ENV = "APPLYPILOT_V2_ENGINE"
 V2_ATS_ENV = "APPLYPILOT_V2_ATS"         # fresh-read per-ATS allowlist (comma list); unset => greenhouse only
 V2_TIER_LABEL = "v2_greenhouse"          # written to prefill_status["tier_used"]
-V2_TIER_LABELS = {"greenhouse": "v2_greenhouse", "ashby": "v2_ashby", "lever": "v2_lever"}
+V2_TIER_DEGRADED = "v2_degraded"         # §6.8 GenericFrontend fallback tier (counted + capped)
+V2_TIER_LABELS = {"greenhouse": "v2_greenhouse", "ashby": "v2_ashby",
+                  "lever": "v2_lever", "generic": V2_TIER_DEGRADED}
 V2_FLIGHT_ENV = "APPLYPILOT_V2_FLIGHT"   # fresh-read gate; OFF => zero flight-recorder cost

@@ -30,6 +30,55 @@ from applypilot.apply.v2.operator import FieldResolutionRequest, FieldSpec
 # The dispatch seam (Task 10) reads this sentinel status to run legacy run_job.
 FALLBACK_SENTINEL = "v2_fallback_to_legacy"
 
+# --- degraded-tier per-run cap (spec §6.8, invariant 14) ------------------
+# The degraded GenericFrontend is a LAST resort (a concrete dialect zeroed out by
+# DOM churn), so it is capped per PROCESS RUN: a churn event must NOT silently
+# route the whole queue through the oracle-labeling tier. A module-level counter
+# fits the "per run" semantic (a run == one apply-batch process); override the
+# ceiling via APPLYPILOT_V2_DEGRADED_CAP (default 3).
+_DEGRADED_CAP_ENV = "APPLYPILOT_V2_DEGRADED_CAP"
+_DEGRADED_USED = 0
+
+
+def _degraded_cap() -> int:
+    try:
+        return max(0, int(os.environ.get(_DEGRADED_CAP_ENV, "3")))
+    except ValueError:
+        return 3
+
+
+def _degraded_allowed() -> bool:
+    return _DEGRADED_USED < _degraded_cap()
+
+
+def _degraded_consume() -> None:
+    global _DEGRADED_USED
+    _DEGRADED_USED += 1
+
+
+def _reset_degraded_budget() -> None:
+    """Test seam / batch-start reset: zero the per-run degraded counter."""
+    global _DEGRADED_USED
+    _DEGRADED_USED = 0
+
+
+def _degraded_parse(page, company, url, operator):
+    """ONE capped, best-effort GenericFrontend attempt (spec §6.8) after the
+    concrete front-end raised. Returns a generic FormSchema (ats='generic', stamped
+    v2_degraded downstream) or None when the per-run cap is spent OR the generic
+    parse itself fails — the caller then fails open to legacy (still pre-submit)."""
+    if not _degraded_allowed():
+        return None
+    try:
+        from applypilot.apply.browser_stream import collect_browser_observation
+        from applypilot.apply.v2 import frontend_generic
+        schema = frontend_generic.parse_observation(
+            collect_browser_observation(page), company=company, url=url, operator=operator)
+    except Exception:                                # noqa: BLE001 — degraded is best-effort
+        return None
+    _degraded_consume()
+    return schema
+
 # Post-submit page-text confirmation markers (Tier-2 DOM signal, live only).
 _CONFIRM_MARKERS = (
     "thank you for applying", "thanks for applying", "application submitted",
@@ -338,16 +387,22 @@ def run_form_compiler(*, job, page, profile, conn, company, operator,
         if pr.terminal.startswith("failed:") or pr.terminal in ("captcha", "login_issue"):
             return pr.terminal, ms, None             # worker_loop promotes these to permanent buckets
 
-    # PARSE — pre-submit, safe to fail open (no submit fired).
+    # PARSE — concrete front-end first; on a parse crash (a dialect zeroed out by
+    # DOM churn, risk §15) fall to ONE degraded GenericFrontend attempt (counted +
+    # capped, invariant 14). Both are pre-submit, so a total miss still fails open
+    # to legacy (invariant 2) — no submit has fired.
     try:
         schema = st.parse(page, company, url)
-    except Exception:                                # noqa: BLE001 — FAIL OPEN (invariant 2)
-        return FALLBACK_SENTINEL, _ms(), None
+    except Exception:                                # noqa: BLE001 — concrete parse failed
+        schema = _degraded_parse(page, company, url, operator)
+        if schema is None:                           # cap spent / generic also failed
+            return FALLBACK_SENTINEL, _ms(), None    # FAIL OPEN (invariant 2)
 
     # Stamp the REAL parsed ATS onto the telemetry (Task 7): ats + the per-ATS
-    # tier label (v2_greenhouse / v2_ashby / v2_lever) so the A/B metric buckets
-    # each front-end independently. Placed after parse — the pre-parse default is
-    # only ever seen on a None-prefill fail-open return.
+    # tier label (v2_greenhouse / v2_ashby / v2_lever); a GenericFrontend fallback
+    # maps ats='generic' -> tier_used='v2_degraded' (spec §11 weekly metric —
+    # reporting.summarize_review's by_tier buckets it for free). Placed after parse
+    # — the pre-parse default is only ever seen on a None-prefill fail-open return.
     prefill["ats"] = schema.ats
     prefill["tier_used"] = V2_TIER_LABELS.get(schema.ats, V2_TIER_LABEL)
 
