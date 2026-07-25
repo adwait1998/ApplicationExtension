@@ -29,6 +29,15 @@ from applypilot.apply.combobox import (  # noqa: F401  (re-exported)
     _norm_opt,
     select_async_combobox_option,
 )
+# Shared resume-attachment upload routine. `GH_RESUME_PRIMARY` /
+# `GH_RESUME_FALLBACK` are re-exported here so existing importers keep working;
+# `upload_resume_to_form` is the ONE upload helper shared with the stream
+# executor's reattach_resume recovery action (no duplicate upload code).
+from applypilot.apply.resume_attach import (  # noqa: F401  (GH_* re-exported)
+    GH_RESUME_FALLBACK,
+    GH_RESUME_PRIMARY,
+    upload_resume_to_form,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +50,6 @@ GH_FIELDS = [
     ("email",      "#email"),
     ("phone",      "#phone"),
 ]
-GH_RESUME_PRIMARY = "input[type='file']#resume"
-GH_RESUME_FALLBACK = "input[type='file'][name*='resume' i]"
-
 GH_PROFILE_FIELDS = [
     ("linkedin", ("input[name*='linkedin' i]", "input[id*='linkedin' i]"), ("linkedin",), "linkedin_url"),
     ("portfolio", ("input[name*='portfolio' i]", "input[id*='portfolio' i]"), ("portfolio",), "portfolio_url"),
@@ -1579,25 +1585,13 @@ def prefill_application(
                 logger.debug("prefill: failed to fill %s EEO dropdown: %s", short, e)
 
         if resume_pdf_path:
-            uploaded = False
-            for sel in (GH_RESUME_PRIMARY, GH_RESUME_FALLBACK):
-                try:
-                    file_input = root.locator(sel).first
-                    if file_input.count() <= 0:
-                        continue
-                    # set_input_files internally fires input+change events on
-                    # the input element. Greenhouse re-renders the form after
-                    # accepting the file, which can detach the original input
-                    # element — so we must NOT touch the locator after this
-                    # call (any post-upload .evaluate() will time out waiting
-                    # for the now-detached node).
-                    file_input.set_input_files(resume_pdf_path, timeout=2500)
-                    _remember(result, "resume")
-                    uploaded = True
-                    break
-                except Exception as e:
-                    logger.debug("prefill: resume upload via %s failed: %s", sel, e)
-            if not uploaded:
+            # Shared with the stream executor's reattach_resume recovery action
+            # (apply/resume_attach.py). set_input_files fires input+change and
+            # Greenhouse re-renders the form afterwards, which can detach the
+            # original input node — the helper never touches it post-upload.
+            if upload_resume_to_form(root, resume_pdf_path):
+                _remember(result, "resume")
+            else:
                 logger.debug("prefill: no resume input matched")
 
         try:
