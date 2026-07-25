@@ -1,0 +1,355 @@
+{
+  "ats": "lever",
+  "url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply",
+  "captured_at": "2026-07-25T02:41:43.315488+00:00",
+  "page_text_sample": "Product Designer - AI Agents San Francisco OfficeProduct – 13002 - Product /Permanent Full Time Employee /Hybrid SUBMIT YOUR APPLICATION Resume/CV ATTACH RESUME/CV Full name ✱ Email ✱ Phone ✱ Current location ✱ Current company ✱ LINKS LinkedIn URL ✱ Twitter URL GitHub URL Portfolio URL Other website US: PLEASE CONFIRM YOUR LEGAL WORK AUTHORIZATION STATUS Will you now or in the future require sponsorship to work for an employer in the US? ✱ Yes - I do/will require sponsorship No - I do not/will not require sponsorship, and I am authorized to work for any employer in the US If you currently require sponsorship (or will require sponsorship in the future), please include: 1. The type of visa or sponsorship you currently have (or will require in the future). 2. The timing of when you will require sponsorship. 3. Any additional information that Aircall may need to know in determining whether or not we will be able to provide sponsorship. PRONOUNS What are your pronouns? COMPENSATION What is your desired salary (annually)? If your target number includes bonuses/commissions, please specify the breakdown. HERE ARE TWO QUICK QUESTIONS FOR YOU. THERE ARE NO RIGHT ANSWERS — WE JUST WANT TO GET TO KNOW YOU BETTER! What is most exciting to you about this role? Why would we be excited to work with you? SAN FRANCISCO HYBRID ROLE This role is a hybrid role based in the Bay Area - San Francisco and requires some regular in office time. Are you comfortable with being in the office up to 2 days per week? ✱ Yes No I could do 1 day a week, but not more SAN FRANCISCO RELOCATION If you are currently residing outside of the Bay Area, are you willing to relocate for this role? Yes No U.S. EQUAL EMPLOYMENT OPPORTUNITY INFORMATION (Completion is voluntary and will not subject you to adverse treatment) Our company values diversity. To ensure that we comply with reporting requirements and to learn more about how we can increase diversity in our candidate pool, we invite you to voluntarily provid",
+  "counts": {
+    "controls": 33,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "Resume/CV ATTACH RESUME/CVCouldn't auto-read resume.Analyzing resume...Success!",
+      "role": "",
+      "control_type": "file",
+      "selector": "#resume-upload-input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Full name✱",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"name\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Email✱",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "input[name=\"email\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Phone ✱",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"phone\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Current location ✱No location found. Try entering a different locationLoading",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#location-input",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Current company ✱",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"org\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "LinkedIn URL✱",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[LinkedIn]\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Twitter URL",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[Twitter]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "GitHub URL",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[GitHub]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Portfolio URL",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[Portfolio]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Other website",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[Other]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Will you now or in the future require sponsorship to work for an employer in the US? ✱ - Yes - I do/will require sponsorship",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Will you now or in the future require sponsorship to work for an employer in the US? ✱ - Yes - I do/will require sponsorship",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"cards[d166ad30-4f0b-4277-a3f5-dc9bf799de1a][field0]\"][value=\"Yes - I do/will require sponsorship\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Yes - I do/will require sponsorship - No - I do not/will not require sponsorship, and I am authorized to work for any employer in the US",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Yes - I do/will require sponsorship - No - I do not/will not require sponsorship, and I am authorized to work for any employer in the US",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"cards[d166ad30-4f0b-4277-a3f5-dc9bf799de1a][field0]\"][value=\"No - I do not/will not require sponsorship, and I am authorized to work for any employer in the US\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "textarea[name=\"cards[d166ad30-4f0b-4277-a3f5-dc9bf799de1a][field1]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"cards[859844bf-bb0f-49bb-9090-8ef2a5cf6867][field0]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"cards[3bcbe39d-bcd3-4d6b-972e-552952658158][field0]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "textarea[name=\"cards[05c7333d-b63a-4129-ab70-b723024a00a0][field0]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "textarea[name=\"cards[05c7333d-b63a-4129-ab70-b723024a00a0][field1]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "This role is a hybrid role based in the Bay Area - San Francisco and requires some regular in office time. Are you comfortable with being in the office up to 2 days per week? ✱ - Yes",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "This role is a hybrid role based in the Bay Area - San Francisco and requires some regular in office time. Are you comfortable with being in the office up to 2 days per week? ✱ - Yes",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"cards[f67357f0-de25-436e-9157-a94d547fbe5f][field0]\"][value=\"Yes\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "This role is a hybrid role based in the Bay Area - San Francisco and requires some regular in office time. Are you comfortable with being in the office up to 2 days per week? ✱ Yes - No",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "This role is a hybrid role based in the Bay Area - San Francisco and requires some regular in office time. Are you comfortable with being in the office up to 2 days per week? ✱ Yes - No",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"cards[f67357f0-de25-436e-9157-a94d547fbe5f][field0]\"][value=\"No\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "This role is a hybrid role based in the Bay Area - San Francisco and requires some regular in office time. Are you comfortable with being in the office up to 2 days per week? ✱ Yes No - I could do 1 day a week, but not more",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "This role is a hybrid role based in the Bay Area - San Francisco and requires some regular in office time. Are you comfortable with being in the office up to 2 days per week? ✱ Yes No - I could do 1 day a week, but not more",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"cards[f67357f0-de25-436e-9157-a94d547fbe5f][field0]\"][value=\"I could do 1 day a week, but not more\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "If you are currently residing outside of the Bay Area, are you willing to relocate for this role? - Yes",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "If you are currently residing outside of the Bay Area, are you willing to relocate for this role? - Yes",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"cards[6c88010a-1af8-4811-ba17-197f0a8c7944][field0]\"][value=\"Yes\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "If you are currently residing outside of the Bay Area, are you willing to relocate for this role? Yes - No",
+      "role": "radio",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "If you are currently residing outside of the Bay Area, are you willing to relocate for this role? Yes - No",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "input[name=\"cards[6c88010a-1af8-4811-ba17-197f0a8c7944][field0]\"][value=\"No\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "GenderSelect ...MaleFemaleDecline to self-identify",
+      "role": "combobox",
+      "control_type": "select",
+      "selector": "select[name=\"eeo[gender]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "RaceSelect ...Hispanic or LatinoWhite (Not Hispanic or Latino)Black or African American (Not Hispanic or Latino)Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)Asian (Not Hispanic or Latino)American Indian or Alaska Native (Not Hispanic or Latino)Two or More Races (Not Hispanic or Latino)Decline to self-identifyHispanic or LatinoA person of Cuban, Mexican, Puerto Rican, South or Central American, or other Spanish culture or origin regardless of race.White (Not Hispanic or Latino)A person having origins in any of the original peoples of Europe, the Middle East, or North Africa.Black or African American (Not Hispanic or Latino)A person having origins in any of the black racial groups of Africa.Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)A person having origins in any of the peoples of Hawaii, Guam, Samoa, or other Pacific Islands.Asian (Not Hispanic or Latino)A person having origins in any of the original peoples of the Far East, Southeast Asia, or the Indian Subcontinent, including, for example, Cambodia, China, India, Japan, Korea, Malaysia, Pakistan, the Philippine Islands, Thailand, and Vietnam.American Indian or Alaska Native (Not Hispanic or Latino)A person having origins in any of the original peoples of North and South America (including Central America), and who maintain tribal affiliation or community attachment.Two or More Races (Not Hispanic or Latino)All persons who identify with more than one of the above five races.",
+      "role": "combobox",
+      "control_type": "select",
+      "selector": "select[name=\"eeo[race]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    },
+    {
+      "label": "Veteran statusSelect ...I am a veteranI am not a veteranDecline to self-identify",
+      "role": "combobox",
+      "control_type": "select",
+      "selector": "select[name=\"eeo[veteran]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "SUBMIT APPLICATION",
+      "role": "button",
+      "control_type": "button",
+      "selector": "#btn-submit",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/aircall/399ef97b-86e7-4454-9bdd-d3f3e03a1f8a/apply"
+    }
+  ],
+  "validation_errors": []
+}
