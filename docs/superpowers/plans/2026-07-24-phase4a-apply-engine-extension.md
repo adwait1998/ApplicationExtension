@@ -2000,3 +2000,17 @@ Summarize to the user: commits made, total new tests + pass count (+ the intenti
 - **`canary-parse` scheduling.** Recommended default: **manual/cron, NO daemon** (encoded in Task 10, spec §14). The command exits non-zero on a parse-rate alarm so a cron wrapper or CI job can notify. Wiring it into the machine's Task Scheduler (nightly) is an ops step, not code — note it in the summary and leave the schedule to the operator. Same-day fixture promotion from a flagged failing form (`fixtures promote`) is the intended remediation loop.
 
 - **Pre-flight probe scope vs the launcher's pre-CDP expired guard.** Recommended default: **keep BOTH** (Task 3). The launcher's pre-CDP guard (L3449-3457) is the cheapest possible expired short-circuit (fires before the form even loads); the in-orchestrator probe is the second line that ALSO catches login/captcha/sso once the page is up. Both share `is_greenhouse_expired_redirect`, so "expired" has one definition. Collapsing them into one site is possible but would move the expired check later (after CDP setup), losing the cheap early exit — not worth it.
+
+---
+## Task 7 addendum (from Task 5/6 probe evidence, 2026-07-24 late)
+
+MANDATORY resolver item discovered in Task 5: Ashby's single full-name field
+(`#_systemfield_name`, labels "Full Name" / "First and Last Name") is not a
+taxonomy key and can substring-match `last_name` — which on a live form would
+fill ONLY the last name into a Full Name box. Lever has the same single
+`input[name="name"]` shape. Task 7 (routing/registry) MUST add a `full_name`
+semantic key to the taxonomy with matcher precedence ABOVE first_name/last_name
+(word-boundary "full name" / "first and last name" / bare "name" on a single
+text input when no separate first/last inputs exist on the form), resolved from
+`profile.personal.full_name` verbatim. Pin with tests for both the Ashby and
+Lever name-field shapes.
