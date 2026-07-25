@@ -1520,3 +1520,27 @@ dry-runs via APPLYPILOT_V2_ATS=greenhouse,ashby,lever; (3) schedule
 canary-parse (cron/manual) so parse-rate churn alarms before the live queue
 feels it; (4) Phase 4B/C/D plans (matching, trust layer, queue controller)
 remain unauthored.
+
+### Funnel bug #6 + first Ashby v2 dispatch (2026-07-24 late)
+
+**Bug #6 (config, biggest recoverable pool of the day):** `searches.yaml` had
+NO `location:` block, so `_preapply_location_reject`'s accept list collapsed to
+profile city (San Jose) + Bay Area. Every concrete-location posting outside the
+Bay Area was parked `not_eligible_location` — including Nida's actual target
+markets. Damage quantified: 30 parked total, 26 in target markets, **24 with
+score>=8** (SF/Mountain View/Seattle/NYC Staff+Senior Product Designer roles).
+Fix: `location.accept_patterns` now encodes CA / NY / WA-metro markers; both
+polarities verified (NYC passes, Austin-onsite still rejects). DAYLIGHT
+FOLLOW-UP: judgment-pass the 24 parked target-market rows (many are weeks old —
+prune/freshness/drift guards will park the dead ones safely on dispatch);
+requeue survivors via `applypilot apply --mark-failed <url>`.
+
+**First Ashby job ever routed into v2** (permitflow NYC Staff Designer,
+approved; dry-run, APPLYPILOT_V2_ATS=greenhouse,ashby,lever): the preflight
+probe classified `captcha` in **16ms at $0** and terminated cleanly — the
+exact wall the legacy path used to discover after 350-430s of LLM burn.
+Likely Cloudflare challenging headless Chrome on jobs.ashbyhq.com; daylight
+item: retry headed / with warmed persistent profile to confirm whether Ashby
+forms are reachable at all from this rig, before investing in Ashby live
+rollout. The per-ATS gate, location fix, and probe all behaved exactly as
+designed on their first composed live-page encounter.
