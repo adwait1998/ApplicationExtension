@@ -1,0 +1,135 @@
+{
+  "ats": "ashby",
+  "url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application",
+  "captured_at": "2026-07-25T02:42:15.972011+00:00",
+  "page_text_sample": "Senior Software Engineer (Node), JavaScript SDK Location Toronto, Ontario, Canada Employment Type Full time Location Type Hybrid Department Engineering Compensation CA$200K – CA$295K • Offers Equity We're always willing to offer above our posted ranges for exceptional talent. If you feel like Sentry is the right place for you, apply and let's make it work! Overview Application Autofill from resume Upload your resume here to autofill key application fields. Upload file First and Last Name Location Email Phone number Resume Upload File or drag and drop here Cover Letter (optional) Upload File or drag and drop here LinkedIn Profile GitHub Profile URL How did you hear about this position? Our Sentaurs enjoy a hybrid work model with 3 days a week in office, and 2 days working remotely. Are you willing to join us in office on Mondays, Tuesdays and Thursdays? Yes No Will you now or in the future require visa sponsorship to work in the location where this job is posted? Yes No Are you seeking a full-time position? Yes No Have you ever used Sentry before? Yes No Why do you want to join the JavaScript SDK team at Sentry? I understand the information I submit will be used in accordance to Sentry's Applicant Privacy Policy. Applicant Privacy Policy I have read and acknowledge Sentry's Applicant Privacy Policy. Recruiting Privacy Policy Submit Application Powered by Privacy PolicySecurityVulnerability Disclosure",
+  "counts": {
+    "controls": 11,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "",
+      "role": "",
+      "control_type": "file",
+      "selector": "input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "First and Last Name",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#_systemfield_name",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "Email",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "#_systemfield_email",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "Phone number",
+      "role": "textbox",
+      "control_type": "tel",
+      "selector": "#\\35 ec706fa-e7c7-4ee1-858a-f499470f3ea4",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "Resume",
+      "role": "",
+      "control_type": "file",
+      "selector": "#_systemfield_resume",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "Cover Letter (optional)",
+      "role": "",
+      "control_type": "file",
+      "selector": "#d34f1d16-0375-43d0-a8b1-dc233040987e",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "LinkedIn Profile",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#\\38 56d7c30-7ffd-48c4-b77c-2f5274e41070",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "GitHub Profile URL",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#c5ea2304-6f6e-4f77-9ead-9bdd08dbf62f",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "How did you hear about this position?",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#e14b52ae-ef7c-48fa-8ed7-d9b650c7df16",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "Why do you want to join the JavaScript SDK team at Sentry?",
+      "role": "textbox",
+      "control_type": "textarea",
+      "selector": "#\\34 7fe4d2a-b646-4f02-9b1e-a6e5647be722",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    },
+    {
+      "label": "I understand the information I submit will be used in accordance to Sentry's Applicant Privacy Policy. - I have read and acknowledge Sentry's Applicant Privacy Policy.",
+      "role": "radio",
+      "control_type": "radio",
+      "selector": "#\\36 a9d1e54-1ff7-4147-a660-c2b41d1cca53_e83c47aa-a543-4bae-92d9-8d21f6bc3851-labeled-radio-0",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "Submit Application",
+      "role": "button",
+      "control_type": "button",
+      "selector": "button",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.ashbyhq.com/sentry/01e24f35-a936-4dd1-a700-31e872c50da8/application"
+    }
+  ],
+  "validation_errors": []
+}
