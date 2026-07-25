@@ -1455,3 +1455,36 @@ Cost today: 4 live-path runs ≈ $1.4 total, zero applications submitted, three
 merged fixes (funnel gates ×2 + ticket scope), two in flight (location,
 drift), one audit leg landed (Task 2). Every failure produced a merged or
 in-flight structural fix — this is the flywheel working as intended.
+
+### Live attempt #5 (post-reset) + STOP decision (2026-07-24 evening)
+
+Attempt #5 (all fixes merged, usage window reset) reached the true finish line:
+location held end-to-end (dance verified again), every field completed, client
+validation passed, submit clicked — and Greenhouse's SERVER rejected it
+("There was an error processing your application"). Root cause #5: the
+prefill-uploaded resume was NO LONGER ATTACHED at submit time
+(`resume_present: false` in the final observation) — the attachment does not
+survive ~4 minutes of agent long-tail interaction (JS checkbox batches,
+react-select re-renders). GH requires the attachment ⇒ server reject, no
+application created. Secondary finding: the submit POST did NOT consume the
+one-shot ticket ⇒ the real GH submit endpoint does not match `_SUBMIT_HINT` —
+needs data, not guesses. Ledger INTENT reconciled as
+`server_rejected_attempt5` (fail transition, evidence in reason).
+
+**STOP: no further live attempts on Twilio 7985808 today.** Five same-day
+attempts under Nida's real identity with repeated uploads is at the edge of
+looking like spam to the board; continuing risks the candidacy itself, which
+outranks engineering momentum. Fix-in-flight on `fix/resume-attach-persistence`
+(Opus worktree): pre-submit resume interlock (`submit_refused_resume_missing`),
+a `reattach_resume` recovery action sharing prefill's upload routine, one HARD
+RULE prompt line, and passive ATS-mutation telemetry (ticket-open, non-submit-
+shaped requests logged) so the next live run captures the real submit path for
+the hint. Validation for all of it: synthetic + dry-run only. Next live window:
+a DIFFERENT fresh job after the fix merges, or Twilio after a multi-day cool-
+down.
+
+Day ledger: 5 live-path attempts, ~$2.3, 0 applications submitted, 5 root
+causes found, 5 structural fixes (4 merged + 1 in flight), 2 safety guards
+added (ticket scope, posting drift), 1 near-miss caught before harm. The form
+is now provably completable end-to-end; only attachment persistence stands
+between the pipeline and a verified submission.
