@@ -47,11 +47,26 @@ _CUSTOM_PREFIX = "custom."
 # -> fall back to custom.*. Deliberately EXCLUDES work_auth/sponsorship/eeo.*,
 # which legitimately appear as checkboxes ("I require visa sponsorship").
 _IDENTITY_KEYS = frozenset({
-    "first_name", "last_name", "email", "phone", "location",
+    "full_name", "first_name", "last_name", "email", "phone", "location",
     "linkedin", "portfolio", "resume",
 })
 
 _SELECT_PLACEHOLDER_RE = re.compile(r"select[\s.…]*$")
+
+# --- name-field taxonomy matcher (Task 7 addendum) -------------------------
+# A single "Full Name" / "First and Last Name" box (Ashby #_systemfield_name,
+# Lever input[name="name"]) must bind the WHOLE name (personal.full_name), never
+# be hijacked by the 'last name' SUBSTRING of "first and last name" and fill only
+# the surname. Precedence full_name > first_name > last_name, WORD-BOUNDARY so a
+# longer phrase can't be split by an inner match. These are the single owner of
+# the name keys for every ATS front-end that opts in via _name_semantic_key.
+_FULL_NAME_RE = re.compile(r"\b(full name|full legal name|first and last name|legal name)\b")
+_FIRST_NAME_RE = re.compile(r"\b(legal first name|first name|given name)\b")
+_LAST_NAME_RE = re.compile(r"\b(legal last name|last name|surname|family name)\b")
+# A BARE 'name' text box (label just "Name"/"Full name", or the field's DOM
+# id/name attr is the canonical single-name handle) — used by the single-name-
+# input heuristic, gated on the form having NO separate first/last inputs.
+_BARE_NAME_LABEL_RE = re.compile(r"^(full\s+)?name[\s:*]*$")
 
 
 def _norm(s: str | None) -> str:
@@ -66,6 +81,51 @@ def _semantic_key(label: str, question: str) -> str | None:
         if any(n in hay for n in needles):
             return key
     return None
+
+
+def _name_semantic_key(label: str, question: str) -> str | None:
+    """Word-boundary name matcher with precedence full_name > first_name >
+    last_name (Task 7 addendum). Returns None for a non-name label so the caller
+    falls through to its own synonym table."""
+    hay = _norm(f"{label} {question}")
+    if not hay:
+        return None
+    if _FULL_NAME_RE.search(hay):
+        return "full_name"
+    if _FIRST_NAME_RE.search(hay):
+        return "first_name"
+    if _LAST_NAME_RE.search(hay):
+        return "last_name"
+    return None
+
+
+def _is_bare_name_field(f) -> bool:
+    """True when a field looks like a lone single-name box: its label is a bare
+    "Name"/"Full name", OR its real DOM id/name attribute is the canonical
+    single-name handle (Ashby #_systemfield_name, Lever input[name="name"])."""
+    if _BARE_NAME_LABEL_RE.match(_norm(f.label_text)) or _BARE_NAME_LABEL_RE.match(_norm(f.question_text)):
+        return True
+    spec = f.locator_spec or {}
+    elem_id = (spec.get("elem_id") or f.field_id or "").lower()
+    name_attr = (spec.get("name_attr") or "").lower()
+    return name_attr == "name" or elem_id in ("name", "_systemfield_name")
+
+
+def promote_full_name(fields):
+    """Single-name-input heuristic (Task 7 addendum): a lone text field that looks
+    like a bare 'name' box binds full_name ONLY when the form has no separate
+    first/last inputs — else the split fields own the name. Mutates + returns the
+    field list. Never touches a field already carrying a real (non-custom) key."""
+    if any(f.semantic_key in ("first_name", "last_name") for f in fields):
+        return fields
+    for f in fields:
+        if f.widget.kind != "text" or f.semantic_key == "full_name":
+            continue
+        if f.semantic_key is not None and not f.semantic_key.startswith(_CUSTOM_PREFIX):
+            continue
+        if _is_bare_name_field(f):
+            f.semantic_key = "full_name"
+    return fields
 
 
 def _is_checkbox_like(ctrl, kind: str) -> bool:

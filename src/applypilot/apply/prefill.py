@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 GREENHOUSE_HOSTS = ("greenhouse.io", "boards.greenhouse.io", "job-boards.greenhouse.io")
 ASHBY_HOSTS = ("ashbyhq.com", "jobs.ashbyhq.com")
+LEVER_HOSTS = ("jobs.lever.co", "lever.co")
 WORKDAY_HOSTS = ("myworkdayjobs.com",)
 GH_FIELDS = [
     ("first_name", "#first_name"),
@@ -126,6 +127,9 @@ def _detect_ats(url: str) -> str:
     for host in ASHBY_HOSTS:
         if host in lowered:
             return "ashby"
+    for host in LEVER_HOSTS:
+        if host in lowered:
+            return "lever"
     for host in WORKDAY_HOSTS:
         if host in lowered:
             return "workday"

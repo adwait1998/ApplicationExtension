@@ -36,16 +36,18 @@ from applypilot.apply.v2.frontend_greenhouse import (
     _frame_path,
     _is_checkbox_like,
     _locator_spec,
+    _name_semantic_key,
     _norm,
     _parse_selector,
+    promote_full_name,
 )
 
 # Grounded in the Ashby probes. Order: most-specific first (mirrors the
-# Greenhouse ordering note). Ashby uses a single "Full Name"/"Legal Name" field,
-# so first_name/last_name rarely fire — kept for the rare split-name tenant.
+# Greenhouse ordering note). Ashby's single "Full Name" / "First and Last Name"
+# field is keyed by the shared word-boundary name matcher (_name_semantic_key),
+# NOT this table — so first_name/last_name are intentionally absent here (the
+# matcher owns all three name keys with full_name precedence; Task 7 addendum).
 _SEMANTIC_SYNONYMS: list[tuple[str, tuple[str, ...]]] = [
-    ("first_name", ("legal first name", "first name")),
-    ("last_name", ("legal last name", "last name", "surname")),
     ("email", ("email",)),
     ("phone", ("phone", "mobile")),
     ("location", ("current location", "location", "city", "where are you based")),
@@ -103,7 +105,9 @@ def _widget_kind(ctrl) -> str:
 def _to_field(ctrl) -> ir.Field:
     label = ctrl.label or ""
     kind = _widget_kind(ctrl)
-    sem = _semantic_key(label, label)
+    # Name matcher FIRST (full_name > first_name > last_name, word-boundary), then
+    # the Ashby synonym table for everything else (Task 7 addendum).
+    sem = _name_semantic_key(label, label) or _semantic_key(label, label)
     # Checkbox identity-bleed guard (reused verbatim from Greenhouse): an
     # identity/profile key on a checkbox — e.g. "How did you hear ... - LinkedIn"
     # — is sibling-text bleed, not a real binding -> fall back to custom.*.
@@ -130,7 +134,9 @@ def parse_observation(obs, *, company: str, url: str) -> ir.FormSchema:
     No react-select inner-input suppression: the probes show no combobox and thus
     no phantom typeahead <input> to drop."""
     candidates = [c for c in obs.controls if c.visible and (c.label or c.control_id)]
-    fields = [_to_field(c) for c in candidates]
+    # Single-name-input heuristic: a lone "Name" text box with no separate
+    # first/last inputs binds full_name (Task 7 addendum).
+    fields = promote_full_name([_to_field(c) for c in candidates])
     advance = None
     if obs.submit_buttons:
         b = obs.submit_buttons[0]

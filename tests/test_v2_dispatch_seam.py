@@ -16,7 +16,6 @@ Two layers of coverage, both pure injection (no Chrome, no network):
 """
 import json
 import logging
-import os
 
 import pytest
 
@@ -460,6 +459,32 @@ def test_production_fn_leaves_intent_dangling_on_post_submit_crash(monkeypatch):
     assert status == "needs_review:v2_crashed_post_submit"
     assert ledger.confirmed == [] and ledger.failed == []
     assert ledger.has_open_intent("id1") is True       # still dangling
+
+
+@pytest.mark.parametrize("terminal", ["captcha", "login_issue", "failed:expired"])
+def test_production_fn_releases_intent_on_probe_terminal(monkeypatch, terminal):
+    # Task 7 (Task-3 dependency): the orchestrator's PRE-FLIGHT probe short-circuits
+    # BEFORE parse (captcha / login_issue / failed:*) — provably no submit fired.
+    # _reconcile_v2_ledger has no branch for these, so the recorded INTENT must be
+    # RELEASED here (intent->failed, reason 'v2_probe_terminal') or it dangles
+    # forever and blocks the next apply. The status is returned verbatim (worker_loop
+    # promotes it to a permanent bucket); legacy must NOT re-enter.
+    ledger, status = _run_production_with_status(monkeypatch, terminal)
+    assert status == terminal
+    assert ledger.failed == [("id1", "v2_probe_terminal")]
+    assert ledger.confirmed == []
+    assert ledger.has_open_intent("id1") is False
+
+
+def test_is_v2_probe_terminal_classifier():
+    assert launcher._is_v2_probe_terminal("captcha")
+    assert launcher._is_v2_probe_terminal("login_issue")
+    assert launcher._is_v2_probe_terminal("failed:expired")
+    assert launcher._is_v2_probe_terminal("failed:anything")
+    # Non-probe v2 terminals reconcile via _reconcile_v2_ledger, not the release.
+    assert not launcher._is_v2_probe_terminal("applied")
+    assert not launcher._is_v2_probe_terminal("needs_review:v2_incomplete_required")
+    assert not launcher._is_v2_probe_terminal("")
 
 
 # ===========================================================================

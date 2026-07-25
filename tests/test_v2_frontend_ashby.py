@@ -71,9 +71,9 @@ def test_ashby_parses_standard_semantic_keys(page):
     schema = _schema(page)
     assert schema.ats == "ashby"
     keys = {f.semantic_key for s in schema.steps for f in s.fields}
-    # Ashby's single "Full Name" field is not a taxonomy key (mirrors the plan's
-    # tolerance); email/resume/linkedin resolve from their labels.
-    assert {"email", "resume", "linkedin"} <= keys
+    # Ashby's single "Full Name" box now keys full_name via the shared word-boundary
+    # name matcher (Task 7 addendum); email/resume/linkedin resolve from their labels.
+    assert {"full_name", "email", "resume", "linkedin"} <= keys
 
 
 def test_ashby_eeo_gender_is_radio_group_options_lazy(page):
@@ -120,3 +120,64 @@ def test_ashby_single_terminal_step_with_submit(page):
     assert len(schema.steps) == 1 and schema.steps[0].terminal
     assert schema.steps[0].advance_control is not None
     assert schema.steps[0].advance_control["label"] == "Submit Application"
+
+
+# --------------------------------------------------------------------------
+# Task 7 addendum: full_name matcher precedence for the Ashby #_systemfield_name
+# single-name box. "First and Last Name" must NOT substring-match last_name (which
+# on a live form would fill ONLY the surname into a Full Name box); it must key
+# full_name so the resolver binds the WHOLE personal.full_name.
+
+_ASHBY_FIRST_AND_LAST_HTML = """
+<form>
+  <label for="_systemfield_name">First and Last Name</label>
+  <input id="_systemfield_name" type="text" required />
+  <label for="_systemfield_email">Email</label>
+  <input id="_systemfield_email" type="email" required />
+  <button type="submit">Submit Application</button>
+</form>
+"""
+
+
+def test_ashby_first_and_last_name_is_full_name_not_last_name(page):
+    # The exact addendum bug: "First and Last Name" contains the 'last name'
+    # substring. Precedence + word-boundary must resolve it to full_name.
+    page.set_content(_ASHBY_FIRST_AND_LAST_HTML)
+    obs = collect_browser_observation(page)
+    schema = fe.parse_observation(obs, company="acme", url="https://jobs.ashbyhq.com/acme/app")
+    by_key = {f.semantic_key: f for s in schema.steps for f in s.fields}
+    assert "full_name" in by_key
+    assert by_key["full_name"].widget.kind == "text"
+    keys = set(by_key)
+    assert "last_name" not in keys and "first_name" not in keys   # NOT split/hijacked
+
+
+def test_ashby_full_name_resolves_whole_name(page):
+    # The single Full Name box binds the WHOLE personal.full_name verbatim (Nida
+    # Shah), never a split token.
+    from applypilot.apply.v2 import resolver
+    page.set_content(_ASHBY_FIRST_AND_LAST_HTML)
+    obs = collect_browser_observation(page)
+    schema = fe.parse_observation(obs, company="acme", url="https://jobs.ashbyhq.com/acme/app")
+    profile = {"personal": {"full_name": "Nida Shah", "email": "nida@example.com"}}
+    plan = resolver.resolve(schema, profile)
+    pf = [p for p in plan.planned if p.field.semantic_key == "full_name"]
+    assert pf and pf[0].value == "Nida Shah"
+    assert pf[0].binding == "profile.personal.full_name"
+
+
+def test_ashby_bare_name_input_single_field_heuristic(page):
+    # A bare "Name" label on the lone #_systemfield_name text box (no separate
+    # first/last inputs) is promoted to full_name by the single-name-input heuristic.
+    html = """
+    <form>
+      <label for="_systemfield_name">Name</label>
+      <input id="_systemfield_name" type="text" required />
+      <button type="submit">Submit Application</button>
+    </form>
+    """
+    page.set_content(html)
+    obs = collect_browser_observation(page)
+    schema = fe.parse_observation(obs, company="acme", url="https://jobs.ashbyhq.com/acme/app")
+    keys = {f.semantic_key for s in schema.steps for f in s.fields}
+    assert "full_name" in keys
