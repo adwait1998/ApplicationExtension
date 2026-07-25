@@ -43,13 +43,26 @@ for Lever and its sleep-tax (drivers.py) does not apply — a speed win for §12
 """
 from __future__ import annotations
 
-import re
-
 from applypilot.apply.v2 import ir
 # The name keys (full_name/first_name/last_name) are owned by the shared word-
 # boundary matcher (_name_semantic_key) with full_name precedence + a single-name-
 # input heuristic (promote_full_name) — see frontend_greenhouse (Task 7 addendum).
-from applypilot.apply.v2.frontend_greenhouse import _name_semantic_key, promote_full_name
+# The ATS-NEUTRAL helpers (_norm/_custom_key/_parse_selector/_frame_path/
+# _locator_spec/_IDENTITY_KEYS) are imported from frontend_greenhouse rather than
+# re-authored — they are dialect-independent (Task 8 carryover: kills the
+# frontend_lever/frontend_ashby asymmetry). Only the Lever-SPECIFIC classifiers
+# (_semantic_key synonym table, _widget_kind native-select map, _is_checkbox_like
+# with radio coverage) stay local.
+from applypilot.apply.v2.frontend_greenhouse import (
+    _IDENTITY_KEYS,
+    _custom_key,
+    _frame_path,
+    _locator_spec,
+    _name_semantic_key,
+    _norm,
+    _parse_selector,
+    promote_full_name,
+)
 
 # Lever-tuned synonym table (grounded in the probe labels). Order matters: most-
 # specific first. The name fields are NOT in this table — _name_semantic_key owns
@@ -74,26 +87,6 @@ _SEMANTIC_SYNONYMS: list[tuple[str, tuple[str, ...]]] = [
     ("eeo.disability", ("disability",)),
 ]
 
-_CUSTOM_PREFIX = "custom."
-
-# Free-text IDENTITY/PROFILE keys that describe the applicant themselves. A
-# checkbox is NEVER one of these — a full name / email / LinkedIn URL is not a
-# boolean. When a checkbox's observation label bleeds concatenated container text
-# (a GDPR consent paragraph mentioning a name; a "How did you hear" option reading
-# 'LinkedIn'), _semantic_key substring-matches one of these and mis-keys the
-# checkbox. Guard: identity key + checkbox kind -> bleed -> fall back to custom.*.
-# Deliberately EXCLUDES work_auth/sponsorship/eeo.*, which legitimately appear as
-# checkboxes on Lever custom cards.
-_IDENTITY_KEYS = frozenset({
-    "full_name", "first_name", "last_name", "email", "phone", "location",
-    "linkedin", "portfolio", "resume",
-})
-
-
-def _norm(s: str | None) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip().lower()
-
-
 def _semantic_key(label: str, question: str) -> str | None:
     hay = _norm(f"{label} {question}")
     if not hay:
@@ -110,11 +103,6 @@ def _is_checkbox_like(ctrl, kind: str) -> bool:
     The identity-key bleed guard keys off this."""
     role = (ctrl.role or "").lower()
     return kind in ("checkbox", "radio_group") or role in ("checkbox", "radio")
-
-
-def _custom_key(question: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", _norm(question)).strip("_")[:40] or "unnamed"
-    return _CUSTOM_PREFIX + slug
 
 
 def _widget_kind(ctrl) -> str:
@@ -146,54 +134,6 @@ def _widget_kind(ctrl) -> str:
     # A widget kind NO Lever probe surfaced (e.g. a JS role="combobox" that is not
     # a native <select>). Do NOT guess a react_select/typeahead mapping.
     return "unknown"
-
-
-def _parse_selector(selector: str | None) -> tuple[str | None, str | None]:
-    """Recover a real DOM id / name attribute from the observation's CSS selector.
-    browser_stream.selectorFor emits '#<id>', 'tag[name="x"]',
-    'tag[name="x"][value="y"]', 'tag[aria-label="x"]', 'label[for="x"]', or a bare
-    tag. The synthetic control_id hash is NOT a DOM handle, so we seed the healing
-    ElementSpec from the selector instead."""
-    sel = selector or ""
-    elem_id = None
-    name_attr = None
-    if sel.startswith("#") and "[" not in sel and " " not in sel:
-        elem_id = sel[1:].replace("\\", "") or None
-    m = re.search(r'\[name="([^"]+)"\]', sel)
-    if m:
-        name_attr = m.group(1)
-    return elem_id, name_attr
-
-
-def _frame_path(ctrl) -> tuple[str, ...]:
-    """Frame chain for the field; () means the top document (ir.py Field contract).
-
-    Gate on frame DEPTH (frame_index), NOT frame_url truthiness: collect_browser_
-    observation stamps frame.url on every control including the main frame (the
-    full page URL), so gating on truthiness would give every standard single-frame
-    Lever form a non-empty frame_path and bake the per-job URL into question_fp.
-    For embedded forms (frame_index > 0) use the frame origin+path as a STABLE
-    handle, stripping the query/fragment so recurring questions share a fp."""
-    if not ctrl.frame_index or not ctrl.frame_url:
-        return ()
-    stable = ctrl.frame_url.split("?", 1)[0].split("#", 1)[0]
-    return (stable,) if stable else ()
-
-
-def _locator_spec(ctrl) -> dict:
-    """Dict that resolver.build_element_spec turns into a healing.ElementSpec.
-    Seeds label + role + real DOM id/name (recovered from the selector) plus the
-    raw selector as a CSS fallback and the frame_url for frame resolution."""
-    elem_id, name_attr = _parse_selector(ctrl.selector)
-    return {
-        "label": ctrl.label or None,
-        "name": ctrl.label or None,
-        "role": ctrl.role or None,
-        "elem_id": elem_id,
-        "name_attr": name_attr,
-        "selector": ctrl.selector or None,
-        "frame_url": ctrl.frame_url or None,
-    }
 
 
 def _to_field(ctrl) -> ir.Field:

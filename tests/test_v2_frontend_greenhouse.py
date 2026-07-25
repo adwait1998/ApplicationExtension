@@ -363,3 +363,23 @@ def test_react_select_real_input_not_suppressed(page):
              if f.widget.kind == "react_select"]
     assert len(react) == 1
     assert react[0].semantic_key == "work_auth"
+
+
+@pytest.mark.parametrize("label", [
+    "Full Name", "Full Legal Name", "First and Last Name",
+    "First & Last Name", "First and last name", "Legal Name",
+])
+def test_name_matcher_maps_full_name_variants(label):
+    # _FULL_NAME_RE must map every single-box name label to full_name so the whole
+    # personal.full_name binds. The AMPERSAND variant "First & Last Name" (Task 8
+    # carryover) previously missed -> fell to the 'last name' substring and filled
+    # only the surname; it now resolves to full_name like the 'and' spelling.
+    assert fe._name_semantic_key(label, label) == "full_name"
+
+
+def test_name_matcher_ampersand_not_hijacked_by_last_name():
+    # The exact bug: "First & Last Name" contains the 'last name' substring. The
+    # full_name precedence + the ampersand alternative must win over last_name.
+    assert fe._name_semantic_key("First & Last Name", "") == "full_name"
+    # A plain "Last Name" still keys last_name (no false-positive from the fix).
+    assert fe._name_semantic_key("Last Name", "") == "last_name"

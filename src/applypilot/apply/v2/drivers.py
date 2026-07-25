@@ -10,12 +10,12 @@ the mapping cache. When the resolver hands us a hand-built Field whose
 locator_spec is sparse (or empty), we fall the label/elem_id in from the Field's
 own attributes so heal still has stable anchors to lock onto.
 
-SPEED NOTE (Task 12 gate): the promoted react-select path is NOT sleep-free —
-prefill._commit_combobox_keyboard / _select_combobox_by_label carry ~5 fixed
-time.sleep() calls (~1.4s per react_select field). The dispatcher itself is
-sleep-free (invariant 9); this tax lives in the promoted fill path and is left
-intact here (no gold-plating). Measured cost is tracked against the §12.2 warm
-budget in Task 12.
+SPEED NOTE (Task 12 gate): the react_select path is NOT sleep-free — it runs the
+shared combobox.select_async_combobox_option dance, whose bounded async-option
+polling carries small settle sleeps + a ~700ms fast-exit window for non-async
+controls. The dispatcher itself is sleep-free (invariant 9); this tax lives in
+the promoted/shared fill path and is left intact here (no gold-plating). Measured
+cost is tracked against the §12.2 warm budget in Task 12.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ import itertools
 from dataclasses import dataclass
 from datetime import datetime
 
+from applypilot.apply.combobox import select_async_combobox_option
 from applypilot.apply.healing import heal
 from applypilot.apply.v2.resolver import build_element_spec, PlannedField
 
@@ -142,29 +143,38 @@ def _file(scope, planned: PlannedField) -> CommitResult:
 
 
 def _react_select(scope, planned: PlannedField) -> CommitResult:
-    """Lazy-enumerate at commit, map intent -> real option, portal-click then
-    keyboard fallback, read-back via _combobox_committed (invariants 4/5/6).
+    """Async-combobox dance (spec §6.6; invariants 4/5/6). Ported from the SHARED
+    combobox.select_async_combobox_option leaf so the ONE battle-tested dance
+    (proven in test_location_async_combobox) covers both react-select cases the
+    live flight surfaced:
+      * Greenhouse's Location typeahead — options fetched ASYNCHRONOUSLY (city
+        autocomplete); typing free text is dropped on blur (the live
+        `validation_location_persist` blocker: committed:false ×2 on Twilio), so
+        the dance types -> awaits the remote options -> picks the BEST-MATCHING
+        real option (never a blind ArrowDown+Enter onto an unfiltered list).
+      * plain static react-selects (work_auth/eeo yes-no) — the same click-then-
+        keyboard commit with a genuine read-back.
 
-    _select_combobox_robust folds BOTH paths: portal-click (verified via
-    _combobox_committed) and, on the desync, the keyboard commit — which itself
-    opens the dropdown, reads the REAL options (_visible_combobox_options), maps
-    the intent to a real option (_match_real_option, index-safe), and only ever
-    types a string that exists. A non-matching intent commits nothing."""
-    f = planned.field
-    needles = tuple(n for n in (f.label_text, f.question_text) if n)
+    The CommitResult is the READ-BACK selected value (chip / hidden / committed
+    text), NEVER the click result (invariant 5): select_async_combobox_option
+    returns the committed value string or None. require_option=True because a
+    react-select drops free text on blur — a control that renders NO matching
+    option is UNFILLED, reported honestly, never a fake commit. A non-matching
+    intent commits nothing (returns None)."""
     intent = (planned.option_intent or "").strip()
     if not intent:                                # optional enumerated field, no data
         return CommitResult(False, error="no_intent")
-    # The intent string is preferred[0]; the promoted code maps it to a REAL
-    # option (index-safe) so invariant 6 holds without a separate index dance.
-    ok = _select_combobox_robust(scope, needles, (intent,))
-    if not ok:
-        return CommitResult(False, error="no_matching_option")
-    # The read-back IS _combobox_committed — the real committed state, never the
-    # click result.
-    committed = _combobox_committed(scope, needles, (intent,))
-    _, tier = _locate(scope, planned)            # best-effort tier for telemetry
-    return CommitResult(bool(committed), tier)
+    loc, tier = _locate(scope, planned)
+    if loc is None:
+        return CommitResult(False, tier, "not_located")
+    # query text (what to type to trigger the options) AND preferred (matched
+    # against the REAL rendered options) are BOTH the intent — for work_auth
+    # react-selects planned.value is None, so the intent is the only signal.
+    committed = select_async_combobox_option(scope, loc, intent, (intent,),
+                                             require_option=True)
+    if committed is None:
+        return CommitResult(False, tier, "no_matching_option")
+    return CommitResult(True, tier)
 
 
 def _native_select(scope, planned: PlannedField) -> CommitResult:

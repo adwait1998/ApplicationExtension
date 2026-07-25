@@ -330,3 +330,21 @@ def test_sentinel_paths_keep_prefill_none(tmp_path):
         conn=conn, company="acme", operator=None, stages=orch.Stages(parse=_boom))
     assert status == orch.FALLBACK_SENTINEL
     assert prefill is None
+
+
+def test_default_parse_registry_miss_falls_back_to_greenhouse(monkeypatch):
+    # Registry-miss regression (Task 8 carryover): an ATS with no registered
+    # front-end (parser_for -> None) must fall back to the Greenhouse parser, never
+    # KeyError/crash. _default_parse imports its deps at call time, so patch them at
+    # their SOURCE modules.
+    from applypilot.apply.browser_stream import BrowserObservation, ControlObservation
+    import applypilot.apply.browser_stream as bs
+    import applypilot.apply.prefill as pf
+    obs = BrowserObservation(controls=[
+        ControlObservation(control_id="c1", control_type="text", selector="#c1",
+                           label="Email", visible=True)])
+    monkeypatch.setattr(bs, "collect_browser_observation", lambda page: obs)
+    monkeypatch.setattr(pf, "_detect_ats", lambda url: "no_such_ats")   # parser_for -> None
+    schema = orch._default_parse(page=object(), company="acme", url="https://x/y")
+    assert schema.ats == "greenhouse"                  # belt-and-suspenders GH fallback
+    assert any(f.semantic_key == "email" for s in schema.steps for f in s.fields)
