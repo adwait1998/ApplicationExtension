@@ -1381,3 +1381,77 @@ gap") on branch `p3-drivers-gap`, also not yet merged into this baseline.
 Neither fix is part of the `5f79378` Phase 3 baseline this iteration verifies —
 both are documented as known limitations in `docs/OPERATOR_CHEATSHEET.md` §11 and
 `CONTEXT.md` pending merge.
+
+## Iteration: first live runs of the v2 era (2026-07-24)
+
+Baseline `4168072` (all three funnel fixes merged: score-gate unknowns, preview/
+dispatch twin-dedup, flight-recorder wiring). Three runs against the live Twilio
+7985808 Lead Product Designer form, escalating dry → live-v2 → live-legacy.
+
+**Rehearsal #4 (dry, v2+flight): PASS.** The twin-dedup fix surfaced the live
+twin into dispatch (queue 1/2 → previously 0). v2 committed 8 core fields;
+flight bundle captured (31 fields, DOM, fp, phase timings). Two driver gaps
+confirmed on a real form and recorded in the Phase 4A plan Task 8: (1) GH
+location typeahead — react_select driver reaches it with a value but never
+commits (async remote options); (2) both file dropzones parse as
+`custom.attach` and the resume rung never claims them.
+
+**Live #1 (v2 on): parked pre-submit, $0, BY DESIGN.**
+`needs_review:v2_incomplete_required` is terminal — no legacy re-entry
+(launcher.py `_release_presubmit_intent`). Correct safety behavior; consequence
+is that v2 on live traffic still measures its PARK rate. v2 stays a shadow
+engine (dry-run flight capture) until Task 8 drivers + a question oracle can
+complete real forms. Live throughput runs legacy meanwhile.
+
+**Live #2 (legacy, v2 off): FAILED at submit — new failure class, real bug.**
+Legacy prefill filled 14 fields incl. location + resume + EEO in 10.6s. Haiku
+completed the long tail (how-did-you-hear checkboxes, acknowledge boxes,
+country select; GH location autocomplete fought back — picked a Venezuelan
+city once; country field cleared twice). Submit was then refused:
+`submit_refused_no_broker_ticket`. Ticket file evidence: issued correctly for
+`greenhouse:twilio:7985808`, but `consumed: true` at ~prefill time. Root
+cause: browser_stream `_guard` consumes the one-shot ticket on ANY mutating
+request to an ATS host — the prefill resume-upload POST burned it ~90s before
+the real submit. The "single submit flow per identity" assumption is false on
+real forms. The 131 historical applies predate this containment layer; today
+was its first live exposure. Fix in flight on `fix/ticket-consume-scope`:
+consume only submit-shaped requests, reusing the v2 verifier's
+`_SUBMIT_HINT`/`_NOT_SUBMIT` classification (moved into browser_stream;
+verify.py delegates — no import cycle).
+
+Failure-class ledger: `validation_submit_button_unresponsive` here was a
+misclassification — the button was fine; the broker refused. Post-fix, a
+broker refusal should classify as its own removable class, not validation_*.
+
+### Addendum: Databricks near-miss + two more fixes (2026-07-24 afternoon)
+
+**Live #3 (Twilio, post-ticket-fix): ticket SURVIVED prefill (consumed:false) —
+the consume-scope fix is verified live.** New terminal blocker isolated:
+`validation_location_persist` — GH's location react-select needs a genuine
+async option-pick; prefill's typed text doesn't persist and the agent can't
+recover with fill/select/type (also the same root cause as v2's
+react_select non-commit). Fix in flight: `fix/gh-location-typeahead` — shared
+async-combobox dance (type → await options → best-match pick, never
+blind-Enter) for prefill + stream_executor, decoy-option TDD fixture.
+
+**Live #4 (Databricks gh_jid=8429978002): NEAR-MISS — posting drift.** The URL
+was scored+approved as "Sr. Product Designer, AI/BI" (fit 8) but at apply time
+served "Engineering Manager - UI Platform" (recycled Greenhouse job id;
+embedded wrapper pages evade the redirect-based freshness guard). The pipeline
+filled the entire form for the wrong, out-of-scope (manager) role; only a
+client-side validation failure prevented submission. Consequences:
+1. New guard in flight (`fix/posting-drift-guard`): apply-time title
+   comparison (DB row vs live page) parking clear mismatches as
+   `needs_review:posting_drift` / class `expired_posting_drift` (B-bucket).
+2. Bookkeeping bug found in the same incident: `--url` runs against rows whose
+   `url != application_url` never write back apply_status (keying mismatch) —
+   fix rides in the same branch.
+3. LIVE BATCH HALTED until both guards merge. Same-day retry order after
+   merge: Twilio 7985808 (attempt #4) only; Databricks stays parked pending
+   fresh discovery/rescore of its board (its DB inventory is stale 2026-05-15
+   and at least one job id is recycled).
+
+Cost today: 4 live-path runs ≈ $1.4 total, zero applications submitted, three
+merged fixes (funnel gates ×2 + ticket scope), two in flight (location,
+drift), one audit leg landed (Task 2). Every failure produced a merged or
+in-flight structural fix — this is the flywheel working as intended.

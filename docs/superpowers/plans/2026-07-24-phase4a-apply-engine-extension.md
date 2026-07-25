@@ -1433,6 +1433,11 @@ git -c user.name="adwai" -c user.email="adwait1234@gmail.com" commit -m "v2: ATS
 
 ## Task 8: Driver long-tail from the Ashby/Lever probes (ONLY what the data shows is needed)
 
+**CONFIRMED GAPS from live flight evidence (2026-07-24, `flight/twilio_20260724T183322_235549_3ec6b4.json`, live GH form, 31 fields):**
+1. **GH location typeahead not committing.** `location` (react_select, provenance `profile.personal.city`) reached the driver with a value but `committed:false` — twice (two location widgets). The `react_select` driver's option-pick flow does not complete on Greenhouse's location autocomplete (async remote options, needs type→debounce→options-populate→pick). Either fix `react_select` for async option sources or route `location`+react_select to the existing `typeahead_location` driver.
+2. **Resume rung never reached the file widgets.** Both `file` widgets parsed as `semantic_key=custom.attach` (GH labels the dropzones "Attach") and were parked; the resolver's resume rung gated on `widget.kind=='file'` did not claim them. Verify the rung runs before parking and matches on widget kind rather than requiring a resume-ish label.
+Both are REQUIRED-field blockers on real GH forms (`v2_incomplete_required`) — fix under this task's read-back conventions even if the Ashby/Lever probes show no gap.
+
 Spec §13 Phase 4 says the driver long-tail comes from "the shadow census" — which does NOT exist (invariant 12). So this task is DATA-DRIVEN by the Task-4/5/6 probes and the FIRST shadow runs, NOT speculative: add a WidgetDriver ONLY for a widget kind the Ashby/Lever probes actually surface that the current registry (`drivers._REGISTRY`, L391-402: text/textarea/file/react_select/native_select/typeahead_location/phone_intl/radio_group/checkbox/date) cannot handle with a read-back. If the probes show the existing ten drivers cover Ashby/Lever (likely for Lever's native selects; probable for Ashby's combobox via the existing `react_select` driver), this task is a NO-OP documented as such — do not gold-plate.
 
 **Files:**
