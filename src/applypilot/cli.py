@@ -949,7 +949,7 @@ def ui(
         raise typer.Exit(1)
 
     url = f"http://{host}:{port}"
-    console.print(f"[bold]ApplyPilot dashboard[/bold] → {url}  (Ctrl+C to stop)")
+    console.print(f"[bold]ApplyPilot dashboard[/bold] -> {url}  (Ctrl+C to stop)")
     if open_browser:
         import threading
         import webbrowser
