@@ -13,6 +13,7 @@ from applypilot.apply.v2 import mapping_cache as mc
 
 # semantic_key -> profile path (dotted). Canary keys map here EXCLUSIVELY.
 _PROFILE_PATHS = {
+    "full_name": "personal.full_name",      # single-field name (Lever); bound whole
     "first_name": "personal.full_name",     # split at fill
     "last_name": "personal.full_name",
     "email": "personal.email",

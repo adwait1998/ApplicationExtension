@@ -1,0 +1,437 @@
+{
+  "ats": "lever",
+  "url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply",
+  "captured_at": "2026-07-25T02:31:02.675985+00:00",
+  "page_text_sample": "🍪 denyaccept Privacy Notice This website uses cookies to improve your web experience. By clicking Accept, you agree to the use of cookies. Analyst, Licensing Finance – FP&A New York, NYFinance – Financial Planning And Analysis /Permanent /On-Site SUBMIT YOUR APPLICATION Resume/CV ✱ ATTACH RESUME/CV Full name ✱ Pronouns He/him She/her They/them Xe/xem Ze/hir Ey/em Hir/hir Fae/faer Hu/hu Use name only Custom Let the employer know what pronouns you use so that they can address you correctly. Email ✱ Phone ✱ Current location ✱ Current company ✱ LINKS LinkedIn URL GitHub URL Portfolio URL Other website PREVIOUS SPOTIFY EMPLOYMENT Have you ever been previously employed by Spotify? ✱ No Yes - Intern Yes - Full Time Employment DEMOGRAPHIC SURVEY What is your location? Select... Afghanistan Albania Algeria American Samoa Andorra Angola Anguilla Antarctica Antigua and Barbuda Argentina Armenia Aruba Australia Austria Azerbaijan Bahamas Bahrain Bangladesh Barbados Belarus Belgium Belize Benin Bermuda Bhutan Bolivia Bonaire, Sint Eustatius and Saba Bosnia and Herzegovina Botswana Bouvet Island Brazil British Indian Ocean Territory Brunei Bulgaria Burkina Faso Burundi Cambodia Cameroon Canada Cape Verde Cayman Islands Central African Republic Chad Chile China Christmas Island Cocos (Keeling) Islands Colombia Comoros Congo Congo, the Democratic Republic of the Cook Islands Costa Rica Croatia Cuba Curaçao Cyprus Czech Republic Denmark Djibouti Dominica Dominican Republic Ecuador Egypt El Salvador Equatorial Guinea Eritrea Estonia Eswatini Ethiopia Falkland Islands Faroe Islands Fiji Finland France French Guiana French Polynesia French Southern Territories Gabon Gambia Georgia Germany Ghana Gibraltar Greece Greenland Grenada Guadeloupe Guam Guatemala Guernsey Guinea Guinea-Bissau Guyana Haiti Heard Island and McDonald Islands Holy See (Vatican City State) Honduras Hong Kong Hungary Iceland India Indonesia Iran Iraq Ireland Isle of Man Israel Italy Ivory Coast Jamaica Japan Jersey J",
+  "counts": {
+    "controls": 41,
+    "submit_buttons": 1
+  },
+  "controls": [
+    {
+      "label": "Resume/CV ✱ATTACH RESUME/CVCouldn't auto-read resume.Analyzing resume...Success!",
+      "role": "",
+      "control_type": "file",
+      "selector": "#resume-upload-input",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Full name✱",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"name\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"He/him\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "She/her",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "She/her",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"She/her\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her - They/them",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her - They/them",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"They/them\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them - Xe/xem",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them - Xe/xem",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"Xe/xem\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem - Ze/hir",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem - Ze/hir",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"Ze/hir\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Xe/xem Ze/hir - Ey/em",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Xe/xem Ze/hir - Ey/em",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"Ey/em\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em - Hir/hir",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em - Hir/hir",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"Hir/hir\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em Hir/hir - Fae/faer",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em Hir/hir - Fae/faer",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"Fae/faer\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Hir/hir Fae/faer - Hu/hu",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Hir/hir Fae/faer - Hu/hu",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"pronouns\"][value=\"Hu/hu\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em Hir/hir Fae/faer Hu/hu - Use name only",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em Hir/hir Fae/faer Hu/hu - Use name only",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#useNameOnlyPronounsOption",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em Hir/hir Fae/faer Hu/hu Use name only - Custom",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "He/him She/her They/them Xe/xem Ze/hir Ey/em Hir/hir Fae/faer Hu/hu Use name only - Custom",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "#customPronounsOption",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Email✱",
+      "role": "textbox",
+      "control_type": "email",
+      "selector": "input[name=\"email\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Phone ✱",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"phone\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Current location ✱No location found. Try entering a different locationLoading",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "#location-input",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Current company ✱",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"org\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "LinkedIn URL",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[LinkedIn]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "GitHub URL",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[GitHub]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Portfolio URL",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[Portfolio]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Other website",
+      "role": "textbox",
+      "control_type": "text",
+      "selector": "input[name=\"urls[Other]\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Have you ever been previously employed by Spotify? ✱ - No",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Have you ever been previously employed by Spotify? ✱ - No",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]\"][value=\"No\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Have you ever been previously employed by Spotify? ✱ No - Yes - Intern",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "Have you ever been previously employed by Spotify? ✱ No - Yes - Intern",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]\"][value=\"Yes - Intern\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "No Yes - Intern - Yes - Full Time Employment",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "No Yes - Intern - Yes - Full Time Employment",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]\"][value=\"Yes - Full Time Employment\"]",
+      "required": true,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "What is your location?Select...AfghanistanAlbaniaAlgeriaAmerican SamoaAndorraAngolaAnguillaAntarcticaAntigua and BarbudaArgentinaArmeniaArubaAustraliaAustriaAzerbaijanBahamasBahrainBangladeshBarbadosBelarusBelgiumBelizeBeninBermudaBhutanBoliviaBonaire, Sint Eustatius and SabaBosnia and HerzegovinaBotswanaBouvet IslandBrazilBritish Indian Ocean TerritoryBruneiBulgariaBurkina FasoBurundiCambodiaCameroonCanadaCape VerdeCayman IslandsCentral African RepublicChadChileChinaChristmas IslandCocos (Keeling) IslandsColombiaComorosCongoCongo, the Democratic Republic of theCook IslandsCosta RicaCroatiaCubaCuraçaoCyprusCzech RepublicDenmarkDjiboutiDominicaDominican RepublicEcuadorEgyptEl SalvadorEquatorial GuineaEritreaEstoniaEswatiniEthiopiaFalkland IslandsFaroe IslandsFijiFinlandFranceFrench GuianaFrench PolynesiaFrench Southern TerritoriesGabonGambiaGeorgiaGermanyGhanaGibraltarGreeceGreenlandGrenadaGuadeloupeGuamGuatemalaGuernseyGuineaGuinea-BissauGuyanaHaitiHeard Island and McDonald IslandsHoly See (Vatican City State)HondurasHong KongHungaryIcelandIndiaIndonesiaIranIraqIrelandIsle of ManIsraelItalyIvory CoastJamaicaJapanJerseyJordanKazakhstanKenyaKiribatiKosovoKuwaitKyrgyzstanLaosLatviaLebanonLesothoLiberiaLibyaLiechtensteinLithuaniaLuxembourgMacaoMacedonia, the Former Yugoslav Republic ofMadagascarMalawiMalaysiaMaldivesMaliMaltaMarshall IslandsMartiniqueMauritaniaMauritiusMayotteMexicoMicronesia, Federated States ofMoldovaMonacoMongoliaMontenegroMontserratMoroccoMozambiqueMyanmarNamibiaNauruNepalNetherlandsNew CaledoniaNew ZealandNicaraguaNigerNigeriaNiueNorfolk IslandNorth KoreaNorthern Mariana IslandsNorwayOmanPakistanPalauPalestine, State ofPanamaPapua New GuineaParaguayPeruPhilippinesPitcairnPolandPortugalPuerto RicoQatarRomaniaRussiaRwandaRéunionSaint BarthélemySaint Helena, Ascension and Tristan da CunhaSaint Kitts and NevisSaint LuciaSaint Martin (French part)Saint Pierre and MiquelonSaint Vincent and the GrenadinesSamoaSan MarinoSao Tome and PrincipeSaudi ArabiaSenegalSerbiaSeychellesSierra LeoneSingaporeSint Maarten (Dutch part)SlovakiaSloveniaSolomon IslandsSomaliaSouth AfricaSouth Georgia and the South Sandwich IslandsSouth KoreaSouth SudanSpainSri LankaSudanSurinameSvalbard and Jan MayenSwedenSwitzerlandSyriaTaiwanTajikistanTanzaniaThailandTimor-LesteTogoTokelauTongaTrinidad and TobagoTunisiaTurkeyTurkmenistanTurks and Caicos IslandsTuvaluUgandaUkraineUnited Arab EmiratesUnited KingdomUnited StatesUnited States Minor Outlying IslandsUruguayUzbekistanVanuatuVenezuelaVietnamVirgin Islands, BritishVirgin Islands, U.S.Wallis and FutunaWestern SaharaYemenZambiaZimbabweÅland Islands",
+      "role": "combobox",
+      "control_type": "select",
+      "selector": "select",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "By applying for this position, your data will be processed as per Spotify's Privacy Policy. - Spotify has my consent to contact me about future job opportunities.",
+      "role": "checkbox",
+      "control_type": "label",
+      "selector": "label",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    },
+    {
+      "label": "By applying for this position, your data will be processed as per Spotify's Privacy Policy. - Spotify has my consent to contact me about future job opportunities.",
+      "role": "checkbox",
+      "control_type": "checkbox",
+      "selector": "input[name=\"consent[marketing]\"][value=\"1\"]",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    }
+  ],
+  "submit_buttons": [
+    {
+      "label": "SUBMIT APPLICATION",
+      "role": "button",
+      "control_type": "button",
+      "selector": "#btn-submit",
+      "required": false,
+      "visible": true,
+      "frame_index": 0,
+      "frame_url": "https://jobs.lever.co/spotify/cc5ccf57-b851-4c25-8840-ed4cd0535c12/apply"
+    }
+  ],
+  "validation_errors": [
+    "Please try again. ⚠️"
+  ]
+}
