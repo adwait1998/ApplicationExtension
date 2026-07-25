@@ -1337,5 +1337,20 @@ def doctor() -> None:
     console.print()
 
 
+@app.command("probe-form")
+def probe_form(
+    url: str = typer.Argument(..., help="A live application URL (Ashby/Lever/Greenhouse)."),
+    out_dir: str = typer.Option("docs/superpowers/probes", "--out", help="Where to write the observation JSON."),
+    headless: bool = typer.Option(True, "--headless/--headed"),
+) -> None:
+    """Dump a live form's raw observation (controls, widget kinds, selectors,
+    frame paths) to JSON — the empirical ground truth for a new front-end parser.
+    Dev/ops only; no apply, no submission."""
+    _bootstrap()
+    from applypilot.apply.probe_dump import probe_url
+    path = probe_url(url, out_dir=out_dir, headless=headless)
+    console.print(f"Probe written to [bold]{path}[/bold]")
+
+
 if __name__ == "__main__":
     app()
