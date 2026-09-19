@@ -1,8 +1,13 @@
+import json
+import os
+import sqlite3
+import subprocess
+import sys
 import time
 
 import pytest
 
-from applypilot import identity_guard
+from applypilot import database, identity_guard
 from applypilot.apply import launcher
 
 
@@ -65,15 +70,6 @@ def test_prologue_refuses_mismatched_profile_identity(tmp_path, monkeypatch):
 # invariant: isolation between profiles is a FILESYSTEM property, not a query
 # predicate a future refactor could drop.
 # ---------------------------------------------------------------------------
-
-import json
-import os
-import sqlite3
-import subprocess
-import sys
-
-from applypilot import database
-
 
 def _mk_profile(root, pid):
     d = root / "profiles" / pid

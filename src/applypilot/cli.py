@@ -304,6 +304,39 @@ def profile_add(pid: str,
         typer.echo(f"Now run:  applypilot --profile {pid} init")
 
 
+@profile_app.command("migrate")
+def profile_migrate(
+    yes: bool = typer.Option(False, "--yes", help="Required: this moves real data."),
+    profile_id: str = typer.Option("nida", "--as", help="Profile id for the existing data."),
+) -> None:
+    """One-shot, idempotent move from the single-profile layout to profiles/.
+
+    Takes a full backup BEFORE moving anything. On failure nothing is rolled
+    back — the backup is the recovery path and the error names it.
+    """
+    from applypilot import migrate_profiles, profiles
+    root = _root()
+    if profiles.is_legacy_layout(root) and not yes:
+        typer.echo(f"This will move everything under {root} into "
+                   f"{root / 'profiles' / profile_id}, extract the shared atlas "
+                   f"tables into {root / 'shared' / 'atlas.db'}, and take a full "
+                   "backup first.")
+        typer.echo("Re-run with --yes to proceed.")
+        raise typer.Exit(1)
+    try:
+        res = migrate_profiles.migrate(root, profile_id=profile_id)
+    except Exception as exc:                     # noqa: BLE001 — surface verbatim
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+    if res["already_migrated"]:
+        typer.echo(f"already migrated — {res['profile_dir']}")
+        return
+    typer.echo(f"migrated -> {res['profile_dir']}")
+    typer.echo(f"backup   -> {res['backup']}")
+    for t, n in (res.get("atlas_counts") or {}).items():
+        typer.echo(f"  atlas.{t}: {n} rows")
+
+
 @profile_app.command("use")
 def profile_use(pid: str) -> None:
     """Switch the active profile. Refuses while a batch is running (one batch
