@@ -218,6 +218,116 @@ def fixtures_promote(
 
 
 # ---------------------------------------------------------------------------
+# Profile sub-app — manage the people ApplyPilot applies for (multi-profile
+# foundation, Task 8). `profile migrate` is intentionally NOT here yet — it
+# belongs to a separate task and lands as its own command on this sub-app.
+# ---------------------------------------------------------------------------
+
+profile_app = typer.Typer(help="Manage the people ApplyPilot applies for.")
+app.add_typer(profile_app, name="profile")
+
+
+def _root():
+    from applypilot import profiles
+    return profiles.data_root()
+
+
+def _display_name(pdir) -> str:
+    """Best-effort display name; an unreadable profile.json must never raise."""
+    import json
+    try:
+        data = json.loads((pdir / "profile.json").read_text(encoding="utf-8"))
+        return (data.get("personal") or {}).get("name") or ""
+    except Exception:      # noqa: BLE001
+        return ""
+
+
+@profile_app.command("list")
+def profile_list() -> None:
+    """List known profiles, marking the active one."""
+    from applypilot import profiles
+    root = _root()
+    ids = profiles.list_profiles(root)
+    if not ids:
+        typer.echo(f"No profiles under {profiles.profiles_dir(root)}.")
+        typer.echo("Run `applypilot profile migrate --yes` or `applypilot profile add <id>`.")
+        return
+    active = profiles.get_active(root)
+    for pid in ids:
+        mark = "*" if pid == active else " "
+        typer.echo(f" {mark} {pid:<16} {_display_name(profiles.profile_dir(root, pid))}")
+
+
+@profile_app.command("show")
+def profile_show(pid: str = typer.Argument(None)) -> None:
+    """Show details for a profile (defaults to the resolved/active one)."""
+    from applypilot import profiles
+    root = _root()
+    if pid is None:
+        try:
+            pid = profiles.resolve(root, [])
+        except profiles.ProfileError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(2)
+    if pid not in profiles.list_profiles(root):
+        typer.echo(f"error: unknown profile {pid!r}", err=True)
+        raise typer.Exit(2)
+    d = profiles.profile_dir(root, pid)
+    typer.echo(f"id:   {pid}")
+    typer.echo(f"name: {_display_name(d)}")
+    typer.echo(f"dir:  {d}")
+
+
+@profile_app.command("add")
+def profile_add(pid: str,
+                wizard: bool = typer.Option(True, "--wizard/--no-wizard")) -> None:
+    """Scaffold a new profile directory. Refuses invalid ids and existing dirs."""
+    import json
+    from applypilot import profiles
+    root = _root()
+    if not profiles.is_valid_id(pid):
+        typer.echo(f"error: invalid profile id {pid!r} "
+                   "(lowercase letters, digits, dash, underscore; max 64)", err=True)
+        raise typer.Exit(2)
+    d = profiles.profiles_dir(root) / pid
+    if d.exists():
+        typer.echo(f"error: {d} already exists", err=True)
+        raise typer.Exit(2)
+    (d / "logs").mkdir(parents=True)
+    (d / "profile.json").write_text(json.dumps({"profile_id": pid}, indent=2),
+                                    encoding="utf-8")
+    typer.echo(f"created {d}")
+    if len(profiles.list_profiles(root)) == 1:
+        profiles.set_active(root, pid)
+        typer.echo(f"active profile set to {pid}")
+    if wizard:
+        typer.echo(f"Now run:  applypilot --profile {pid} init")
+
+
+@profile_app.command("use")
+def profile_use(pid: str) -> None:
+    """Switch the active profile. Refuses while a batch is running (one batch
+    at a time, globally — see webui.registry.active_batch)."""
+    from applypilot import profiles
+    from applypilot.webui import registry
+    root = _root()
+    try:
+        active_batch = registry.active_batch()
+    except Exception:      # noqa: BLE001 — no registry yet is not an error
+        active_batch = None
+    if active_batch and active_batch.get("finished_at") is None:
+        typer.echo(f"error: a batch is running for profile "
+                   f"{active_batch.get('profile')!r}; stop it before switching.", err=True)
+        raise typer.Exit(2)
+    try:
+        profiles.set_active(root, pid)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2)
+    typer.echo(f"active profile set to {pid}")
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -229,8 +339,17 @@ def main(
         callback=_version_callback,
         is_eager=True,
     ),
+    profile: Optional[str] = typer.Option(
+        None, "--profile",
+        help="Which person to act for (resolved before this process starts; see `applypilot profile`).",
+    ),
 ) -> None:
     """ApplyPilot — AI-powered end-to-end job application pipeline."""
+    # `profile` is consumed by applypilot.__main__.bind_profile from raw argv
+    # BEFORE this module is imported (APP_DIR is already frozen by then). This
+    # option exists only so `--profile` shows in --help and Typer doesn't
+    # reject it as unknown; it is deliberately unused here.
+    del profile
 
 
 @app.command()
@@ -955,7 +1074,9 @@ def ui(
         import webbrowser
 
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+    from applypilot import config
+    uvicorn.run(create_app(db_path=config.DB_PATH, app_dir=config.APP_DIR),
+                host=host, port=port, log_level="warning")
 
 
 @app.command("prune-expired")
