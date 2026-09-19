@@ -34,7 +34,7 @@ dev = ["pytest>=7.0", "ruff>=0.1"]
 ui = ["fastapi>=0.110", "uvicorn>=0.27"]
 
 [project.scripts]
-applypilot = "applypilot.cli:app"
+applypilot = "applypilot.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/Pickle-Pixel/ApplyPilot"
