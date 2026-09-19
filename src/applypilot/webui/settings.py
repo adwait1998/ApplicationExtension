@@ -1,6 +1,11 @@
-"""Persisted operator settings for the UI control plane. Lives under APP_DIR
-(NOT env vars) so autopilot state + caps survive restarts. Every read fully
-defaults; a missing/corrupt file resolves to the SAFE side (autopilot OFF)."""
+"""PER-PROFILE operator settings for the UI control plane. Lives under APP_DIR
+(NOT env vars) so the apply cap + batch defaults survive restarts. Every read
+fully defaults; a missing/corrupt file resolves to the SAFE side.
+
+Autopilot and the spend cap are deliberately NOT here — there is one runner and
+one wallet across all profiles, so both live in webui/shared_settings.py. Do not
+reintroduce them: two sources of truth for autopilot is how a supervisor ends up
+running while the UI reports it off."""
 from __future__ import annotations
 
 import json
@@ -8,7 +13,6 @@ import os
 import tempfile
 
 DEFAULT_SETTINGS: dict = {
-    "autopilot_enabled": False,                 # constraint 3: OFF by default
     "max_live_applies_per_day": 20,             # hard cap (CONFIRMED ledger rows / rolling day)
     "batch": {
         "limit": 10,
