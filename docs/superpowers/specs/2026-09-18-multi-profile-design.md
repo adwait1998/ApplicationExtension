@@ -53,7 +53,7 @@ becomes a root containing shared state plus one self-contained directory per per
 E:\applypilot-data\
   active_profile              text file naming the current profile, e.g. "nida"
   shared\
-    atlas.db                  boards, source_runs, ats_companies,
+    atlas.db                  boards, source_runs,
                               mapping_cache, submit_endpoints
     settings.json             global: spend cap (one wallet), autopilot config
     ui_runs\                  GLOBAL batch registry — one active batch
@@ -62,7 +62,7 @@ E:\applypilot-data\
       profile.json
       resume.pdf  resume.txt
       searches.yaml
-      applypilot.db           jobs, attempts, submission_ledger, engine_control
+      applypilot.db           jobs, submission_ledger, engine_control, engine_control
       logs\                   incl. review.jsonl, spend_ledger.jsonl
       tailored_resumes\  cover_letters\
       chrome-workers\  apply-workers\
@@ -120,20 +120,55 @@ that never migrates keeps working.
 
 ## Shared atlas split
 
-Five tables are profile-agnostic. `database.py:192` already documents `boards` as a
-"Profile-AGNOSTIC registry", and `mapping_cache` stores a *binding* (`'profile.<path>'`)
-rather than a literal value — designed to survive profile edits, which makes it equally
-safe across people.
+The database has exactly seven tables. Four are profile-agnostic. `database.py:192` already
+documents `boards` as a "Profile-AGNOSTIC registry", and `mapping_cache` stores a *binding*
+(`'profile.<path>'`) rather than a literal value — designed to survive profile edits, which
+makes it equally safe across people.
 
-| Table | Home | Reason |
-|---|---|---|
-| `boards`, `source_runs`, `ats_companies` | `shared/atlas.db` | Board directory and crawl bookkeeping; contains no personal data |
-| `mapping_cache`, `submit_endpoints` | `shared/atlas.db` | Learned ATS form structure, stored as references not values |
-| `jobs`, `attempts`, `submission_ledger`, `engine_control` | `profiles/<id>/applypilot.db` | Personal queue, history, and submission record |
+| Table | DDL | Home | Reason |
+|---|---|---|---|
+| `boards` | `database.py:197` | `shared/atlas.db` | Board directory; no personal data |
+| `source_runs` | `database.py:225` | `shared/atlas.db` | Crawl bookkeeping; no personal data |
+| `mapping_cache` | `database.py:248` | `shared/atlas.db` | Learned ATS form structure, stored as references not values |
+| `submit_endpoints` | `database.py:264` | `shared/atlas.db` | Learned per-ATS submit paths |
+| `jobs` | `database.py:93` | `profiles/<id>/applypilot.db` | Personal queue and history |
+| `submission_ledger` | `database.py:168` | `profiles/<id>/applypilot.db` | Personal submission record |
+| `engine_control` | `database.py:188` | `profiles/<id>/applypilot.db` | Pause flag, per-profile |
 
-**Verified precondition:** a grep for SQL joins between `jobs` and any of the five atlas
-tables returns zero matches. The split therefore needs no `ATTACH` and no query rewriting —
-atlas modules open the shared database, everything else opens the profile database.
+`ats_companies` is **not** a database table — it is `src/applypilot/config/ats_companies.yaml`,
+shipped inside the package, and is therefore already shared by construction. It needs no
+migration.
+
+### Mechanism: `ATTACH`, not a second connection
+
+A single connection opens the profile database as `main` and attaches the shared database
+as `atlas`. SQLite resolves an unqualified table name across attached databases, so
+`FROM boards` resolves to `atlas.boards` while `FROM jobs` resolves to `main.jobs`.
+
+**Empirically verified** before adopting: unqualified reads *and writes* against the
+attached database resolve correctly and persist to the attached file; cross-database joins
+work; each table stays in its own file.
+
+This matters because `discovery/atlas/tick.py:run_tick` legitimately touches both sides in
+one operation — it reads `boards`/`source_runs` and counts newly stored `jobs`. The
+alternative (threading a second connection through `run_tick`, `poll_board` and their
+callers) would change signatures across the atlas pipeline. With `ATTACH`, **no SQL
+statement and no function signature changes anywhere**; the split is confined to
+`database.py`'s connection setup.
+
+Every atlas function already takes `conn` as its first parameter, so the modules need no
+edits at all.
+
+**Accepted tradeoff:** in WAL mode, a transaction spanning attached databases is not
+atomic. A crash mid-tick could therefore store jobs without marking the board checked, or
+the reverse. This is acceptable because the Atlas tick is explicitly designed to be
+idempotent and resumable — the id-set diff short-circuits unchanged boards — so the failure
+degrades to one redundant poll. The implementation must confirm tick idempotency still
+holds after the split.
+
+**Legacy/test mode:** when running against an explicit `APPLYPILOT_DIR` or an in-memory
+database, all seven tables are created in `main` exactly as today and nothing is attached.
+This keeps the existing 963-test suite passing unchanged.
 
 `config.py` gains `SHARED_DIR` and `ATLAS_DB_PATH`, derived from the root rather than from
 `APP_DIR`.
@@ -203,7 +238,7 @@ applypilot profile migrate                         # one-shot, idempotent
 1. Back up the current data dir first.
 2. Create `profiles/nida/`, `shared/`.
 3. Move the personal files and directories into `profiles/nida/`.
-4. Copy the five atlas tables into `shared/atlas.db`, then drop them from the profile
+4. Copy the four atlas tables into `shared/atlas.db`, then drop them from the profile
    database.
 5. Add `"profile_id": "nida"` to the migrated `profile.json`.
 6. Write `active_profile` = `nida`.
