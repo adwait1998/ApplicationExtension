@@ -10,7 +10,6 @@ import tempfile
 DEFAULT_SETTINGS: dict = {
     "autopilot_enabled": False,                 # constraint 3: OFF by default
     "max_live_applies_per_day": 20,             # hard cap (CONFIRMED ledger rows / rolling day)
-    "spend_cap_usd_per_day": 5.0,               # hard cap (reuses SpendLedger.spent_today)
     "batch": {
         "limit": 10,
         "model": "claude-haiku-4-5-20251001",
@@ -53,8 +52,6 @@ def load_settings() -> dict:
 def _validate(s: dict) -> None:
     if int(s["max_live_applies_per_day"]) < 0:
         raise ValueError("max_live_applies_per_day must be >= 0")
-    if float(s["spend_cap_usd_per_day"]) <= 0:
-        raise ValueError("spend_cap_usd_per_day must be > 0")
     b = s.get("batch", {})
     if int(b.get("limit", 1)) < 1:
         raise ValueError("batch.limit must be >= 1")
