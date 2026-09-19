@@ -1544,3 +1544,77 @@ item: retry headed / with warmed persistent profile to confirm whether Ashby
 forms are reachable at all from this rig, before investing in Ashby live
 rollout. The per-ATS gate, location fix, and probe all behaved exactly as
 designed on their first composed live-page encounter.
+
+## Multi-profile foundation (2026-09-18/19) — COMPLETE
+
+ApplyPilot stopped being a single-person tool. It now runs independent job
+searches for several people (Nida — product design; Adwait — software/data
+engineering) from one installation, with learned ATS knowledge shared and
+everything personal isolated on disk.
+
+Spec `docs/superpowers/specs/2026-09-18-multi-profile-design.md`, plan
+`docs/superpowers/plans/2026-09-18-multi-profile-foundation.md` (11 tasks, all
+landed). Suite: 963 -> **1019 passed + 1 skipped**, ruff clean in `src/`.
+
+**The mechanism.** The bound profile is resolved PER PROCESS, BEFORE any
+applypilot module is imported: `__main__.bind_profile()` scans argv for
+`--profile`, resolves it, sets `APPLYPILOT_DIR` to `<root>/profiles/<id>`, and
+only then imports the CLI. This was chosen because `config.py` computes its path
+constants at import time and `database.py:13` imports `DB_PATH` by VALUE — so
+runtime mutation cannot work, and threading a `profile_id` parameter would have
+touched the 19 `load_profile()` call sites plus scoring, tailoring, cover
+letters, the canary resolver and the v2 Form Compiler. Binding before import
+left every one of them untouched.
+
+**The atlas split.** `boards`, `source_runs`, `mapping_cache` and
+`submit_endpoints` moved to `shared/atlas.db`, ATTACHed as schema `atlas`.
+Verified empirically first: SQLite resolves unqualified table names across
+attached databases for reads AND writes, so `FROM boards` -> `atlas.boards` and
+`FROM jobs` -> `main.jobs` with ZERO SQL changes and zero signature changes.
+The alternative (threading a second connection through `run_tick`/`poll_board`)
+was considered and rejected. Every atlas function already took `conn` as its
+first parameter, so those modules needed no edits at all.
+
+Three findings during implementation worth keeping:
+- `get_connection()` also had to apply the atlas default, not just `init_db()`:
+  apply workers build their own thread-local connection and never call
+  `init_db`, so without it every `boards`/`mapping_cache` query inside a worker
+  would fail with "no such table" — in production only, never in tests that pass
+  an explicit `db_path`. Covered by `test_worker_thread_connection_sees_the_shared_atlas`.
+- `CREATE INDEX` qualifies the INDEX name with the schema, not the table name;
+  `ON atlas.boards(...)` is a syntax error.
+- The migration's DDL rewrite was changed from a first-occurrence
+  `str.replace` to an anchored whole-word regex that raises on an unexpected
+  shape. The naive form was only incidentally safe for today's schema.
+
+**Safety.** Isolation is a filesystem property, not a query predicate — a
+profile's ledger, artifacts and DB live inside its own directory, so there is no
+path by which one profile's process reaches another's. `identity_guard`
+additionally refuses to apply when `profile.json`'s `profile_id` disagrees with
+the directory it was loaded from (catches a profile.json copied between dirs —
+the realistic route to a wrong-name submission); it runs in `_safety_prologue`
+~120 lines BEFORE the ledger INTENT is recorded, so a mismatch never leaves a
+dangling row. Legacy single-profile layouts are exempt and byte-identical:
+proven by running a legacy `APPLYPILOT_DIR` and asserting nothing is attached
+and all seven tables are in `main`.
+
+**Operational.** One batch at a time GLOBALLY (one Chrome rig, one kill switch);
+registry moved to `shared/ui_runs` with each record tagged by profile.
+Spend cap global, apply cap per profile, autopilot global only — a duplicated
+`autopilot_enabled` in the per-profile settings was removed, since two sources
+of truth is how a supervisor ends up running while the UI reports it off.
+
+Phase 4B Tasks 1, 2 and 4 (cp1252 fix, persisted settings, batch registry) were
+also merged. Tasks 3, 5, 6, 7, 8, 9 remain and MUST be re-read against this
+foundation before implementation — re-planned in
+`docs/superpowers/plans/2026-09-19-phase4b-profile-aware-replan.md`.
+
+**Env trap found today:** a past C-drive cleanup moved folders to `E:\C_Offload`
+but left NO junction for `ms-playwright`, `pip` and `Coursier`, so Playwright
+could not find its browsers and 135 browser-backed tests errored with no code
+cause. Restored with `mklink /J`. Check the junctions before suspecting code
+when a large block of browser tests fails at once.
+
+**Not yet done:** the migration has NOT been run against the real
+`E:\applypilot-data` (reserved for a supervised run), and the second profile has
+not been created (needs the operator's resume).

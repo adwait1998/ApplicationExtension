@@ -17,7 +17,49 @@ Run anything below as `& $PY -m applypilot <command>`.
 
 Key paths:
 - Code: `E:\auto-apply-pipeline`
-- Data: `E:\applypilot-data` → `applypilot.db`, `logs\`, `skills\`, `profile.json`, `resume.pdf`, `searches.yaml`
+- Data root: `E:\applypilot-data`
+
+```
+E:\applypilot-data\
+  active_profile              which person commands act for by default
+  shared\                     atlas.db (boards, source_runs, mapping_cache,
+                              submit_endpoints), settings.json, ui_runs\
+  profiles\<id>\              profile.json, resume.pdf, searches.yaml,
+                              applypilot.db, logs\, ui_settings.json
+```
+
+Before migration the data dir is flat (`profile.json` etc. at the root) and
+everything still works unchanged — see §0b.
+
+---
+
+## 0b. Profiles (who you are applying for)
+
+ApplyPilot can run independent job searches for several people. Learned ATS
+knowledge is shared; everything personal is isolated on disk.
+
+```powershell
+& $PY -m applypilot profile list                 # ids + names, * marks active
+& $PY -m applypilot profile show                 # the resolved profile
+& $PY -m applypilot profile use nida             # change the default
+& $PY -m applypilot profile add adwait           # scaffold a new one
+& $PY -m applypilot --profile adwait <command>   # act for one command only
+```
+
+Which profile a command acts for: `--profile` > `APPLYPILOT_PROFILE` >
+`active_profile` > the only profile if there is just one. It is resolved before
+the process loads any config, so it applies to the whole command.
+
+**One-time migration** from the old flat layout (moves real data, backs up first):
+
+```powershell
+& $PY -m applypilot profile migrate --yes
+```
+
+**One batch at a time, globally.** There is one Chrome rig and one kill switch,
+so a batch for one profile blocks batches for every other. `profile use` refuses
+to switch while a batch is running. The spend cap is global (one wallet);
+`max_live_applies_per_day` is per profile.
 
 ---
 
