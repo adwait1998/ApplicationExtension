@@ -5,9 +5,10 @@ from applypilot.webui import registry as reg
 
 
 def test_open_writes_record_and_pidfile(tmp_path, monkeypatch):
-    monkeypatch.setattr("applypilot.config.APP_DIR", tmp_path)
+    monkeypatch.setattr("applypilot.config.SHARED_DIR", tmp_path)
     rec = reg.open_batch(kind="live_apply", dry_run=False,
-                         args=["apply", "--limit", "10"], pid=os.getpid())
+                         args=["apply", "--limit", "10"], pid=os.getpid(),
+                         profile="nida")
     assert rec["id"] and rec["finished_at"] is None and rec["pid"] == os.getpid()
     d = tmp_path / "ui_runs"
     assert (d / f"{rec['id']}.json").exists()
@@ -15,8 +16,9 @@ def test_open_writes_record_and_pidfile(tmp_path, monkeypatch):
 
 
 def test_close_batch_records_outcome(tmp_path, monkeypatch):
-    monkeypatch.setattr("applypilot.config.APP_DIR", tmp_path)
-    rec = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=os.getpid())
+    monkeypatch.setattr("applypilot.config.SHARED_DIR", tmp_path)
+    rec = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=os.getpid(),
+                         profile="nida")
     reg.close_batch(rec["id"], returncode=0, outcome={"applied": 3, "failed": 1, "needs_review": 2})
     got = reg.get_batch(rec["id"])
     assert got["returncode"] == 0 and got["outcome"]["applied"] == 3
@@ -25,26 +27,30 @@ def test_close_batch_records_outcome(tmp_path, monkeypatch):
 
 
 def test_history_newest_first(tmp_path, monkeypatch):
-    monkeypatch.setattr("applypilot.config.APP_DIR", tmp_path)
-    a = reg.open_batch(kind="live_apply", dry_run=True, args=[], pid=os.getpid())
+    monkeypatch.setattr("applypilot.config.SHARED_DIR", tmp_path)
+    a = reg.open_batch(kind="live_apply", dry_run=True, args=[], pid=os.getpid(),
+                       profile="nida")
     reg.close_batch(a["id"], returncode=0, outcome={})
-    b = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=os.getpid())
+    b = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=os.getpid(),
+                       profile="nida")
     reg.close_batch(b["id"], returncode=0, outcome={})
     hist = reg.history(limit=10)
     assert [h["id"] for h in hist][:2] == [b["id"], a["id"]]
 
 
 def test_reconcile_adopts_live_pid(tmp_path, monkeypatch):
-    monkeypatch.setattr("applypilot.config.APP_DIR", tmp_path)
-    rec = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=os.getpid())
+    monkeypatch.setattr("applypilot.config.SHARED_DIR", tmp_path)
+    rec = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=os.getpid(),
+                         profile="nida")
     result = reg.reconcile_on_start()
     assert result["adopted"] and result["adopted"]["id"] == rec["id"]
     assert reg.get_batch(rec["id"])["finished_at"] is None
 
 
 def test_reconcile_closes_dead_pid_as_orphan(tmp_path, monkeypatch):
-    monkeypatch.setattr("applypilot.config.APP_DIR", tmp_path)
-    rec = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=2_000_000_000)
+    monkeypatch.setattr("applypilot.config.SHARED_DIR", tmp_path)
+    rec = reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=2_000_000_000,
+                         profile="nida")
     result = reg.reconcile_on_start()
     assert result["adopted"] is None
     got = reg.get_batch(rec["id"])
@@ -55,3 +61,20 @@ def test_reconcile_closes_dead_pid_as_orphan(tmp_path, monkeypatch):
 def test_pid_alive_is_windows_safe():
     assert reg.pid_alive(os.getpid()) is True
     assert reg.pid_alive(2_000_000_000) is False
+
+
+def test_record_carries_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr("applypilot.config.SHARED_DIR", tmp_path)
+    rec = reg.open_batch(kind="live_apply", dry_run=False, args=[],
+                         pid=os.getpid(), profile="adwait")
+    assert rec["profile"] == "adwait"
+    assert reg.get_batch(rec["id"])["profile"] == "adwait"
+
+
+def test_single_active_batch_is_global_across_profiles(tmp_path, monkeypatch):
+    """Two profiles must not both hold an active batch."""
+    monkeypatch.setattr("applypilot.config.SHARED_DIR", tmp_path)
+    reg.open_batch(kind="live_apply", dry_run=False, args=[], pid=os.getpid(), profile="nida")
+    assert reg.active_batch()["profile"] == "nida"
+    reg.open_batch(kind="live_apply", dry_run=True, args=[], pid=os.getpid(), profile="adwait")
+    assert reg.active_batch()["profile"] == "adwait"   # one slot, globally

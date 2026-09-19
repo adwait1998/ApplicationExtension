@@ -1,7 +1,10 @@
 """Durable batch registry + pidfile so a UI-launched batch is never orphaned
 across a server restart (constraint 7), and so the Runs page has history. One
-JSON record per batch under APP_DIR/ui_runs/; current.pid names the active
-batch. reconcile_on_start() adopts a live batch or closes a dead one."""
+JSON record per batch under SHARED_DIR/ui_runs/; current.pid names the active
+batch. Only one batch runs at a time, globally, across all profiles — records
+are tagged with the `profile` they belong to so the Runs history shows whose
+batch each was. reconcile_on_start() adopts a live batch or closes a dead
+one."""
 from __future__ import annotations
 
 import json
@@ -16,7 +19,7 @@ ORPHANED = -999                                  # returncode sentinel for a los
 
 def _dir():
     from applypilot import config
-    d = config.APP_DIR / "ui_runs"
+    d = config.SHARED_DIR / "ui_runs"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -63,10 +66,12 @@ def pid_alive(pid: int) -> bool:
         return False
 
 
-def open_batch(*, kind: str, dry_run: bool, args: list[str], pid: int) -> dict:
+def open_batch(*, kind: str, dry_run: bool, args: list[str], pid: int,
+               profile: str) -> dict:
     rec = {
         "id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6],
         "kind": kind, "dry_run": bool(dry_run), "args": list(args), "pid": int(pid),
+        "profile": profile,
         "started_at": _now(), "finished_at": None, "returncode": None, "outcome": None,
     }
     d = _dir()
