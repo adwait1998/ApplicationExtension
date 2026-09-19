@@ -16,8 +16,54 @@ from applypilot.config import DB_PATH
 # (required for SQLite thread safety with parallel workers)
 _local = threading.local()
 
+# Profile-agnostic tables (learned ATS knowledge). These move to a shared
+# "atlas" DB that gets ATTACHed to every profile connection -- see
+# _attach_atlas. Everything else (jobs, submission_ledger, engine_control)
+# stays in `main`, per profile.
+ATLAS_TABLES = ("boards", "source_runs", "mapping_cache", "submit_endpoints")
 
-def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
+
+def _atlas_attached(conn: sqlite3.Connection) -> bool:
+    return any(row[1] == "atlas" for row in conn.execute("PRAGMA database_list").fetchall())
+
+
+def _attach_atlas(conn: sqlite3.Connection, atlas_path: Path | str | None) -> bool:
+    """Attach the shared atlas DB to `conn` as schema `atlas`. Returns True
+    when attached (now, or already).
+
+    SQLite resolves an unqualified table name across attached databases, so
+    `FROM boards` resolves to `atlas.boards` and `FROM jobs` to `main.jobs`
+    with NO change to any SQL statement or function signature anywhere else
+    in the codebase.
+
+    Idempotent -- safe to call more than once on the same connection (both
+    get_connection and init_db call it). Returns False for atlas_path=None
+    (in-memory DBs and legacy single-profile installs), where all tables live
+    in `main` exactly as before.
+    """
+    if atlas_path is None:
+        return False
+    if _atlas_attached(conn):
+        return True
+    p = Path(atlas_path)
+    if str(p) != ":memory:":
+        p.parent.mkdir(parents=True, exist_ok=True)
+    conn.execute("ATTACH DATABASE ? AS atlas", (str(p),))
+    conn.execute("PRAGMA atlas.journal_mode=WAL")
+    return True
+
+
+def _default_atlas_path():
+    """The configured shared atlas, or None in a legacy single-profile layout
+    (where every table stays in main, as today)."""
+    from applypilot import config, profiles
+    if profiles.is_legacy_layout(config.ROOT):
+        return None
+    return config.ATLAS_DB_PATH
+
+
+def get_connection(db_path: Path | str | None = None,
+                   atlas_path: Path | str | None = None) -> sqlite3.Connection:
     """Get a thread-local cached SQLite connection with WAL mode enabled.
 
     Each thread gets its own connection (required for SQLite thread safety).
@@ -25,10 +71,21 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
 
     Args:
         db_path: Override the default DB_PATH. Useful for testing.
+        atlas_path: Shared atlas DB to ATTACH as schema `atlas` (see
+            _attach_atlas). When db_path is left at its default (the real
+            configured DB_PATH) and atlas_path is not given, it resolves via
+            _default_atlas_path() -- this is what makes atlas attachment
+            transparent to worker threads, which create their own
+            thread-local connection via this function and never call
+            init_db(). An explicit db_path (as every existing test uses)
+            never auto-attaches unless atlas_path is passed explicitly, so
+            legacy/test behavior is byte-identical.
 
     Returns:
-        sqlite3.Connection configured with WAL mode and row factory.
+        sqlite3.Connection configured with WAL mode and row factory, with the
+        shared atlas DB attached as schema `atlas` when applicable.
     """
+    explicit_db_path = db_path is not None
     path = str(db_path or DB_PATH)
 
     if not hasattr(_local, 'connections'):
@@ -38,15 +95,20 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
     if conn is not None:
         try:
             conn.execute("SELECT 1")
-            return conn
         except sqlite3.ProgrammingError:
-            pass
+            conn = None
 
-    conn = sqlite3.connect(path, timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=10000")
-    conn.row_factory = sqlite3.Row
-    _local.connections[path] = conn
+    if conn is None:
+        conn = sqlite3.connect(path, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.row_factory = sqlite3.Row
+        _local.connections[path] = conn
+
+    if atlas_path is None and not explicit_db_path:
+        atlas_path = _default_atlas_path()
+    _attach_atlas(conn, atlas_path)
+
     return conn
 
 
@@ -59,7 +121,8 @@ def close_connection(db_path: Path | str | None = None) -> None:
             conn.close()
 
 
-def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
+def init_db(db_path: Path | str | None = None,
+           atlas_path: Path | str | None = None) -> sqlite3.Connection:
     """Create the full jobs table with all columns from every pipeline stage.
 
     This is idempotent -- safe to call on every startup. Uses CREATE TABLE IF NOT EXISTS
@@ -77,18 +140,36 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
                    agent_id, last_attempted_at, apply_duration_ms, apply_task_id,
                    verification_confidence
 
+    Profile-agnostic tables (boards, source_runs, mapping_cache,
+    submit_endpoints -- see ATLAS_TABLES) are created in an ATTACHed shared
+    "atlas" DB instead of `main` when atlas_path resolves to a path; see
+    _attach_atlas. jobs, submission_ledger and engine_control always stay in
+    `main`.
+
     Args:
         db_path: Override the default DB_PATH.
+        atlas_path: Shared atlas DB path. Left at its default, it resolves via
+            _default_atlas_path() UNLESS db_path was also given explicitly
+            (as every existing test does) -- in that case nothing is
+            attached and all 7 tables land in `main`, exactly as before.
 
     Returns:
         sqlite3.Connection with the schema initialized.
     """
+    explicit_db_path = db_path is not None
     path = db_path or DB_PATH
 
-    # Ensure parent directory exists
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    if atlas_path is None and not explicit_db_path:
+        atlas_path = _default_atlas_path()
 
-    conn = get_connection(path)
+    # Ensure parent directory exists
+    if str(path) != ":memory:":
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+    conn = get_connection(path, atlas_path)
+    attached = _attach_atlas(conn, atlas_path)
+    ns = "atlas." if attached else ""
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             -- Discovery stage (smart_extract / job_search)
@@ -193,8 +274,8 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     # one row per (ats, token). status/ring drive the freshness scheduler;
     # job_id_set_hash powers the incremental poller's cheap unchanged-board
     # short-circuit. Created here (standalone table, not in _ALL_COLUMNS).
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS boards (
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS {ns}boards (
             ats               TEXT NOT NULL,     -- 'greenhouse' | 'lever' | 'ashby'
             token             TEXT NOT NULL,     -- board slug, lowercased
             company_name      TEXT,              -- best-effort display name
@@ -213,16 +294,19 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             PRIMARY KEY (ats, token)
         )
     """)
+    # NOTE: unlike CREATE TABLE, CREATE INDEX qualifies the INDEX name with the
+    # schema (an index must live in the same database as its table) -- the
+    # table name itself stays unqualified so it still resolves via ATTACH.
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_boards_ring_status "
+        f"CREATE INDEX IF NOT EXISTS {ns}idx_boards_ring_status "
         "ON boards(ring, status)"
     )
 
     # Per-source run accounting (v2 Phase 2, spec §7.2). One row per Atlas tick
     # (or per source per tick). Requests/yield/cost join down-funnel so zero-yield
     # sources demote automatically. Standalone table (not in _ALL_COLUMNS).
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS source_runs (
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS {ns}source_runs (
             run_id         INTEGER PRIMARY KEY AUTOINCREMENT,
             source         TEXT NOT NULL,        -- 'atlas' | 'atlas:greenhouse' | ...
             started_at     TEXT NOT NULL,
@@ -244,8 +328,8 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     # for re-resolution; rows are versioned + kept, never deleted. Also holds
     # the auto-harvested submit-endpoint signature per (ats, company) that
     # Tier-1 network-evidence verify writes on confirmed success.
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS mapping_cache (
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS {ns}mapping_cache (
             ats            TEXT NOT NULL,       -- 'greenhouse'
             field_fp       TEXT NOT NULL,       -- ir.field_fp (primary key part)
             binding        TEXT NOT NULL,       -- 'profile.<path>' | 'answer:<qfp>' | 'policy.<k>'
@@ -260,8 +344,8 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             PRIMARY KEY (ats, field_fp)
         )
     """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS submit_endpoints (
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS {ns}submit_endpoints (
             ats            TEXT NOT NULL,       -- 'greenhouse'
             company        TEXT NOT NULL,       -- board token / company slug
             method         TEXT NOT NULL,       -- 'POST'
