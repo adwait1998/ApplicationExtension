@@ -110,3 +110,21 @@ def test_resolve_unknown_profile_raises(tmp_path):
 ])
 def test_profile_from_argv(argv, expected):
     assert profiles.profile_from_argv(argv) == expected
+
+
+def test_config_exposes_shared_paths(tmp_path, monkeypatch):
+    """SHARED_DIR/ATLAS_DB_PATH derive from the ROOT, not from APP_DIR."""
+    import importlib
+
+    monkeypatch.setenv("APPLYPILOT_ROOT", str(tmp_path))
+    monkeypatch.setenv("APPLYPILOT_DIR", str(tmp_path / "profiles" / "nida"))
+    from applypilot import config as _c
+    config = importlib.reload(_c)
+    try:
+        assert config.ROOT == tmp_path
+        assert config.SHARED_DIR == tmp_path / "shared"
+        assert config.ATLAS_DB_PATH == tmp_path / "shared" / "atlas.db"
+        assert config.APP_DIR == tmp_path / "profiles" / "nida"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(_c)

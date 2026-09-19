@@ -8,6 +8,16 @@ from pathlib import Path
 # User data directory — all user-specific files live here
 APP_DIR = Path(os.environ.get("APPLYPILOT_DIR", Path.home() / ".applypilot"))
 
+# Data ROOT — holds shared/ and profiles/. APP_DIR is the BOUND PROFILE's dir
+# (see applypilot.profiles + __main__.bind_profile); ROOT is where the
+# profile-agnostic things live. In a legacy single-profile layout they are the
+# same directory.
+from applypilot.profiles import data_root as _data_root  # noqa: E402
+
+ROOT = _data_root()
+SHARED_DIR = ROOT / "shared"
+ATLAS_DB_PATH = SHARED_DIR / "atlas.db"
+
 # Core paths
 DB_PATH = APP_DIR / "applypilot.db"
 PROFILE_PATH = APP_DIR / "profile.json"
@@ -90,7 +100,8 @@ def get_chrome_user_data() -> Path:
 
 def ensure_dirs():
     """Create all required directories."""
-    for d in [APP_DIR, TAILORED_DIR, COVER_LETTER_DIR, LOG_DIR, CHROME_WORKER_DIR, APPLY_WORKER_DIR]:
+    for d in [APP_DIR, TAILORED_DIR, COVER_LETTER_DIR, LOG_DIR, CHROME_WORKER_DIR,
+              APPLY_WORKER_DIR, SHARED_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
 
