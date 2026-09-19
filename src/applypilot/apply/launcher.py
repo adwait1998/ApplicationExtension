@@ -31,6 +31,7 @@ from rich.live import Live
 from applypilot import config
 from applypilot.database import get_connection
 from applypilot.identity import parse_ats_url
+from applypilot.identity_guard import ProfileIdentityError, assert_profile_identity
 from applypilot.submission_ledger import SubmissionLedger
 from applypilot.apply import prompt as prompt_mod
 from applypilot.apply.browser_stream import (
@@ -2392,6 +2393,22 @@ def _safety_prologue(job: dict, *, worker_id: int, run_started: float,
     both engines return verbatim. It does NOT write the MCP config (legacy-only)
     and does NOT run prefill."""
     profile = config.load_profile()
+    # SAFETY: profile.json's declared profile_id must agree with the directory
+    # it was loaded from (config.APP_DIR). Catches a profile.json accidentally
+    # copied between profile directories — the realistic path to a wrong-name
+    # submission. Checked before ANY other gate/side-effect and, in particular,
+    # before the ledger INTENT below, so a mismatch never leaves a dangling
+    # ledger row. Converted into the same blocked-decision shape every other
+    # refusal in this function uses; it must never raise into the caller.
+    try:
+        assert_profile_identity(profile, config.APP_DIR)
+    except ProfileIdentityError as exc:
+        job_meta["failure_class"] = "profile_identity_mismatch"
+        logger.error("SAFETY: refusing apply — %s", exc)
+        add_event(f"[W{worker_id}] SAFETY: profile identity mismatch: {exc}")
+        update_state(worker_id, status="failed", last_action="profile_identity_mismatch")
+        return _PrologueDecision(True, "needs_review:profile_identity_mismatch",
+                                 int((time.time() - run_started) * 1000))
     apply_url = _effective_apply_url(job) or ""
     job["application_url"] = apply_url
     location_reject = _preapply_location_reject(job, profile)
