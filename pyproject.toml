@@ -57,3 +57,10 @@ artifacts = ["src/applypilot/config/*.yaml", "src/applypilot/webui/static/*.html
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+
+[tool.pytest.ini_options]
+# Every test lives in tests/. Without this, a bare `pytest` also collects the
+# standalone verification harnesses in scripts/ (chrome_load_test.py matches
+# the *_test.py pattern), whose top-level code launches Chrome and calls
+# sys.exit() — collection aborts and ZERO tests run.
+testpaths = ["tests"]
