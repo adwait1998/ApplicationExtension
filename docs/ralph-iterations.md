@@ -1679,3 +1679,64 @@ needing a re-click, and custom widgets whose native input is truly 0×0.
 
 **Not verified:** a real click-through on a live Greenhouse/Lever/Ashby/Workday posting. The
 scanner is validated against a mock page and a real layout engine, not a real ATS.
+
+## Copilot extension v2 (2026-09-24) — fill everything, own the profile
+
+v1 was validated on two REAL ATS forms — the first live-ATS run of this feature. A Tessera
+Labs (Ashby-style) form filled 6 fields correctly including BOTH work-auth canaries. A
+Workday "My Experience" step filled **0 of 10**.
+
+That second result was diagnosed correctly and it mattered: Job Title / Company / Location /
+From / To / Role Description are perfectly recognisable — **the profile simply had no work
+history to put in them.** A data gap, not a matching gap. No amount of smarter classification
+would have fixed it.
+
+Spec: `docs/superpowers/specs/2026-09-24-copilot-full-helper-design.md`.
+Suite 1141 → **1275 passed, 2 skipped**.
+
+**New tiers** (ladder is now secret → canary → deterministic → structured → laya →
+answer_bank → draft → unresolved):
+
+- **structured** — `work_history[]`/`education[]` mapped by the scanner's new
+  `section`/`section_index`. An out-of-range block SKIPS ("no 3rd position in your work
+  history") rather than wrapping: silently putting the current job in a previous-employer
+  box is a real-world harm.
+- **answer_bank** — reuses `apply/answer_cache.py` (Reliability-v2 Phase D) plus the 98 real
+  Q&A pairs already in `answer_bank.json`. Mostly wiring; the machinery existed.
+- **draft** — LLM-written text for genuinely novel questions. Off by default
+  (`APPLYPILOT_ANSWERS=1` + `APPLYPILOT_DRAFTS=1`), capped per request (default 5, an ATS
+  step can dump a dozen free-text fields and the popup waits synchronously), rendered BLUE
+  with a DRAFT badge, and never persisted back to the curated bank.
+
+**The most important fix of the phase.** The agent that built the draft tier flagged, rather
+than hid, that grounding was only a *prompt instruction* — the model was told to stay inside
+`resume_facts` and nothing checked that it had. That makes the safety property "the operator
+reads carefully", which code does not guarantee. `extension/grounding.py` now scans a draft
+for FIRST-PERSON EMPLOYMENT CLAIMS ("I worked at X", "my tenure at X", "I joined X") and
+REFUSES the draft when X is absent from the applicant's real history. Deliberately narrow: it
+does not police company names generally, because naming the employer you are applying to is
+normal and truthful, and a guard that fires on every good answer gets switched off within a
+day. Answer-bank hits are never second-guessed — those are the operator's own prior words.
+
+**Scanner**: `section`/`section_index` per field, resolved via legend → heading →
+aria-labelledby, with the index also parsed from Workday-style names
+(`workExperience-2--jobTitle`). The keyword list deliberately excludes bare "experience" and
+"years": "5+ years of experience" would otherwise read as section index 5.
+
+**Profile editor** in the extension's Options page: personal / work auth (explicit Yes/No,
+never silently defaulted) / compensation / experience, repeatable work-history and education
+rows with reordering, and a profile switcher. New endpoints `GET /profile/full`,
+`POST /profile`, `GET /profiles`, `POST /profiles`, `POST /profiles/{id}/activate`.
+`/profile/full` strips `personal.password`, so `POST /profile` MERGES secrets back — a naive
+load-edit-save would otherwise wipe a credential the client was never shown.
+
+**Verified**: `scripts/e2e_extension.py` (22 assertions, real socket + the extension's real
+scanner output, covering the scanner→structured seam neither agent could test alone),
+`scripts/e2e_profile_editor.py` (secret round-trip; work history saved in the editor is
+usable on the very next fill, no restart), `scripts/chrome_load_test.py` (21 checks in real
+Chromium incl. section detection against a real layout engine and the "Phone Numbers (2 max)"
+false-positive guard), `extension/selftest.js` (37 jsdom checks).
+
+**Residual risk, stated plainly**: the grounding check is heuristic and English-only. It
+catches invented employers in first-person claims; it does not verify every factual assertion
+in a draft. The DRAFT badge and human review remain load-bearing for that tier.

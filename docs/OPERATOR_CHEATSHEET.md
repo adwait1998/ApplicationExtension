@@ -94,17 +94,49 @@ How each field is decided, first match wins:
 | secret guard | passwords/SSN/card fields | never |
 | canary | work auth, sponsorship, salary, EEO, address, DOB — from exact profile paths only | only on an exact hit, else skipped |
 | deterministic | `autocomplete` attribute, then name/id/label patterns | yes |
+| structured | `work_history[]` / `education[]`, indexed by the block heading ("Work Experience 2") | yes |
 | laya | local semantic classification, confidence ≥ 0.75 | yes, above threshold |
+| answer bank | semantic match against your past answers (`answer_bank.json`) | yes |
+| draft | LLM-written from your résumé facts | yes, **badged DRAFT** |
 | unresolved | — | no, left for you |
 
-Canary questions are **never** answered by a model, and free-text questions ("why do you want
-to work here?") are never answered at all. An unanswerable canary is left blank on purpose —
-that is the design, not a failure.
+Canary questions are **never** answered by a model. An unanswerable canary is left blank on
+purpose — that is the design, not a failure.
 
-Laya is optional and **off unless `APPLYPILOT_LAYA=1`**; without it the extension runs on the
-deterministic tier, which covers the standard fields. `GET /health` reports which tiers are
-live. See `extension/README.md` for details and known limitations (cross-origin iframes,
-shadow DOM, multi-step forms).
+**Drafts are the one tier that puts generated text under your name.** They render blue rather
+than green and are grouped separately in the popup. A draft that claims experience somewhere
+absent from your history is refused outright ("draft refused — it claimed experience at X"),
+so a model ignoring its instructions cannot invent an employer for you. Answer-bank hits are
+never second-guessed: those are your own past words.
+
+Optional tiers, all off by default:
+
+```powershell
+$env:APPLYPILOT_LAYA    = "1"   # semantic classification (~2GB RAM, ~28s first load)
+$env:APPLYPILOT_ANSWERS = "1"   # reuse your past answers
+$env:APPLYPILOT_DRAFTS  = "1"   # LLM drafts (needs APPLYPILOT_ANSWERS too)
+$env:APPLYPILOT_MAX_DRAFTS = "5"  # per-page cap, default 5
+```
+
+`GET /health` reports which tiers are live.
+
+### Editing your profile from the extension
+
+The extension's **Options** page has a full profile editor — personal details, work
+authorisation (explicit Yes/No, never guessed), compensation, experience, and repeatable
+**work history** and **education** rows. **Row 1 must be your most recent position**, because
+that is what "Work Experience 1" on a Workday form maps to.
+
+It also has a profile switcher, so several people can share one installation. Saving takes
+effect immediately — no restart.
+
+Repeating blocks fill from the matching position, and a block beyond your history is skipped
+rather than wrapped ("no 3rd position in your work history"), so your current job can never
+land in a previous-employer box.
+
+See `extension/README.md` for known limitations (cross-origin iframes, shadow DOM, multi-step
+forms). Verification harnesses: `scripts/e2e_extension.py`, `scripts/e2e_profile_editor.py`,
+`scripts/chrome_load_test.py`.
 
 ---
 
