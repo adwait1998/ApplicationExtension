@@ -108,15 +108,36 @@
     var failedIds = {};
     (applyResp.failed || []).forEach(function (f) { failedIds[f.id] = f; });
 
-    if (applyResp.applied && applyResp.applied.length) {
+    var factApplied = (applyResp.applied || []).filter(function (a) { return !a.draft; });
+    var draftApplied = (applyResp.applied || []).filter(function (a) { return a.draft; });
+
+    if (factApplied.length) {
       var filledTitle = document.createElement('div');
       filledTitle.className = 'section-title';
-      filledTitle.textContent = 'Filled (' + applyResp.applied.length + ')';
+      filledTitle.textContent = 'Filled (' + factApplied.length + ')';
       resultsBox.appendChild(filledTitle);
-      applyResp.applied.forEach(function (a) {
+      factApplied.forEach(function (a) {
         var row = document.createElement('div');
         row.className = 'field-row filled';
         row.innerHTML =
+          '<div class="value">' + escapeHtml(a.value) + '</div>' +
+          '<div class="reason">' + escapeHtml(a.reason || '') + (a.profile_key ? ' &middot; ' + escapeHtml(a.profile_key) : '') + '</div>';
+        resultsBox.appendChild(row);
+      });
+    }
+
+    // Drafts are generated text, not facts pulled from the profile — kept in their own
+    // clearly-labelled, visually distinct group so they can never be mistaken for a fact.
+    if (draftApplied.length) {
+      var draftTitle = document.createElement('div');
+      draftTitle.className = 'section-title draft-title';
+      draftTitle.textContent = 'Drafted — review before submitting (' + draftApplied.length + ')';
+      resultsBox.appendChild(draftTitle);
+      draftApplied.forEach(function (a) {
+        var row = document.createElement('div');
+        row.className = 'field-row draft';
+        row.innerHTML =
+          '<div class="draft-badge">DRAFT</div>' +
           '<div class="value">' + escapeHtml(a.value) + '</div>' +
           '<div class="reason">' + escapeHtml(a.reason || '') + (a.profile_key ? ' &middot; ' + escapeHtml(a.profile_key) : '') + '</div>';
         resultsBox.appendChild(row);
@@ -191,8 +212,11 @@
         skipped: data.skipped || []
       });
 
-      var filledCount = (applyResp.applied || []).length;
-      setStatus('Filled ' + filledCount + ' field(s). Review below, then submit yourself when ready.');
+      var appliedList = applyResp.applied || [];
+      var filledCount = appliedList.length;
+      var draftCount = appliedList.filter(function (a) { return a.draft; }).length;
+      var summary = 'Filled ' + filledCount + (draftCount ? ' (' + draftCount + ' draft' + (draftCount === 1 ? '' : 's') + ' to review)' : '') + '.';
+      setStatus(summary + ' Review below, then submit yourself when ready.');
       renderResults(applyResp, data);
       undoBtn.disabled = filledCount === 0;
     } catch (e) {

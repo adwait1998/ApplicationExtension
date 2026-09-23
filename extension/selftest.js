@@ -99,6 +99,42 @@ expect('auto-generated-id field still captured, with a non-#id selector', (() =>
 })());
 expect('every selector is present and non-empty', fields.every(f => typeof f.selector === 'string' && f.selector.length > 0));
 
+// --- section / section_index — Workday-style repeating "Work Experience" blocks --------
+// Block 1: <fieldset><legend>Work Experience 1</legend>...</fieldset>
+expect('block 1 section resolved via <fieldset><legend> ("Work Experience 1")',
+  byName['workExperience-1--jobTitle'] && byName['workExperience-1--jobTitle'].section === 'Work Experience 1');
+expect('block 1 section_index parsed from the legend text',
+  byName['workExperience-1--jobTitle'] && byName['workExperience-1--jobTitle'].section_index === 1);
+expect('block 1 company field carries the same section_index',
+  byName['workExperience-1--company'] && byName['workExperience-1--company'].section_index === 1);
+expect('block 1 "I currently work here" checkbox carries the same section_index',
+  fields.some(f => f.name === 'workExperience-1--currentlyWorkHere' && f.type === 'checkbox' && f.section_index === 1));
+
+// Block 2: no <fieldset>/<legend> — a preceding class*="heading" div is the section instead.
+expect('block 2 section resolved via a class*="heading" block ("Work Experience 2")',
+  byName['workExperience-2--jobTitle'] && byName['workExperience-2--jobTitle'].section === 'Work Experience 2');
+expect('block 2 section_index parsed from that heading text',
+  byName['workExperience-2--jobTitle'] && byName['workExperience-2--jobTitle'].section_index === 2);
+expect('block 2 location field carries the same section_index',
+  byName['workExperience-2--location'] && byName['workExperience-2--location'].section_index === 2);
+
+// Block 3: heading text carries NO number at all ("Additional Work Experience") — the index
+// must come only from the Workday-style field name (workExperience-3--...).
+expect('block 3 heading text has no number ("Additional Work Experience")',
+  byName['workExperience-3--jobTitle'] && byName['workExperience-3--jobTitle'].section === 'Additional Work Experience');
+expect('block 3 section_index resolved ONLY from the field name, not the heading',
+  byName['workExperience-3--jobTitle'] && byName['workExperience-3--jobTitle'].section_index === 3);
+expect('block 3 company field also gets the name-derived section_index',
+  byName['workExperience-3--company'] && byName['workExperience-3--company'].section_index === 3);
+
+// Negative case: a heading with an unrelated digit next to it ("Phone Numbers (2 max)") must
+// NOT be mistaken for a section index — no section-ish keyword sits next to that "2", and the
+// field's own name ("altPhone") has no digit either.
+expect('negative case: digit near an unrelated heading does not yield a bogus section_index',
+  byName.altPhone && byName.altPhone.section_index === null);
+expect('negative case: unrelated pre-existing field has no section_index bleed-through',
+  byName.full_name && byName.full_name.section_index === null);
+
 // --- the defining safety invariant ------------------------------------------
 // Filling a radio/checkbox needs a native .click(). Nothing else may ever be
 // clicked, because a click on a submit button would send a real application.

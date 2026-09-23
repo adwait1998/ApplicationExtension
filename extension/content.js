@@ -50,6 +50,9 @@
     return { fields: result.fields, skippedFrames: result.skippedFrames };
   }
 
+  // 'filled' (green, solid) = a fact from the profile. 'draft' (blue, solid) = generated
+  // text the operator must review before submitting — never let it look like a plain fill.
+  // 'skipped' (amber, dashed) = left for the human.
   function highlight(el, kind, reason) {
     if (!el) return;
     if (!el.hasAttribute(HIGHLIGHT_ATTR)) {
@@ -57,9 +60,12 @@
       highlightedElements.push(el);
     }
     el.setAttribute(HIGHLIGHT_ATTR, kind);
-    el.style.setProperty('outline', kind === 'filled' ? '2px solid #22c55e' : '2px dashed #f59e0b', 'important');
+    var outlineColor = kind === 'filled' ? '#22c55e' : (kind === 'draft' ? '#2563eb' : '#f59e0b');
+    var outlineStyle = kind === 'skipped' ? 'dashed' : 'solid';
+    var bgColor = kind === 'filled' ? 'rgba(34,197,94,0.08)' : (kind === 'draft' ? 'rgba(37,99,235,0.08)' : 'rgba(245,158,11,0.08)');
+    el.style.setProperty('outline', '2px ' + outlineStyle + ' ' + outlineColor, 'important');
     el.style.setProperty('outline-offset', '1px', 'important');
-    el.style.setProperty('background-color', kind === 'filled' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)', 'important');
+    el.style.setProperty('background-color', bgColor, 'important');
     if (reason) el.setAttribute('title', reason);
   }
 
@@ -104,10 +110,12 @@
         priorValues[fill.id] = ApplyPilotScanner.getCurrentValue(entry);
         var ok = ApplyPilotScanner.applyFill(entry, fill.value);
         var hlTargets = ApplyPilotScanner.getHighlightTargets(entry);
+        var isDraft = !!fill.draft || fill.source === 'draft';
         if (ok) {
           var reasonText = (fill.reason || 'Filled') + (fill.profile_key ? ' [' + fill.profile_key + ']' : '');
-          for (var h = 0; h < hlTargets.length; h++) highlight(hlTargets[h], 'filled', reasonText);
-          applied.push({ id: fill.id, value: fill.value, reason: fill.reason, profile_key: fill.profile_key, source: fill.source });
+          if (isDraft) reasonText += ' — drafted — review before submitting';
+          for (var h = 0; h < hlTargets.length; h++) highlight(hlTargets[h], isDraft ? 'draft' : 'filled', reasonText);
+          applied.push({ id: fill.id, value: fill.value, reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft });
         } else {
           for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Could not match "' + fill.value + '" to an option');
           failed.push({ id: fill.id, reason: 'Could not match value "' + fill.value + '" to an option on the page' });

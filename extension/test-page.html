@@ -83,6 +83,81 @@
   <label for=":r3:">Auto-generated id field</label>
   <input type="text" id=":r3:" name="weird_id_field">
 
+  <!-- ===================================================================
+       Repeating "Work Experience" blocks — Workday "My Experience" step shape.
+       Exercises scanner.js section/section_index resolution via three different paths.
+       =================================================================== -->
+
+  <!-- Block 1: section resolved via nearest ancestor <fieldset>'s <legend> -->
+  <fieldset>
+    <legend>Work Experience 1</legend>
+
+    <label for="we1_title">Job Title</label>
+    <input type="text" id="we1_title" name="workExperience-1--jobTitle">
+
+    <label for="we1_company">Company</label>
+    <input type="text" id="we1_company" name="workExperience-1--company">
+
+    <label for="we1_location">Location</label>
+    <input type="text" id="we1_location" name="workExperience-1--location">
+
+    <label><input type="checkbox" name="workExperience-1--currentlyWorkHere"> I currently work here</label>
+
+    <label for="we1_from">From</label>
+    <input type="text" id="we1_from" name="workExperience-1--startDate" placeholder="MM/YYYY">
+
+    <label for="we1_to">To</label>
+    <input type="text" id="we1_to" name="workExperience-1--endDate" placeholder="MM/YYYY">
+
+    <label for="we1_desc">Role Description</label>
+    <textarea id="we1_desc" name="workExperience-1--roleDescription"></textarea>
+  </fieldset>
+
+  <!-- Block 2: no <fieldset>/<legend> — section resolved via a preceding class*="heading" block -->
+  <div class="section-heading">Work Experience 2</div>
+  <div class="workday-block">
+    <label for="we2_title">Job Title</label>
+    <input type="text" id="we2_title" name="workExperience-2--jobTitle">
+
+    <label for="we2_company">Company</label>
+    <input type="text" id="we2_company" name="workExperience-2--company">
+
+    <label for="we2_location">Location</label>
+    <input type="text" id="we2_location" name="workExperience-2--location">
+
+    <label><input type="checkbox" name="workExperience-2--currentlyWorkHere"> I currently work here</label>
+
+    <label for="we2_from">From</label>
+    <input type="text" id="we2_from" name="workExperience-2--startDate" placeholder="MM/YYYY">
+
+    <label for="we2_to">To</label>
+    <input type="text" id="we2_to" name="workExperience-2--endDate" placeholder="MM/YYYY">
+
+    <label for="we2_desc">Role Description</label>
+    <textarea id="we2_desc" name="workExperience-2--roleDescription"></textarea>
+
+    <button type="button">+ Add Another</button>
+  </div>
+
+  <!-- Block 3: heading present but carries NO number at all — section_index must be resolved
+       ONLY from the field names (workExperience-3--...), never from the heading text. -->
+  <div class="section-heading">Additional Work Experience</div>
+  <div class="workday-block">
+    <label for="we3_title">Job Title</label>
+    <input type="text" id="we3_title" name="workExperience-3--jobTitle">
+
+    <label for="we3_company">Company</label>
+    <input type="text" id="we3_company" name="workExperience-3--company">
+
+    <label><input type="checkbox" name="workExperience-3--currentlyWorkHere"> I currently work here</label>
+  </div>
+
+  <!-- Negative case: a heading with an unrelated digit ("2 max") next to a phone field must
+       NOT be mistaken for a section index — no section-ish keyword sits next to the "2". -->
+  <div class="section-heading">Phone Numbers (2 max)</div>
+  <label for="alt_phone">Alternate Phone</label>
+  <input type="tel" id="alt_phone" name="altPhone" placeholder="555-0199">
+
   <button type="submit">Submit Application</button>
 </form>
 

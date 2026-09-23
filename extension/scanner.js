@@ -158,6 +158,141 @@
     return '';
   }
 
+  // ---------------------------------------------------------------------
+  // section context — which repeating block (Work Experience 2, Education 1, ...) a
+  // field belongs to. Workday-style "My Experience" steps render N near-identical blocks
+  // of fields; without this, the fill service has no way to map a field to
+  // `work_history[index]` / `education[index]` in the profile.
+  // ---------------------------------------------------------------------
+
+  // Only these words make a nearby number look like a section index. Deliberately narrow:
+  // a phone number, a year, a zip code, a "2 years experience" select option etc. must NOT
+  // be mistaken for a section index just because a digit sits near it.
+  var SECTION_KEYWORD_SRC = '(work\\s*experience|employment|education|position|school|job)';
+
+  function extractSectionIndex(text) {
+    if (!text) return null;
+    var s = String(text);
+
+    // Array/bracket style: "experience[1].title", "workHistory[2]" — a strong, low-risk
+    // signal on its own (bounded to 1-2 digits so it can't swallow a longer id/hash run).
+    var bracket = s.match(/\[(\d{1,2})\](?!\d)/);
+    if (bracket) return parseInt(bracket[1], 10);
+
+    // Keyword immediately followed by a short separator run then a 1-2 digit number, e.g.
+    // "workExperience-2--jobTitle", "education_3_school", "Work Experience 2".
+    var reAfter = new RegExp(SECTION_KEYWORD_SRC + '[^a-z0-9]{0,3}(\\d{1,2})(?!\\d)', 'i');
+    var mAfter = s.match(reAfter);
+    if (mAfter) return parseInt(mAfter[2], 10);
+
+    // Number-before-keyword order, e.g. "2-education-school".
+    var reBefore = new RegExp('(\\d{1,2})(?!\\d)[^a-z0-9]{0,3}' + SECTION_KEYWORD_SRC, 'i');
+    var mBefore = s.match(reBefore);
+    if (mBefore) return parseInt(mBefore[1], 10);
+
+    return null;
+  }
+
+  function isHeadingLike(node) {
+    if (!node || node.nodeType !== 1) return false;
+    var tag = node.tagName;
+    if (tag === 'LABEL' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' ||
+        tag === 'BUTTON' || tag === 'SCRIPT' || tag === 'STYLE') return false;
+    if (/^H[1-6]$/.test(tag)) return true;
+    var role = node.getAttribute && node.getAttribute('role');
+    if (role === 'heading') return true;
+    var cls = (node.getAttribute && node.getAttribute('class')) || '';
+    if (/title|heading/i.test(cls)) return true;
+    return false;
+  }
+
+  // Nearest preceding heading-like element, walking sibling-then-up. Bounded at the
+  // enclosing <form> (or body/html) so a page-level <h1> title never gets mistaken for a
+  // field's section — that boundary is what keeps this "nearest enclosing", not "any
+  // heading anywhere above this field on the page".
+  function findPrecedingHeading(el) {
+    var node = el;
+    for (var depth = 0; depth < 8 && node; depth++) {
+      if (node.tagName === 'FORM' || node.tagName === 'BODY' || node.tagName === 'HTML') break;
+      var sib = node.previousElementSibling;
+      while (sib) {
+        if (isHeadingLike(sib)) {
+          var t = cleanText(sib.textContent);
+          if (t) return t;
+        }
+        if (sib.querySelector) {
+          var inner = null;
+          try { inner = sib.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]'); } catch (e) { inner = null; }
+          if (inner) {
+            var t2 = cleanText(inner.textContent);
+            if (t2) return t2;
+          }
+        }
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    return '';
+  }
+
+  // A wrapping group (fieldset-like container that isn't a real <fieldset>) whose own
+  // aria-labelledby points at the section's heading text.
+  function findAriaLabelledbyGroup(el, doc) {
+    var node = el.parentElement;
+    for (var depth = 0; depth < 8 && node; depth++) {
+      if (node.tagName === 'FORM' || node.tagName === 'BODY' || node.tagName === 'HTML') break;
+      var lb = node.getAttribute && node.getAttribute('aria-labelledby');
+      if (lb && doc) {
+        var ids = lb.split(/\s+/).filter(Boolean);
+        var parts = [];
+        for (var i = 0; i < ids.length; i++) {
+          var ref = doc.getElementById(ids[i]);
+          if (ref) {
+            var t = cleanText(ref.textContent);
+            if (t) parts.push(t);
+          }
+        }
+        if (parts.length) return parts.join(' ');
+      }
+      node = node.parentElement;
+    }
+    return '';
+  }
+
+  /**
+   * Resolves { section, section_index } for `el`:
+   *   1. nearest ancestor <fieldset>'s <legend>
+   *   2. nearest preceding sibling/ancestor heading (h1-h6, role=heading, class*=title|heading)
+   *   3. aria-labelledby on a wrapping group
+   * `section_index` prefers a number parsed out of that heading text; when the heading has
+   * none (or there is no heading at all), it falls back to a number parsed from the field's
+   * own name/id (Workday-style `workExperience-2--jobTitle`).
+   */
+  function getSectionContext(el) {
+    var doc = ownerDoc(el);
+    var section = '';
+
+    var fieldset = el.closest ? el.closest('fieldset') : null;
+    if (fieldset) {
+      var legend = fieldset.querySelector('legend');
+      if (legend) {
+        var t = cleanText(legend.textContent);
+        if (t) section = t;
+      }
+    }
+
+    if (!section) section = findPrecedingHeading(el);
+    if (!section) section = findAriaLabelledbyGroup(el, doc);
+
+    var sectionIndex = section ? extractSectionIndex(section) : null;
+    if (sectionIndex === null) {
+      var nameIndex = extractSectionIndex(el.name || el.id || '');
+      if (nameIndex !== null) sectionIndex = nameIndex;
+    }
+
+    return { section: section, section_index: sectionIndex };
+  }
+
   function getGroupLabel(group) {
     if (!group.length) return '';
     var first = group[0];
@@ -329,6 +464,7 @@
           ? 'input[type="radio"][name="' + cssEscape(el.name) + '"]'
           : buildSelector(el);
 
+        var radioSection = getSectionContext(el);
         registry[id] = { kind: 'radio-group', elements: group };
         fields.push({
           id: id,
@@ -340,7 +476,9 @@
           label: getGroupLabel(group),
           placeholder: '',
           required: group.some(function (r) { return r.required; }),
-          options: options
+          options: options,
+          section: radioSection.section,
+          section_index: radioSection.section_index
         });
         continue;
       }
@@ -351,6 +489,7 @@
 
       var fid = 'f' + (counter++);
       var selector = buildSelector(el);
+      var fieldSection = getSectionContext(el);
       registry[fid] = { kind: 'element', el: el };
       fields.push({
         id: fid,
@@ -362,7 +501,9 @@
         label: getLabel(el),
         placeholder: el.placeholder || '',
         required: !!el.required,
-        options: tagLower === 'select' ? getSelectOptions(el) : []
+        options: tagLower === 'select' ? getSelectOptions(el) : [],
+        section: fieldSection.section,
+        section_index: fieldSection.section_index
       });
     }
 
@@ -556,6 +697,8 @@
     isVisible: isVisible,
     getLabel: getLabel,
     getGroupLabel: getGroupLabel,
+    getSectionContext: getSectionContext,
+    extractSectionIndex: extractSectionIndex,
     buildSelector: buildSelector,
     scanFields: scanFields,
     scanAll: scanAll,
