@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock Job Application (ApplyPilot Copilot test page)</title>
+<style>
+  body { font-family: sans-serif; max-width: 640px; margin: 40px auto; }
+  fieldset { margin-bottom: 20px; }
+  label { display: block; margin-top: 10px; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+</style>
+</head>
+<body>
+<h1>Acme Corp — Software Engineer Application</h1>
+
+<form id="application-form">
+
+  <!-- Pattern 1: <label for=id> -->
+  <label for="full_name">Full Name</label>
+  <input type="text" id="full_name" name="full_name" autocomplete="name">
+
+  <!-- Pattern 2: wrapping <label> -->
+  <label>
+    Email Address
+    <input type="email" name="email" autocomplete="email">
+  </label>
+
+  <!-- Pattern 3: aria-label -->
+  <input type="tel" name="phone" aria-label="Phone Number" autocomplete="tel">
+
+  <!-- Pattern 4: placeholder-only, no label at all -->
+  <input type="text" name="linkedin" placeholder="LinkedIn profile URL">
+
+  <!-- Pattern 5: aria-labelledby referencing separate text -->
+  <span id="portfolio-label">Portfolio URL</span>
+  <input type="text" name="portfolio" aria-labelledby="portfolio-label">
+
+  <!-- Pattern 6: nearby preceding text node, no label/aria at all -->
+  <p>How did you hear about us?</p>
+  <input type="text" name="referral">
+
+  <!-- React-style controlled input: setting .value directly does NOT stick unless the
+       native setter + input event is used (see the script at the bottom of this file). -->
+  <label for="react_input">Desired Salary (controlled input demo)</label>
+  <input type="text" id="react_input" name="react_input">
+
+  <!-- select -->
+  <label for="experience_level">Experience Level</label>
+  <select id="experience_level" name="experience_level">
+    <option value="">-- Select --</option>
+    <option value="junior">Junior (0-2 years)</option>
+    <option value="mid">Mid-level (3-5 years)</option>
+    <option value="senior">Senior (6+ years)</option>
+  </select>
+
+  <!-- radio group -->
+  <fieldset>
+    <legend>Are you legally authorized to work in the US?</legend>
+    <label><input type="radio" name="work_auth" value="yes"> Yes</label>
+    <label><input type="radio" name="work_auth" value="no"> No</label>
+  </fieldset>
+
+  <!-- textarea -->
+  <label for="cover_note">Anything else you'd like us to know?</label>
+  <textarea id="cover_note" name="cover_note"></textarea>
+
+  <!-- should be excluded: hidden input -->
+  <input type="hidden" name="hidden_token" value="abc123">
+
+  <!-- should be excluded: aria-hidden wrapper -->
+  <div aria-hidden="true">
+    <label for="aria_hidden_field">Decoy field (aria-hidden)</label>
+    <input type="text" id="aria_hidden_field" name="aria_hidden_field">
+  </div>
+
+  <!-- should be excluded: display:none -->
+  <div style="display:none">
+    <label for="display_none_field">Decoy field (display none)</label>
+    <input type="text" id="display_none_field" name="display_none_field">
+  </div>
+
+  <!-- react-auto-generated-looking id, to test the "not a good id" heuristic -->
+  <label for=":r3:">Auto-generated id field</label>
+  <input type="text" id=":r3:" name="weird_id_field">
+
+  <button type="submit">Submit Application</button>
+</form>
+
+<script>
+  // Simulates a React-controlled input: a re-render loop enforces the value in `reactState`
+  // unless the native `input` event fired (which is what setNativeValue() in scanner.js
+  // triggers). Setting el.value = x directly with no event will get silently reverted.
+  (function () {
+    var el = document.getElementById('react_input');
+    var reactState = '';
+    el.addEventListener('input', function (e) { reactState = e.target.value; });
+    setInterval(function () {
+      if (el.value !== reactState) el.value = reactState;
+    }, 50);
+  })();
+</script>
+</body>
+</html>

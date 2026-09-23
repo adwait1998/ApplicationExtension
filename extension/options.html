@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ApplyPilot Copilot — Settings</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    max-width: 560px;
+    margin: 32px auto;
+    padding: 0 20px;
+    color: #1f2937;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  p.sub { color: #6b7280; margin-top: 0; font-size: 13px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 18px 0 6px; }
+  input[type="text"], input[type="password"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    font-size: 13px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  button {
+    margin-top: 16px;
+    padding: 8px 14px;
+    font-size: 13px;
+    border-radius: 6px;
+    border: 1px solid #2563eb;
+    background: #2563eb;
+    color: #fff;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: #fff;
+    color: #2563eb;
+  }
+  button:hover { opacity: 0.9; }
+  #toggleToken { margin-top: 0; padding: 8px 10px; }
+  #status { margin-top: 14px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; }
+  #status.ok { display: block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+  #status.err { display: block; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  #status.info { display: block; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
+  .hint { font-size: 12px; color: #6b7280; margin-top: 6px; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>ApplyPilot Copilot</h1>
+  <p class="sub">Connect the extension to your local ApplyPilot service. Nothing here ever leaves your machine.</p>
+
+  <label for="serviceUrl">Service URL</label>
+  <input type="text" id="serviceUrl" placeholder="http://127.0.0.1:8765" autocomplete="off" spellcheck="false">
+  <div class="hint">Printed when you run <code>applypilot serve-extension</code>. Must be on <code>127.0.0.1</code>.</div>
+
+  <label for="token">Service token</label>
+  <div class="row">
+    <input type="password" id="token" placeholder="paste the token from the CLI output" autocomplete="off" spellcheck="false">
+    <button type="button" class="secondary" id="toggleToken">Show</button>
+  </div>
+  <div class="hint">Also printed by <code>applypilot serve-extension</code> on first run. Stored only in this browser's local extension storage.</div>
+
+  <div>
+    <button type="button" id="save">Save</button>
+    <button type="button" class="secondary" id="test">Test connection</button>
+  </div>
+
+  <div id="status"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>

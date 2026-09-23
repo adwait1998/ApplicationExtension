@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ApplyPilot Copilot</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="title">
+      <span class="dot" id="serviceDot" title="Service status unknown"></span>
+      ApplyPilot Copilot
+    </div>
+    <button id="optionsBtn" class="icon-btn" title="Settings">Settings</button>
+  </header>
+
+  <div class="reminder">
+    You review and submit. This extension never clicks submit and never navigates — it only
+    fills fields and highlights what it did.
+  </div>
+
+  <div id="statusBox" class="status"></div>
+
+  <div class="actions">
+    <button id="scanBtn" class="primary">Scan &amp; fill this page</button>
+    <button id="undoBtn" class="secondary" disabled>Undo fill</button>
+  </div>
+
+  <div id="results" class="results"></div>
+
+  <footer>
+    <span id="tiersLine"></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "ApplyPilot Copilot",
+  "version": "0.1.0",
+  "description": "Fills job application forms from your local ApplyPilot profile. Fills and highlights only — you always review and submit yourself. Nothing leaves your machine.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://127.0.0.1:*/*"
+  ],
+  "minimum_chrome_version": "110"
+}
