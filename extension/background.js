@@ -43,6 +43,94 @@ function callResolve(url, fields) {
   });
 }
 
+// Chunked to avoid "Maximum call stack size exceeded" from
+// String.fromCharCode.apply on a large array. Base64 is the simplest reliable
+// way to move binary bytes across the background-worker -> content-script
+// message boundary (structured clone does carry ArrayBuffer/Uint8Array too,
+// but base64 + JSON is what chrome.runtime.sendMessage's promise API round-trips
+// most predictably). Measured cost for a ~1MB PDF: ~8ms to encode here, ~4ms to
+// decode in content.js, ~1.33x size inflation (1MB -> ~1.33MB of base64 text) —
+// negligible next to the localhost fetch itself.
+function bufferToBase64(buffer) {
+  var bytes = new Uint8Array(buffer);
+  var CHUNK = 0x8000;
+  var parts = [];
+  for (var i = 0; i < bytes.length; i += CHUNK) {
+    parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(parts.join(''));
+}
+
+function parseFilenameFromDisposition(disposition) {
+  if (!disposition) return '';
+  var star = /filename\*=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  if (star) {
+    try { return decodeURIComponent(star[1]); } catch (e) { return star[1]; }
+  }
+  var plain = /filename="?([^";]+)"?/i.exec(disposition);
+  return plain ? plain[1] : '';
+}
+
+/**
+ * Fetches the operator's résumé bytes for the content script to attach to a
+ * file input. GET /resume/info (filename/size) is consulted first for a
+ * clean filename, but /resume itself is still tried even if that lookup
+ * fails or the endpoint doesn't exist yet — the Content-Type header on the
+ * bytes response is authoritative either way. Fails soft: no token, service
+ * unreachable, or no résumé stored (404) all resolve to { ok: false, ... }
+ * rather than throwing, so content.js can fall back to today's skip behaviour.
+ */
+function callResume() {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) {
+      return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
+    }
+    var headers = { 'X-ApplyPilot-Token': cfg.token };
+
+    function fetchBytes(fallbackFilename) {
+      return fetch(cfg.serviceUrl + '/resume', { headers: headers }).then(function (resp) {
+        if (resp.status === 404) {
+          return { ok: false, error: 'no-resume', message: 'No résumé is stored yet. Upload one on the extension options page.' };
+        }
+        if (resp.status === 401) {
+          return { ok: false, error: 'unauthorized', message: 'The service rejected the token (401 Unauthorized). Check the token in the extension options page.' };
+        }
+        if (!resp.ok) {
+          return { ok: false, error: 'http-' + resp.status, message: 'Service returned HTTP ' + resp.status + ' fetching the résumé.' };
+        }
+        var contentType = resp.headers.get('Content-Type') || 'application/octet-stream';
+        var headerFilename = parseFilenameFromDisposition(resp.headers.get('Content-Disposition') || '');
+        return resp.arrayBuffer().then(function (buf) {
+          return {
+            ok: true,
+            data: {
+              filename: headerFilename || fallbackFilename || 'resume.pdf',
+              contentType: contentType,
+              size: buf.byteLength,
+              base64: bufferToBase64(buf)
+            }
+          };
+        });
+      }, function () {
+        return { ok: false, error: 'unreachable', message: friendlyFetchError(cfg.serviceUrl) };
+      });
+    }
+
+    return fetch(cfg.serviceUrl + '/resume/info', { headers: headers }).then(function (infoResp) {
+      if (!infoResp.ok) return fetchBytes(''); // /resume itself still 404s cleanly if nothing is stored
+      return infoResp.json().then(function (info) {
+        return fetchBytes(info && info.filename);
+      }, function () {
+        return fetchBytes('');
+      });
+    }, function () {
+      // /resume/info unreachable for the same reason /resume would be — try
+      // /resume directly anyway rather than giving up on a filename lookup alone.
+      return fetchBytes('');
+    });
+  });
+}
+
 function callHealth() {
   return getConfig().then(function (cfg) {
     var headers = cfg.token ? { 'X-ApplyPilot-Token': cfg.token } : {};
@@ -80,6 +168,10 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'HEALTH') {
     callHealth().then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'GET_RESUME') {
+    callResume().then(sendResponse);
     return true;
   }
   return false;

@@ -150,6 +150,84 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('click guard REFUSES null', Scanner.isClickSafe(null) === false);
 })();
 
+// --- résumé attachment: target selection (v3 spec §B) -----------------------
+// jsdom (verified against the version this harness runs) has NO DataTransfer
+// or DragEvent implementation at all, and its `input.files` setter only
+// accepts a real FileList (which nothing here can construct). That means the
+// actual "assign the file, dispatch drop, read back input.files[0]" mechanics
+// in attachResumeFile() CANNOT be exercised end-to-end offline — only in a
+// real browser (see scripts/chrome_load_test.py, owned elsewhere; this repo's
+// operator adds the real-Chrome attachment assertions there separately).
+//
+// What CAN be verified here, and is below:
+//   1. findResumeFileTarget()'s résumé-vs-cover-letter selection logic — pure
+//      DOM/text matching, no browser-only APIs involved.
+//   2. attachResumeFile()'s fail-soft guard when DataTransfer is unavailable —
+//      genuinely exercises the "never throw, report a clear failure instead"
+//      path (the same path a site that rejects programmatic assignment would
+//      also hit), rather than a vacuous pass.
+(() => {
+  const doc = dom.window.document;
+
+  const ghTarget = Scanner.findResumeFileTarget(doc);
+  expect('résumé target found on the page', !!ghTarget);
+  expect('résumé target is the Greenhouse dropzone input, not the cover letter or the ambiguous "Attach" input',
+    ghTarget && ghTarget.el.id === 'gh_resume_input');
+  expect('résumé target is correctly flagged as a dropzone',
+    ghTarget && ghTarget.isDropzone === true);
+  expect('résumé target context text captured the "Resume/CV" label despite the hidden input having no <label for>',
+    ghTarget && /resume\s*\/?\s*cv/i.test(ghTarget.contextText));
+
+  expect('generic scanFields() excludes the hidden Greenhouse input (display:none)',
+    !fields.some(f => f.name === 'resume_gh'));
+  expect('generic scanFields() still sees the visible cover-letter and "Attach" file inputs',
+    fields.some(f => f.name === 'cover_letter') && fields.some(f => f.name === 'attach_file'));
+
+  // Remove the explicitly-labeled dropzone to test rule 2 in isolation: with no
+  // résumé-labeled candidate left, the first non-cover-letter file input wins —
+  // even though the cover-letter input is EARLIER in DOM order (proving the
+  // cover-letter exclusion, not DOM order, is what's doing the work).
+  const dz = doc.getElementById('gh_resume_dropzone');
+  dz.parentNode.removeChild(dz);
+  const fallbackTarget = Scanner.findResumeFileTarget(doc);
+  expect('rule 2 (no explicit résumé label): first non-cover-letter file input wins over an earlier cover-letter input',
+    fallbackTarget && fallbackTarget.el.id === 'attach_upload');
+
+  // Remove every remaining file input to test the "nothing to attach to" case.
+  doc.getElementById('attach_upload').remove();
+  doc.getElementById('cover_letter_upload').remove();
+  expect('no eligible file input on the page -> null target', Scanner.findResumeFileTarget(doc) === null);
+
+  const noTargetResult = Scanner.attachResumeFile(doc, new dom.window.File(['x'], 'resume.pdf', { type: 'application/pdf' }));
+  expect('attachResumeFile() reports attempted:false when there is nothing to attach to',
+    noTargetResult && noTargetResult.attempted === false);
+})();
+
+// --- résumé attachment: fail-soft guard when DataTransfer is unavailable ----
+(() => {
+  const doc = dom.window.document;
+  const input = doc.createElement('input');
+  input.type = 'file';
+  input.id = 'guard_resume_input';
+  doc.body.appendChild(input);
+  const labelNode = doc.createElement('label');
+  labelNode.setAttribute('for', 'guard_resume_input');
+  labelNode.textContent = 'Resume/CV';
+  doc.body.appendChild(labelNode);
+
+  const file = new dom.window.File(['hello'], 'resume.pdf', { type: 'application/pdf' });
+  let threw = false;
+  let result;
+  try {
+    result = Scanner.attachResumeFile(doc, file);
+  } catch (e) {
+    threw = true;
+  }
+  expect('attachResumeFile() never throws even when DataTransfer is unavailable', threw === false);
+  expect('attachResumeFile() reports a clear, non-silent failure when DataTransfer is unavailable (jsdom has none)',
+    !!result && result.attempted === true && result.attached === false && /DataTransfer/.test(result.reason || ''));
+})();
+
 let failed = 0;
 console.log('\n--- checks ---');
 for (const c of checks) {

@@ -158,6 +158,38 @@
   <label for="alt_phone">Alternate Phone</label>
   <input type="tel" id="alt_phone" name="altPhone" placeholder="555-0199">
 
+  <!-- ===================================================================
+       Résumé attachment scenarios (v3 spec §B) — exercises
+       ApplyPilotScanner.findResumeFileTarget()'s résumé-vs-cover-letter
+       disambiguation. The cover-letter input is placed BEFORE the ambiguous
+       "Attach" input on purpose: if the cover-letter exclusion rule didn't
+       work, DOM order alone would pick the wrong one first.
+       =================================================================== -->
+
+  <!-- Should NEVER be chosen as the résumé target, no matter what. -->
+  <label for="cover_letter_upload">Cover Letter (optional)</label>
+  <input type="file" id="cover_letter_upload" name="cover_letter" accept=".pdf,.doc,.docx">
+
+  <!-- Ambiguous "Attach" file input — no résumé-ish label at all, mirroring a
+       Greenhouse dropzone whose label is just "Attach". Should be chosen as
+       the résumé target ONLY when no explicitly résumé-labeled input exists
+       elsewhere on the page (selftest.js removes the block below to test
+       this in isolation). -->
+  <label for="attach_upload">Attach</label>
+  <input type="file" id="attach_upload" name="attach_file">
+
+  <!-- Greenhouse-style dropzone: visible "Upload File" button + "or drag and
+       drop here" copy, with the REAL <input type=file> hidden (display:none)
+       and explicitly résumé-labeled. Must be found and chosen despite being
+       hidden, and despite the ambiguous "Attach" input above being earlier
+       in DOM order (explicit résumé label outranks DOM order). -->
+  <div class="gh-dropzone" id="gh_resume_dropzone">
+    <div class="gh-dropzone-label">Resume/CV</div>
+    <button type="button" class="gh-dropzone-button">Upload File</button>
+    <span>or drag and drop here</span>
+    <input type="file" id="gh_resume_input" name="resume_gh" style="display:none">
+  </div>
+
   <button type="submit">Submit Application</button>
 </form>
 

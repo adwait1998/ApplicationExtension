@@ -136,6 +136,60 @@
     return { applied: applied, failed: failed, skippedCount: skipped.length };
   }
 
+  function base64ToUint8Array(base64) {
+    var binary = atob(base64);
+    var len = binary.length;
+    var bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  /**
+   * Best-effort résumé attachment, run as part of applyFills() — i.e. only ever
+   * as a step inside an explicit, user-initiated "fill this page" action, never
+   * on page load (see file header). Fails soft at every step: no résumé-shaped
+   * field on the page, no service reachable, no résumé stored, or a widget that
+   * rejects programmatic assignment all resolve to a reported (never thrown)
+   * failure. The target gets the same highlight() treatment as a normal
+   * fill/skip so it's visible on the page, not just in the popup's summary.
+   */
+  function maybeAttachResume() {
+    // Cheap local check first — skip the round-trip to the background worker
+    // (and the local service) entirely when there's nowhere on this page to
+    // put a résumé.
+    var target = ApplyPilotScanner.findResumeFileTarget(document);
+    if (!target) return Promise.resolve({ attempted: false });
+
+    function fail(reason) {
+      highlight(target.el, 'skipped', 'Résumé not attached — ' + reason);
+      return { attempted: true, attached: false, reason: reason };
+    }
+
+    return chrome.runtime.sendMessage({ type: 'GET_RESUME' }).then(function (resp) {
+      if (!resp || !resp.ok) {
+        return fail((resp && resp.message) || 'Could not reach the local service for the résumé file.');
+      }
+      var d = resp.data || {};
+      var file;
+      try {
+        var bytes = base64ToUint8Array(d.base64 || '');
+        file = new File([bytes], d.filename || 'resume.pdf', { type: d.contentType || 'application/octet-stream' });
+      } catch (e) {
+        return fail('Could not decode the résumé file from the service response.');
+      }
+
+      var result = ApplyPilotScanner.attachResumeFile(document, file);
+      if (result.attached) {
+        highlight(target.el, 'filled', 'Résumé attached: ' + result.filename);
+      } else if (result.attempted) {
+        highlight(target.el, 'skipped', 'Résumé not attached — ' + (result.reason || 'unknown error'));
+      }
+      return result;
+    }, function (e) {
+      return fail('Could not reach the background worker for the résumé file: ' + (e && e.message ? e.message : e));
+    });
+  }
+
   function undo() {
     var restored = 0;
     for (var id in priorValues) {
@@ -157,6 +211,26 @@
 
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || typeof msg !== 'object') return false;
+
+    if (msg.type === 'APPLY_FILLS') {
+      // Async: applying the field fills themselves is synchronous, but the
+      // résumé step needs a round-trip to the background worker for the file
+      // bytes (see maybeAttachResume). Returning true below keeps the message
+      // channel open for this promise chain.
+      Promise.resolve()
+        .then(function () { return applyFills(msg.fills, msg.skipped); })
+        .then(function (result) {
+          return maybeAttachResume().then(function (resume) {
+            result.resume = resume;
+            return result;
+          });
+        })
+        .then(sendResponse, function (e) {
+          sendResponse({ error: String(e && e.message ? e.message : e) });
+        });
+      return true;
+    }
+
     try {
       if (msg.type === 'DETECT') {
         sendResponse(detect());
@@ -164,10 +238,6 @@
       }
       if (msg.type === 'SCAN') {
         sendResponse(scan());
-        return false;
-      }
-      if (msg.type === 'APPLY_FILLS') {
-        sendResponse(applyFills(msg.fills, msg.skipped));
         return false;
       }
       if (msg.type === 'UNDO') {

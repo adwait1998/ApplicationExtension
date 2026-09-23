@@ -700,6 +700,160 @@
     return [entry.el];
   }
 
+  // ---------------------------------------------------------------------
+  // résumé attachment — picking the target, then assigning the file
+  // ---------------------------------------------------------------------
+  //
+  // Selection mirrors the REASONING of src/applypilot/apply/v2/resolver.py's
+  // _pick_resume_file_field / _is_cover_letter_file (read for the rules, not
+  // imported — this file has zero Python/Node dependencies by design, see the
+  // file header):
+  //   1. an explicit résumé/CV-labeled file input wins;
+  //   2. else the first file input that is NOT cover-letter-labeled (a plain
+  //      "Attach" dropzone with no résumé-ish label still binds the résumé —
+  //      it's usually the required blocker, same as Greenhouse's ambiguous
+  //      "Attach" widgets);
+  //   3. a cover-letter-labeled file input is NEVER the résumé target.
+
+  var COVER_LETTER_RE = /cover[\s_-]?letter/i;
+  var RESUME_LABEL_RE = /\b(r[ée]sum[ée]|curriculum\s*vitae|\bcv\b)\b/i;
+  var DROPZONE_RE = /drag\s*(?:and|&|'?n'?)?\s*drop/i;
+
+  // Gathers label + name/id + a little nearby container copy so a Greenhouse-style
+  // dropzone ("Upload File / or drag and drop here", with the real <input> hidden
+  // and unlabeled) is classified correctly even though none of that text sits in
+  // a real <label for>/aria-label on the input itself.
+  function fileInputContextText(el) {
+    var parts = [getLabel(el), el.name || '', el.id || ''];
+    var node = el.parentElement;
+    for (var depth = 0; depth < 4 && node; depth++) {
+      if (node.tagName === 'FORM' || node.tagName === 'BODY') break;
+      var t = cleanText(node.textContent);
+      if (t && t.length < 300) parts.push(t);
+      node = node.parentElement;
+    }
+    return cleanText(parts.join(' '));
+  }
+
+  /**
+   * Picks the single file input that should receive the résumé. Returns
+   * { el, contextText, isDropzone } or null when no eligible input exists on
+   * the page (no file inputs at all, or every file input is cover-letter-labeled).
+   */
+  function findResumeFileTarget(doc) {
+    doc = doc || (typeof document !== 'undefined' ? document : null);
+    if (!doc) return null;
+    var inputs = Array.prototype.slice.call(doc.querySelectorAll('input[type="file"]'))
+      .filter(function (el) { return el.isConnected && !el.disabled; });
+
+    var candidates = [];
+    for (var i = 0; i < inputs.length; i++) {
+      var el = inputs[i];
+      var ctx = fileInputContextText(el);
+      if (COVER_LETTER_RE.test(ctx)) continue; // rule 3: never the résumé target
+      candidates.push({ el: el, contextText: ctx, isDropzone: DROPZONE_RE.test(ctx) });
+    }
+    if (!candidates.length) return null;
+
+    for (var c = 0; c < candidates.length; c++) {
+      if (RESUME_LABEL_RE.test(candidates[c].contextText)) return candidates[c]; // rule 1
+    }
+    return candidates[0]; // rule 2: first non-cover-letter file input, DOM order
+  }
+
+  // Nearest ancestor whose own text mentions drag-and-drop, so the synthetic `drop`
+  // lands on the widget's actual drop target rather than always the input's direct
+  // parent (Greenhouse-style markup often wraps the hidden input several levels
+  // below the clickable/droppable area).
+  function findDropzoneContainer(el) {
+    var node = el.parentElement;
+    var fallback = node || el;
+    for (var depth = 0; depth < 4 && node; depth++) {
+      var t = cleanText(node.textContent);
+      if (t && DROPZONE_RE.test(t)) return node;
+      node = node.parentElement;
+    }
+    return fallback;
+  }
+
+  /**
+   * Attaches `file` to the page's résumé target and VERIFIES it stuck before
+   * reporting success — a silent failure here is worse than a skip (the
+   * operator would submit with no résumé attached). Never throws: assigning
+   * to a file input's `.files` is the one DOM write in this whole module a
+   * site's own JS can reject outright, so every failure mode reports rather
+   * than propagates.
+   *
+   * Never opens a native file picker and never calls .click() on anything —
+   * the file is assigned programmatically via DataTransfer, full stop. That
+   * keeps this function outside isClickSafe()'s guard entirely, on purpose:
+   * there is no click path here to protect against turning into a submit.
+   *
+   * Returns:
+   *   { attempted: false }                                 — no résumé-eligible
+   *                                                            file input on the page
+   *   { attempted: true, attached: true, filename }         — verified via read-back
+   *   { attempted: true, attached: false, reason }          — tried and failed, or
+   *                                                            could not verify
+   */
+  function attachResumeFile(doc, file) {
+    var target = findResumeFileTarget(doc);
+    if (!target) return { attempted: false };
+
+    var el = target.el;
+    var view = realmOf(el);
+    var DataTransferCtor = view && view.DataTransfer;
+    if (!DataTransferCtor) {
+      // Real Chrome always has this. Only a test/runtime environment without a
+      // full DOM (e.g. jsdom, which has no DataTransfer/DragEvent) lands here —
+      // fail soft, never throw. See selftest.js for what that guard exercises.
+      return { attempted: true, attached: false, reason: 'DataTransfer is not available in this browsing context.' };
+    }
+
+    try {
+      var dt = new DataTransferCtor();
+      dt.items.add(file);
+
+      try {
+        el.files = dt.files;
+      } catch (eAssign) {
+        return { attempted: true, attached: false, reason: 'Site rejected programmatic file assignment: ' + (eAssign && eAssign.message ? eAssign.message : eAssign) };
+      }
+      fireEvents(el, ['input', 'change']);
+
+      if (target.isDropzone) {
+        // Best-effort only: some dropzone widgets (react-dropzone and similar)
+        // read e.dataTransfer.files from the drop event itself rather than
+        // from the underlying input's change event. This can never downgrade
+        // the verified result below, and any failure here is swallowed.
+        try {
+          var dzEl = findDropzoneContainer(el);
+          var EventCtor = (view && (view.DragEvent || view.Event)) || (typeof Event !== 'undefined' ? Event : null);
+          if (EventCtor && dzEl) {
+            var dropEvt = new EventCtor('drop', { bubbles: true, cancelable: true });
+            try { Object.defineProperty(dropEvt, 'dataTransfer', { value: dt }); } catch (eDef) { /* best effort */ }
+            dzEl.dispatchEvent(dropEvt);
+          }
+        } catch (eDrop) {
+          // best effort only — never affects the verified result below
+        }
+      }
+
+      var attached = el.files && el.files[0];
+      if (attached && attached.name === file.name) {
+        return { attempted: true, attached: true, filename: attached.name };
+      }
+      return {
+        attempted: true,
+        attached: false,
+        reason: 'Assigned the file but could not confirm it stuck (input.files[0] was ' +
+          (attached ? ('"' + attached.name + '"') : 'empty') + ').'
+      };
+    } catch (e) {
+      return { attempted: true, attached: false, reason: 'Error while attaching résumé: ' + (e && e.message ? e.message : String(e)) };
+    }
+  }
+
   return {
     VERSION: '0.1.0',
     EXCLUDED_INPUT_TYPES: EXCLUDED_INPUT_TYPES,
@@ -720,6 +874,8 @@
     getCurrentValue: getCurrentValue,
     applyFill: applyFill,
     getHighlightTargets: getHighlightTargets,
-    isClickSafe: isClickSafe
+    isClickSafe: isClickSafe,
+    findResumeFileTarget: findResumeFileTarget,
+    attachResumeFile: attachResumeFile
   };
 });
