@@ -262,21 +262,25 @@ def resolve_field(
 
 
 def resolve_fields(
-    fields: list[FieldDescriptor], profile: dict, app_dir=None, url: str = ""
+    fields: list[FieldDescriptor], profile: dict, app_dir=None, url: str = "",
+    bank_path=None,
 ) -> FillPlan:
     """Resolve a batch of fields into a FillPlan. Values are returned only
     for the fields actually passed in — the profile itself never leaves
     this function. ``app_dir`` selects which persisted extension settings
     (see settings.py) apply; ``url`` is the page's URL (server.py passes
     the incoming request's ``url``), used by tier 5's "previously employed
-    here?" check to identify the employer being applied to."""
+    here?" check to identify the employer being applied to. ``bank_path``
+    is the ACTIVE PROFILE's own answer_bank.json — a bank is personal, so
+    with none given only profile-derived seeds are used."""
     backend = get_backend()
     # One AnswerCache and one draft budget for the whole batch: the answer
     # bank only needs loading once per request, and the draft cap (tier 6)
     # is only meaningful shared across every field in it — see
     # answers.DraftBudget. Built only when actually enabled, so a caller
     # who never opted in never pays for loading the bank file at all.
-    answer_cache = answers.make_cache(profile) if answers.answers_enabled(app_dir) else None
+    answer_cache = (answers.make_cache(profile, bank_path)
+                    if answers.answers_enabled(app_dir) else None)
     draft_budget = answers.DraftBudget(app_dir=app_dir) if answers.drafts_enabled(app_dir) else None
     plan = FillPlan(tiers_available=tiers_available(backend, app_dir))
     for f in fields:

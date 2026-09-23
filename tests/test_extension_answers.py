@@ -137,20 +137,23 @@ def test_match_returns_none_for_a_field_with_no_question_text(monkeypatch):
 def test_bank_hit_on_a_paraphrase_not_a_literal_match(monkeypatch, tmp_path):
     _enable(monkeypatch)
     bank = tmp_path / "bank.json"
+    # Company-NEUTRAL on purpose. This used "Why do you want to work at this
+    # company?" — but a real answer to that names the employer, and reusing it
+    # across companies is the bug is_company_directed() now blocks.
     bank.write_text(json.dumps([
-        {"q": "Why do you want to work at this company?", "a": "I admire the mission and want to contribute."},
+        {"q": "When can you start?", "a": "Two weeks after an offer."},
     ]), encoding="utf-8")
 
     def _explode(q, c):
         raise AssertionError("tier 5 alone must never call the LLM")
 
     result = answers.match(
-        _field(label="Why are you interested in this role?"),  # paraphrase, not literal
+        _field(label="What is your earliest available start date?"),  # paraphrase, not literal
         PROFILE, bank_path=bank, llm_fn=_explode,
     )
     assert isinstance(result, FillResult)
     assert result.source == "answer_bank"
-    assert result.value == "I admire the mission and want to contribute."
+    assert result.value == "Two weeks after an offer."
     assert result.auto_fill is True
     assert result.draft is False
     assert result.profile_key.startswith("answer_bank:")
@@ -160,15 +163,18 @@ def test_bank_hit_on_a_paraphrase_not_a_literal_match(monkeypatch, tmp_path):
 def test_bank_hit_reports_the_matched_question_in_the_reason(monkeypatch, tmp_path):
     _enable(monkeypatch)
     bank = tmp_path / "bank.json"
-    bank.write_text(json.dumps([{"q": "Why do you want to join this company?",
-                                  "a": "I admire the mission and want to contribute."}]),
+    # Company-NEUTRAL on purpose. This used "Why do you want to work at this
+    # company?" — but a real answer to that names the employer, and reusing it
+    # across companies is the bug is_company_directed() now blocks.
+    bank.write_text(json.dumps([{"q": "When can you start?",
+                                  "a": "Two weeks after an offer."}]),
                      encoding="utf-8")
     result = answers.match(
-        _field(label="Why are you interested in working here?"),
+        _field(label="What is your earliest available start date?"),
         PROFILE, bank_path=bank, llm_fn=lambda q, c: (_ for _ in ()).throw(AssertionError()),
     )
     assert isinstance(result, FillResult)
-    assert "why" in result.reason.lower() or "join" in result.reason.lower()
+    assert "start" in result.reason.lower()
 
 
 def test_seed_bank_answers_a_standard_question_with_zero_bank_file(monkeypatch, tmp_path):
@@ -713,3 +719,83 @@ def test_real_llm_fn_fails_soft_when_neither_provider_nor_cli_available(monkeypa
 
     result = answers._real_llm_fn("Tell us about yourself.", "context")
     assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# Found end-to-end the moment the answer bank was switched on by default: for
+# an application to one company it filled "Why do you want to work here?" with
+# "I'm drawn to Discord's…" and "How did you hear about us?" with "I've been
+# following Fanatics'…" — real answers written for OTHER employers. And the
+# default bank was one person's file, so anyone else got her answers too.
+# ---------------------------------------------------------------------------
+
+_OTHER_CO_BANK = [
+    {"q": "Why do you want to work here?",
+     "a": "I'm drawn to Discord's innovative approach to community."},
+    {"q": "How did you hear about us?",
+     "a": "I've been following Fanatics' growth for years."},
+    {"q": "Do you want to tell something to our recruiters that can make a difference?",
+     "a": "Stripe's mission deeply resonates with me."},
+    {"q": "What is your notice period?", "a": "Two weeks."},
+]
+
+
+def _bank(tmp_path, entries=_OTHER_CO_BANK):
+    p = tmp_path / "answer_bank.json"
+    p.write_text(json.dumps(entries), encoding="utf-8")
+    return p
+
+
+def _q(label, fid="q"):
+    return FieldDescriptor(id=fid, selector="#q", tag="textarea", type="textarea", name="",
+                           autocomplete="", label=label, placeholder="", required=False,
+                           options=[])
+
+
+@pytest.mark.parametrize("question", [
+    "Why do you want to work here?",
+    "How did you hear about us?",
+    "Do you want to tell something to our recruiters that can make a difference?",
+    "Why are you interested in joining our team?",
+    "What excites you about this role?",
+])
+def test_company_directed_questions_never_reuse_another_companys_answer(tmp_path, monkeypatch, question):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.delenv("APPLYPILOT_DRAFTS", raising=False)   # drafts off
+    out = answers.match(_q(question), {"personal": {}}, bank_path=_bank(tmp_path))
+    if isinstance(out, FillResult):
+        for co in ("Discord", "Fanatics", "Stripe"):
+            assert co not in out.value, f"reused {co}'s answer for {question!r}"
+    assert out is None or not isinstance(out, FillResult)
+
+
+def test_company_directed_question_goes_to_a_fresh_draft_when_drafts_are_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+    out = answers.match(_q("Why do you want to work here?"), {"personal": {}},
+                        bank_path=_bank(tmp_path),
+                        llm_fn=lambda q, c: "I want to build accessible products.")
+    assert isinstance(out, FillResult)
+    assert out.source == "draft" and out.draft is True
+    assert "Discord" not in out.value
+
+
+def test_generic_questions_still_reuse_the_bank(tmp_path, monkeypatch):
+    """The guard must not neuter the bank: company-neutral answers are exactly
+    what it is for."""
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    out = answers.match(_q("What is your notice period?"), {"personal": {}},
+                        bank_path=_bank(tmp_path))
+    assert isinstance(out, FillResult) and out.value == "Two weeks."
+
+
+def test_no_bank_path_means_seeds_only_never_another_persons_file(monkeypatch):
+    """With no bank supplied, nothing from any file may appear."""
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    cache = answers.make_cache({"personal": {}}, None)
+    assert all(e.get("source") == "seed" for e in cache._entries)
+
+
+def test_missing_bank_file_is_seeds_only(tmp_path):
+    cache = answers.make_cache({"personal": {}}, tmp_path / "does-not-exist.json")
+    assert all(e.get("source") == "seed" for e in cache._entries)

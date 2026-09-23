@@ -421,17 +421,20 @@ def test_tiers_available_reports_draft_only_with_both_flags(monkeypatch):
 def test_ladder_fills_from_the_answer_bank_before_falling_to_unresolved(monkeypatch, tmp_path):
     monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
     bank = tmp_path / "bank.json"
-    bank.write_text('[{"q": "Why do you want to join this company?", '
-                     '"a": "I admire the mission."}]', encoding="utf-8")
+    # Company-NEUTRAL on purpose. This used "Why do you want to work at this
+    # company?" — but a real answer to that names the employer, and reusing it
+    # across companies is the bug is_company_directed() now blocks.
+    bank.write_text('[{"q": "When can you start?", '
+                     '"a": "Two weeks after an offer."}]', encoding="utf-8")
     cache = answers.make_cache(PROFILE, bank_path=bank)
 
     result = resolve.resolve_field(
-        _field(tag="textarea", label="Why are you interested in this role?"),
+        _field(tag="textarea", label="What is your earliest available start date?"),
         PROFILE, answer_cache=cache,
     )
     assert isinstance(result, FillResult)
     assert result.source == "answer_bank"
-    assert result.value == "I admire the mission."
+    assert result.value == "Two weeks after an offer."
     assert result.draft is False
     assert result.auto_fill is True
 

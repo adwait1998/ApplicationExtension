@@ -400,7 +400,15 @@ def create_app(
             )
             for f in body.fields
         ]
-        plan = resolve.resolve_fields(fields, _load_profile(), app_dir=app_dir, url=body.url)
+        # The answer bank is personal: read the ACTIVE profile's own file, never
+        # another person's. Resolved per request so switching profiles takes
+        # effect immediately.
+        try:
+            bank = _current_profile_path(root).parent / "answer_bank.json"
+        except HTTPException:
+            bank = None
+        plan = resolve.resolve_fields(fields, _load_profile(), app_dir=app_dir,
+                                      url=body.url, bank_path=bank)
         return plan.to_dict()
 
     # -----------------------------------------------------------------

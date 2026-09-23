@@ -148,17 +148,45 @@ def _budgeted(real_fn: Callable[[str, str], str], budget: DraftBudget) -> Callab
 def make_cache(profile: dict, bank_path: str | Path | None = None) -> AnswerCache:
     """Build the AnswerCache tiers 5/6 share, with persistence disabled.
 
-    Loads ``bank_path`` (default: the repo-root ``answer_bank.json``) so
-    matching sees the full curated bank, then clears the *instance's*
-    ``bank_path`` so ``AnswerCache._persist()`` -- which only writes when
-    ``self.bank_path`` is truthy -- becomes a no-op. This is the one thing
-    that must never regress: an LLM miss must never be appended to a file
-    the operator has never reviewed.
+    ``bank_path`` must be the ACTIVE PROFILE's own ``answer_bank.json``. With
+    no path, the cache holds profile-derived seeds only and reads no file at
+    all. It used to default to the repo-root bank — one person's real past
+    answers — which put that person's answers (and personal background) into
+    anyone else's applications. A bank is personal; there is no safe default
+    other than none.
+
+    Persistence is disabled on the instance (``AnswerCache._persist`` only
+    writes when ``self.bank_path`` is truthy): an LLM miss must never be
+    appended to a file the operator has never reviewed.
     """
-    path = _DEFAULT_BANK_PATH if bank_path is None else Path(bank_path)
+    path = Path(bank_path) if bank_path is not None else None
+    if path is not None and not path.exists():
+        path = None
     cache = AnswerCache(profile, bank_path=path, threshold=_THRESHOLD)
     cache.bank_path = None
     return cache
+
+
+# Questions whose honest answer is about ONE specific employer. A cached answer
+# to one of these was written for some other company, so reusing it pastes
+# "I'm drawn to Discord's…" into a Viasat application — caught end-to-end the
+# moment the answer bank was switched on by default. These go to a fresh draft
+# (which knows which company this is) or are left for the operator, never to
+# the cache. Profile-derived seeds are unaffected: they are not company-bound.
+_COMPANY_DIRECTED = re.compile(
+    r"\bwhy\b.{0,40}\b(work|join|apply|applying|interested|here|us|company|role|position|team)\b"
+    r"|\bhow\s+did\s+you\s+(hear|learn|find|come\s+across)\b"
+    r"|\bwhat\s+(excites|interests|attracts|draws|appeals|motivates)\s+you\b"
+    r"|\bwhat\s+do\s+you\s+know\s+about\b"
+    r"|\b(tell|share\s+with)\s+(us|our\s+recruiters?|the\s+(hiring\s+)?team)\b"
+    r"|\bcover\s+letter\b"
+    r"|\bmake\s+a\s+difference\b",
+    re.I,
+)
+
+
+def is_company_directed(question: str) -> bool:
+    return bool(_COMPANY_DIRECTED.search(question or ""))
 
 
 _SYSTEM_PROMPT = (
@@ -484,7 +512,14 @@ def match(
         return prev_employed
 
     drafting = drafts_enabled(app_dir)
-    ac = cache if cache is not None else make_cache(profile, bank_path)
+    if is_company_directed(question):
+        # Seeds only: a stored answer to "why do you want to work here?" was
+        # written for some other employer. With no bank entries to match, the
+        # lookup misses and falls through to a fresh draft (drafts on) or to
+        # the operator (drafts off) — never to another company's answer.
+        ac = make_cache(profile, None)
+    else:
+        ac = cache if cache is not None else make_cache(profile, bank_path)
     ctx = _context_for(profile, field)
 
     if drafting:
