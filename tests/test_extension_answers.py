@@ -440,3 +440,70 @@ def test_canary_shaped_question_never_produces_answer_bank_or_draft(monkeypatch,
 
     result = answers.match(_field(label=label), PROFILE, bank_path=bank, llm_fn=_explode)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Grounding enforcement: the system prompt TELLS the model to stay inside
+# resume_facts; these assert that we also CHECK. Without this, the only thing
+# between a fabricated employer and a real application is the operator
+# noticing a blue badge.
+# ---------------------------------------------------------------------------
+
+def _drafting_env(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+
+
+_GROUNDED_PROFILE = {
+    "resume_facts": {"preserved_companies": ["Acme Corp"],
+                     "preserved_school": "Arizona State University"},
+    "experience": {"current_job_title": "Product Designer"},
+}
+
+
+def _grounding_field(label="Describe a project you are proud of", fid="g1"):
+    from applypilot.extension.schema import FieldDescriptor
+    return FieldDescriptor(
+        id=fid, selector="#g", tag="textarea", type="textarea", name="",
+        autocomplete="", label=label, placeholder="", required=False, options=[])
+
+
+def test_draft_claiming_an_invented_employer_is_refused(tmp_path, monkeypatch):
+    _drafting_env(monkeypatch)
+    bank = tmp_path / "bank.json"
+    bank.write_text("[]", encoding="utf-8")
+    out = answers.match(
+        _grounding_field(), _GROUNDED_PROFILE, bank_path=bank,
+        llm_fn=lambda q, c: "I worked at Netflix on their recommendations team.")
+    assert isinstance(out, SkipResult)
+    assert out.source == "draft"
+    assert "Netflix" in out.reason
+    assert out.auto_fill is False
+
+
+def test_draft_within_the_real_history_is_kept(tmp_path, monkeypatch):
+    _drafting_env(monkeypatch)
+    bank = tmp_path / "bank.json"
+    bank.write_text("[]", encoding="utf-8")
+    out = answers.match(
+        _grounding_field(), _GROUNDED_PROFILE, bank_path=bank,
+        llm_fn=lambda q, c: "At Acme Corp I rebuilt the onboarding flow.")
+    assert isinstance(out, FillResult)
+    assert out.draft is True
+    assert out.source == "draft"
+
+
+def test_grounding_never_blocks_an_answer_bank_hit(tmp_path, monkeypatch):
+    """Tier 5 answers are the operator's OWN past words — they are ground
+    truth by definition and must not be second-guessed by the draft check."""
+    _drafting_env(monkeypatch)
+    bank = tmp_path / "bank.json"
+    bank.write_text(json.dumps([{
+        "q": "Describe a project you are proud of",
+        "a": "At Netflix I rebuilt the recommendations UI.",
+    }]), encoding="utf-8")
+    out = answers.match(_grounding_field(), _GROUNDED_PROFILE, bank_path=bank,
+                        llm_fn=lambda q, c: "should not be called")
+    assert isinstance(out, FillResult)
+    assert out.source == "answer_bank"
+    assert out.draft is False

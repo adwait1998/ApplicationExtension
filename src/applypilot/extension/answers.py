@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Callable
 
 from applypilot.apply.answer_cache import AnswerCache
+from applypilot.extension import grounding
 from applypilot.extension.schema import FieldDescriptor, FillResult, SkipResult
 
 _ANSWERS_ENV = "APPLYPILOT_ANSWERS"
@@ -238,6 +239,23 @@ def _refuse_llm(question: str, context: str) -> str:
     return ""
 
 
+def _target_company(field: FieldDescriptor | None) -> str:
+    """Best-effort name of the employer being applied to. Naming them in an
+    answer is normal and truthful, so the grounding check must not treat it as
+    a fabricated employer. Derived from the field's section/label text only —
+    this module never sees the page URL."""
+    if field is None:
+        return ""
+    for text in (getattr(field, "section", ""), getattr(field, "label", "")):
+        for token in ("at ", "for ", "join "):
+            idx = (text or "").lower().find(token)
+            if idx >= 0:
+                tail = text[idx + len(token):].strip(" ?.,:;!")
+                if tail:
+                    return tail
+    return ""
+
+
 def match(
     field: FieldDescriptor,
     profile: dict,
@@ -302,6 +320,24 @@ def match(
         )
 
     if result.source == "llm" and result.answer:
+        # Grounding was, until this check, only an instruction in the system
+        # prompt — nothing verified the model obeyed it. A draft that claims
+        # employment somewhere the applicant has never worked is the worst
+        # output this tier can produce, and the DRAFT badge only helps if the
+        # operator happens to read carefully. So an unsupported employment
+        # claim is REFUSED outright: an empty box is strictly better.
+        unsupported = grounding.find_unsupported_claims(
+            result.answer, profile, target_company=_target_company(field)
+        )
+        if unsupported:
+            return SkipResult(
+                id=field.id,
+                source="draft",
+                reason=("draft refused — it claimed experience at "
+                        f"{', '.join(unsupported)}, which is not in your history. "
+                        "Answer this one yourself."),
+                auto_fill=False,
+            )
         return FillResult(
             id=field.id,
             value=result.answer,
