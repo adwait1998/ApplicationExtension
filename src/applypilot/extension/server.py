@@ -68,6 +68,10 @@ class FieldIn(BaseModel):
     placeholder: str = ""
     required: bool = False
     options: list[str] = Field(default_factory=list)
+    # Repeating-section context for tier 3 (structured). Optional so a
+    # scanner build that hasn't shipped this yet keeps working unchanged.
+    section: str = ""
+    section_index: int | None = None
 
 
 class ResolveRequest(BaseModel):
@@ -187,6 +191,8 @@ def create_app(
                 placeholder=f.placeholder,
                 required=f.required,
                 options=list(f.options),
+                section=f.section,
+                section_index=f.section_index,
             )
             for f in body.fields
         ]

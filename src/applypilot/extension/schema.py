@@ -30,6 +30,14 @@ class FieldDescriptor:
     placeholder: str = ""
     required: bool = False
     options: list[str] = field(default_factory=list)
+    # Repeating-section context (Workday "Work Experience 2", etc.), sent by
+    # the scanner. Both optional and defaulted so every existing caller and
+    # test keeps working unchanged. ``section`` is the nearest enclosing
+    # heading/legend text; ``section_index`` is the 1-based position parsed
+    # from it (or None when it could not be parsed / there is no repeating
+    # section). Consumed by tier 3 (applypilot.extension.structured).
+    section: str = ""
+    section_index: int | None = None
 
 
 @dataclass
@@ -38,7 +46,7 @@ class FillResult:
 
     id: str
     value: str
-    source: str  # "canary" | "deterministic" | "laya"
+    source: str  # "canary" | "deterministic" | "structured" | "laya"
     profile_key: str
     confidence: float
     auto_fill: bool
@@ -53,7 +61,7 @@ class SkipResult:
     """A field the ladder left for the human, with why."""
 
     id: str
-    source: str  # "canary" | "deterministic" | "secret_guard" | "unresolved"
+    source: str  # "canary" | "deterministic" | "structured" | "secret_guard" | "unresolved"
     reason: str
     auto_fill: bool = False
 

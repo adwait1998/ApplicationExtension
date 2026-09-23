@@ -118,6 +118,50 @@ def test_name_field_used_when_label_missing():
 
 
 # ---------------------------------------------------------------------------
+# "First and Last Legal Name" and sibling phrasings — the real Workday gap.
+# ---------------------------------------------------------------------------
+
+
+def test_first_and_last_legal_name_matches_full_name():
+    result = match(_field(label="First and Last Legal Name"), PROFILE)
+    assert isinstance(result, FillResult)
+    assert result.value == "Nida Shah"
+    assert result.profile_key == "personal.full_name"
+
+
+def test_legal_name_alone_matches_full_name():
+    result = match(_field(label="Legal Name"), PROFILE)
+    assert isinstance(result, FillResult)
+    assert result.value == "Nida Shah"
+
+
+def test_full_legal_name_matches_full_name():
+    result = match(_field(label="Full Legal Name"), PROFILE)
+    assert isinstance(result, FillResult)
+    assert result.value == "Nida Shah"
+
+
+def test_name_first_and_last_parenthetical_matches_full_name():
+    result = match(_field(label="Name (First and Last)"), PROFILE)
+    assert isinstance(result, FillResult)
+    assert result.value == "Nida Shah"
+
+
+def test_first_name_alone_still_matches_first_name_only():
+    # Regression guard: the new "legal name" / "first and last name" patterns
+    # must not swallow the existing bare first-name / last-name matches.
+    result = match(_field(label="First Name"), PROFILE)
+    assert isinstance(result, FillResult)
+    assert result.value == "Nida"
+
+
+def test_last_name_alone_still_matches_last_name_only():
+    result = match(_field(label="Last Name"), PROFILE)
+    assert isinstance(result, FillResult)
+    assert result.value == "Shah"
+
+
+# ---------------------------------------------------------------------------
 # file input / no match / unrelated fields
 # ---------------------------------------------------------------------------
 

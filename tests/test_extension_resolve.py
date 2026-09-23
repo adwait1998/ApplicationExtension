@@ -270,3 +270,100 @@ def test_secret_paths_are_not_rankable_candidates():
     from applypilot.extension import matcher
     for key in matcher.rank_candidates(_fd(label="Password"), limit=99):
         assert key != "personal.password"
+
+
+# ---------------------------------------------------------------------------
+# tier 3: structured, exercised through the ladder — reproducing the real
+# Workday "My Experience" step that filled 0 of 10 fields because the
+# profile had no work_history in it. Two work_history entries here.
+# ---------------------------------------------------------------------------
+
+WORKDAY_PROFILE = {
+    "personal": {"full_name": "Nida Shah", "email": "nida@example.com"},
+    "work_history": [
+        {
+            "title": "Senior Product Designer",
+            "company": "Acme",
+            "location": "Seattle, WA",
+            "start": "03/2022",
+            "end": "",
+            "current": True,
+            "description": "Led design for the core product.",
+        },
+        {
+            "title": "Product Designer",
+            "company": "Globex",
+            "location": "Portland, OR",
+            "start": "06/2018",
+            "end": "02/2022",
+            "current": False,
+            "description": "Owned onboarding flows.",
+        },
+    ],
+}
+
+
+def _workday_fields(section: str, section_index: int) -> list[FieldDescriptor]:
+    common = dict(section=section, section_index=section_index)
+    return [
+        _field(id="title", label="Job Title", **common),
+        _field(id="company", label="Company", **common),
+        _field(id="location", label="Location", **common),
+        _field(id="current", label="I currently work here", type="checkbox", **common),
+        _field(id="from", label="From", **common),
+        _field(id="to", label="To", **common),
+        _field(id="description", label="Role Description", tag="textarea", **common),
+    ]
+
+
+def test_workday_work_experience_1_fills_from_first_position():
+    plan = resolve.resolve_fields(_workday_fields("Work Experience 1", 1), WORKDAY_PROFILE)
+    fills = {f.id: f for f in plan.fills}
+    assert plan.skipped == [] or all(s.id not in fills for s in plan.skipped)
+    assert fills["title"].value == "Senior Product Designer"
+    assert fills["company"].value == "Acme"
+    assert fills["location"].value == "Seattle, WA"
+    assert fills["current"].value == "true"
+    assert fills["from"].value == "03/2022"
+    assert fills["to"].value == ""  # current position -> end date left blank
+    assert fills["description"].value == "Led design for the core product."
+    for f in fills.values():
+        assert f.source == "structured"
+        assert f.auto_fill is True
+
+
+def test_workday_work_experience_2_fills_from_second_position():
+    plan = resolve.resolve_fields(_workday_fields("Work Experience 2", 2), WORKDAY_PROFILE)
+    fills = {f.id: f for f in plan.fills}
+    assert fills["title"].value == "Product Designer"
+    assert fills["company"].value == "Globex"
+    assert fills["location"].value == "Portland, OR"
+    assert fills["current"].value == "false"
+    assert fills["from"].value == "06/2018"
+    assert fills["to"].value == "02/2022"
+    assert fills["description"].value == "Owned onboarding flows."
+
+
+def test_workday_work_experience_3_all_skip_never_wraps_to_position_1():
+    # Only two positions in the profile — a 3rd section must skip every
+    # field, never wrap back to Senior Product Designer / Acme.
+    plan = resolve.resolve_fields(_workday_fields("Work Experience 3", 3), WORKDAY_PROFILE)
+    assert plan.fills == []
+    assert len(plan.skipped) == 7
+    for s in plan.skipped:
+        assert s.source == "structured"
+        assert s.auto_fill is False
+        assert "3rd" in s.reason
+
+
+def test_workday_step_with_no_work_history_behaves_exactly_as_before():
+    # The actual bug: a profile with NO work_history must still just skip,
+    # with the same generic message as before tier 3 existed — never crash,
+    # never claim a "structured" skip it has no data to back up.
+    profile = {"personal": {"full_name": "Nida Shah"}}
+    plan = resolve.resolve_fields(_workday_fields("Work Experience 1", 1), profile)
+    assert plan.fills == []
+    assert len(plan.skipped) == 7
+    for s in plan.skipped:
+        assert s.source == "unresolved"
+        assert s.auto_fill is False

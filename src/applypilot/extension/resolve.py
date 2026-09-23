@@ -11,8 +11,15 @@
                    invariant 7).
 2. Deterministic  applypilot.extension.matcher — autocomplete, then
                    name/id/label regex.
-3. Laya           optional, lazy, absent by default. Gated on confidence.
-4. Unresolved     left for the human.
+3. Structured     applypilot.extension.structured — work_history[] /
+                   education[], indexed by the scanner's section/
+                   section_index. Like canary, a field this tier
+                   recognises (kind + slot both established) NEVER falls
+                   through to a lower tier — an out-of-range section index
+                   stays a structured skip rather than risking Laya
+                   guessing a value into the wrong position.
+4. Laya           optional, lazy, absent by default. Gated on confidence.
+5. Unresolved     left for the human.
 """
 from __future__ import annotations
 
@@ -20,7 +27,7 @@ import re
 from typing import Protocol
 
 from applypilot.apply import canary
-from applypilot.extension import matcher
+from applypilot.extension import matcher, structured
 from applypilot.extension.schema import FieldDescriptor, FillPlan, FillResult, SkipResult
 
 # ---------------------------------------------------------------------------
@@ -65,7 +72,7 @@ def _secret_skip(field: FieldDescriptor) -> SkipResult:
 
 
 # ---------------------------------------------------------------------------
-# Tier 3: Laya — narrow protocol only, absent by default
+# Tier 4: Laya — narrow protocol only, absent by default
 # ---------------------------------------------------------------------------
 
 
@@ -162,7 +169,16 @@ def resolve_field(
             return _secret_skip(field)
         return det
 
-    # tier 3: laya (optional)
+    # tier 3: structured (work_history / education, indexed by section) —
+    # never falls through once it recognises the field, same invariant as
+    # canary: an unresolvable structured field stays a structured skip.
+    struct = structured.match(field, profile)
+    if struct is not None:
+        if isinstance(struct, FillResult) and is_secret_path(struct.profile_key):
+            return _secret_skip(field)
+        return struct
+
+    # tier 4: laya (optional)
     backend = laya if laya is not None else get_backend()
     if backend is not None:
         # Pre-ranked and capped: Laya's confidence is only calibrated up to
@@ -188,7 +204,7 @@ def resolve_field(
                         reason=f"laya classification (confidence {confidence:.2f})",
                     )
 
-    # tier 4: unresolved
+    # tier 5: unresolved
     return SkipResult(
         id=field.id,
         source="unresolved",

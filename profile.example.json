@@ -39,6 +39,35 @@
     "current_company": "",
     "target_role": "software engineer"
   },
+  "work_history": [
+    {
+      "title": "Senior Product Designer",
+      "company": "Acme",
+      "location": "Seattle, WA",
+      "start": "03/2022",
+      "end": "",
+      "current": true,
+      "description": "Led design for the core product."
+    },
+    {
+      "title": "Product Designer",
+      "company": "Globex",
+      "location": "Portland, OR",
+      "start": "06/2018",
+      "end": "02/2022",
+      "current": false,
+      "description": "Owned onboarding flows."
+    }
+  ],
+  "education": [
+    {
+      "school": "Your University",
+      "degree": "Bachelor's Degree",
+      "field": "Computer Science",
+      "start": "08/2014",
+      "end": "05/2018"
+    }
+  ],
   "skills_boundary": {
     "languages": ["Python", "SQL", "JavaScript"],
     "frameworks": ["FastAPI", "Flask", "React"],

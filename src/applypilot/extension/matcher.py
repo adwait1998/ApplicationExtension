@@ -52,7 +52,14 @@ AUTOCOMPLETE_MAP: dict[str, str] = {
 _NAME_LABEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(first\s*name|given\s*name|fname)\b", re.I), "personal.full_name#first"),
     (re.compile(r"\b(last\s*name|family\s*name|surname|lname)\b", re.I), "personal.full_name#last"),
-    (re.compile(r"\b(full\s*name|your\s*name|applicant\s*name)\b", re.I), "personal.full_name"),
+    (
+        re.compile(
+            r"\bfull\s*name\b|\byour\s*name\b|\bapplicant\s*name\b|\blegal\s*name\b"
+            r"|\bfirst\s*and\s*last\s*name\b|name\s*\(first\s*and\s*last\)",
+            re.I,
+        ),
+        "personal.full_name",
+    ),
     (re.compile(r"\be-?mail\b", re.I), "personal.email"),
     (re.compile(r"\b(phone|mobile|cell)\s*(number)?\b", re.I), "personal.phone"),
     (re.compile(r"\blinkedin\b", re.I), "personal.linkedin_url"),
@@ -66,7 +73,7 @@ _NAME_LABEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bcurrent\s*(title|role|job\s*title)\b", re.I), "experience.current_job_title"),
 ]
 
-# Candidate profile keys eligible for the Laya (tier 3) semantic
+# Candidate profile keys eligible for the Laya (tier 4) semantic
 # classification pass — deterministic-tier paths only, secret paths are
 # never included (resolve.py's guard is the enforcement point, this is
 # belt-and-suspenders so Laya is never even offered the option).

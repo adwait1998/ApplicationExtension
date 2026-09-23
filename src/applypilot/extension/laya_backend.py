@@ -1,4 +1,4 @@
-"""Tier 3 of the resolution ladder: Laya semantic field classification.
+"""Tier 4 of the resolution ladder: Laya semantic field classification.
 
 Laya (https://pypi.org/project/laya/, publisher Convai Innovations) is a
 non-autoregressive *decision engine*, not a text generator. It answers
