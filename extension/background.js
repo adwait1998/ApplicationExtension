@@ -10,7 +10,7 @@
  * 127.0.0.1 service.
  */
 
-var DEFAULT_SERVICE_URL = 'http://127.0.0.1:8765';
+var DEFAULT_SERVICE_URL = 'http://127.0.0.1:8787';
 
 function getConfig() {
   return chrome.storage.local.get(['serviceUrl', 'token']).then(function (data) {

@@ -324,3 +324,29 @@ def test_startup_is_a_noop_without_laya(tmp_path, monkeypatch):
         r = client.get("/health", headers={"X-ApplyPilot-Token": token})
         assert r.status_code == 200
         assert "laya" not in r.json()["tiers_available"]
+
+
+def test_extension_default_port_matches_the_serve_extension_cli_default():
+    """The extension's default Service URL and the CLI's --port default live in
+    different languages with nothing tying them together. They drifted once
+    already: the extension shipped pointing at 8765, the web dashboard's port,
+    so it could never reach the service on 8787 out of the box."""
+    import re
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    cli = (repo / "src" / "applypilot" / "cli.py").read_text(encoding="utf-8")
+    line = next((ln for ln in cli.splitlines()
+                 if "Copilot extension service" in ln and "typer.Option(" in ln), None)
+    assert line, "could not find serve-extension's --port default in cli.py"
+    m = re.search(r"typer\.Option\((\d+)", line)
+    assert m, f"no numeric default in: {line.strip()}"
+    cli_port = m.group(1)
+
+    for rel in ("extension/background.js", "extension/options.js",
+                "extension/options.html", "extension/README.md"):
+        text = (repo / rel).read_text(encoding="utf-8")
+        ports = set(re.findall(r"127\.0\.0\.1:(\d+)", text))
+        assert ports, f"{rel} names no 127.0.0.1 port"
+        assert ports == {cli_port}, (
+            f"{rel} points at {sorted(ports)} but serve-extension listens on {cli_port}")

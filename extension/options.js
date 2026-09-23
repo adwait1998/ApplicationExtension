@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  var DEFAULT_SERVICE_URL = 'http://127.0.0.1:8765';
+  var DEFAULT_SERVICE_URL = 'http://127.0.0.1:8787';
 
   var serviceUrlEl = document.getElementById('serviceUrl');
   var tokenEl = document.getElementById('token');

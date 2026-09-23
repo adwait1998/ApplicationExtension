@@ -27,7 +27,7 @@ The extension talks to a companion service that runs on your machine (built sepa
 that service prints a URL and a token.
 
 1. Right-click the extension icon → **Options** (or click **Settings** inside the popup).
-2. Paste the **Service URL** (defaults to `http://127.0.0.1:8765` — it must always be
+2. Paste the **Service URL** (defaults to `http://127.0.0.1:8787` — it must always be
    `http://127.0.0.1`, the options page refuses anything else) and the **token**.
 3. Click **Save**, then **Test connection**. You should see which decision tiers the service
    reports (`canary`, `deterministic`, and — if the optional Laya model loaded — `laya`).
