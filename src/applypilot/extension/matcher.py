@@ -75,6 +75,78 @@ CANDIDATE_KEYS: list[str] = sorted(
     | {path.split("#", 1)[0] for _pattern, path in _NAME_LABEL_PATTERNS}
 )
 
+# Laya's confidence is only calibrated up to ~10 choice options — the library
+# itself warns that 11+ ships out-of-range temperatures and that confidence
+# should then be treated as uncalibrated. Since the confidence gate is the
+# ONLY thing standing between Laya and a wrong value in a real application,
+# an uncalibrated score is worse than no Laya at all. So candidates are
+# pre-ranked here and the tier offers the top few plus "none", never the
+# whole catalogue.
+LAYA_MAX_CANDIDATES = 9
+
+# Extra vocabulary per key, for terms a human uses that the dotted path does
+# not contain ("mobile" -> phone, "zip" -> postal_code).
+_KEY_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "personal.full_name": ("name", "applicant", "candidate", "legal"),
+    "personal.email": ("email", "e-mail", "mail", "contact"),
+    "personal.phone": ("phone", "mobile", "cell", "telephone", "tel", "number"),
+    "personal.city": ("city", "town", "municipality", "location"),
+    "personal.province_state": ("state", "province", "region"),
+    "personal.country": ("country", "nation"),
+    "personal.postal_code": ("postal", "zip", "postcode", "code"),
+    "personal.address": ("address", "street", "residence", "line"),
+    "personal.linkedin_url": ("linkedin", "profile", "url", "link"),
+    "personal.github_url": ("github", "git", "repo", "url", "link"),
+    "personal.portfolio_url": ("portfolio", "work", "url", "link", "site"),
+    "personal.website_url": ("website", "site", "url", "link", "homepage"),
+    "experience.current_company": ("company", "employer", "organization", "org", "firm"),
+    "experience.current_job_title": ("title", "role", "position", "job", "occupation"),
+}
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _terms_for_key(key: str) -> set[str]:
+    """Vocabulary describing a profile key: its own path tokens plus synonyms."""
+    tokens = set(_TOKEN_RE.findall(key.lower().replace(".", " ").replace("_", " ")))
+    tokens.discard("personal")
+    tokens.discard("experience")
+    tokens.discard("url")
+    return tokens | set(_KEY_SYNONYMS.get(key, ()))
+
+
+def _field_terms(field: FieldDescriptor) -> set[str]:
+    hay = " ".join(
+        str(x or "")
+        for x in (field.label, field.name, field.placeholder, field.autocomplete)
+    )
+    hay = hay.lower().replace("_", " ").replace("-", " ")
+    return set(_TOKEN_RE.findall(hay))
+
+
+def rank_candidates(
+    field: FieldDescriptor,
+    keys: list[str] | None = None,
+    limit: int = LAYA_MAX_CANDIDATES,
+) -> list[str]:
+    """The most plausible profile keys for this field, best first, capped at
+    `limit` so Laya is only ever asked a question it can calibrate.
+
+    Scoring is deliberately cheap and deterministic (term overlap, not a
+    model): its only job is to narrow the field before the real classifier
+    runs. Keys that share no vocabulary with the field still fill out the
+    tail in stable alphabetical order, so the list is never short enough to
+    exclude a correct-but-oddly-worded answer.
+    """
+    pool = list(keys if keys is not None else CANDIDATE_KEYS)
+    field_terms = _field_terms(field)
+
+    def score(key: str) -> tuple[int, str]:
+        overlap = len(field_terms & _terms_for_key(key))
+        return (-overlap, key)          # higher overlap first, then stable by name
+
+    return sorted(pool, key=score)[:limit]
+
 
 def _dig(profile: dict, dotted_path: str):
     node = profile or {}

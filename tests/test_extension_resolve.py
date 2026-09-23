@@ -217,3 +217,56 @@ def test_resolve_fields_batch_builds_fill_plan():
     assert plan.tiers_available == ["canary", "deterministic"]
     # the plan never contains anything beyond the fields it was given
     assert filled_ids | skipped_ids == {"f0", "f1", "f2"}
+
+
+# ---------------------------------------------------------------------------
+# Laya candidate pre-ranking — the confidence gate is only meaningful while
+# the option count stays inside Laya's calibrated range (~10).
+# ---------------------------------------------------------------------------
+
+def _fd(**kw):
+    from applypilot.extension.schema import FieldDescriptor
+    base = dict(id="f1", selector="#x", tag="input", type="text", name="",
+                autocomplete="", label="", placeholder="", required=False,
+                options=[])
+    base.update(kw)
+    return FieldDescriptor(**base)
+
+
+def test_laya_is_never_offered_more_options_than_it_can_calibrate():
+    from applypilot.extension import matcher
+    seen = {}
+
+    class Spy:
+        def classify(self, field, candidate_keys):
+            seen["n"] = len(candidate_keys)
+            return None
+
+    profile = {"personal": {"email": "a@b.com"}}
+    resolve.resolve_field(_fd(label="Some Unmatched Question"), profile, laya=Spy())
+    # +1 for the "none" option a backend adds; stay at or under 10 total.
+    assert seen["n"] <= matcher.LAYA_MAX_CANDIDATES
+    assert seen["n"] + 1 <= 10
+
+
+def test_ranking_puts_the_obvious_key_first():
+    from applypilot.extension import matcher
+    assert matcher.rank_candidates(_fd(label="Current Employer"))[0] == \
+        "experience.current_company"
+    assert matcher.rank_candidates(_fd(label="Mobile Number"))[0] == "personal.phone"
+    assert matcher.rank_candidates(_fd(label="Zip"))[0] == "personal.postal_code"
+    assert matcher.rank_candidates(_fd(label="LinkedIn Profile"))[0] == \
+        "personal.linkedin_url"
+
+
+def test_ranking_is_stable_and_never_empty_for_an_unknown_field():
+    from applypilot.extension import matcher
+    got = matcher.rank_candidates(_fd(label="Favourite colour"))
+    assert 0 < len(got) <= matcher.LAYA_MAX_CANDIDATES
+    assert got == matcher.rank_candidates(_fd(label="Favourite colour"))
+
+
+def test_secret_paths_are_not_rankable_candidates():
+    from applypilot.extension import matcher
+    for key in matcher.rank_candidates(_fd(label="Password"), limit=99):
+        assert key != "personal.password"

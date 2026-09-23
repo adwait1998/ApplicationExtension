@@ -165,8 +165,12 @@ def resolve_field(
     # tier 3: laya (optional)
     backend = laya if laya is not None else get_backend()
     if backend is not None:
+        # Pre-ranked and capped: Laya's confidence is only calibrated up to
+        # ~10 options, and the confidence gate below is the only thing
+        # standing between it and a wrong value in a real application.
+        candidates = matcher.rank_candidates(field)
         try:
-            result = backend.classify(field, matcher.CANDIDATE_KEYS)
+            result = backend.classify(field, candidates)
         except Exception:
             result = None
         if result is not None:
