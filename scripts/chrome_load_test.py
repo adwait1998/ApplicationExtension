@@ -152,6 +152,37 @@ with sync_playwright() as p:
               guard["radio"] and guard["checkbox"] and not guard["submit"] and not guard["button"],
               json.dumps(guard))
 
+        # 5a. Custom dropdowns (select2 / Chosen). On a real Viasat form the
+        #     State/Province and Country fields were never even highlighted —
+        #     the libraries hide the native <select> and the visibility filter
+        #     dropped it. jsdom has no layout or widget behaviour, so whether
+        #     this works at all is only knowable here.
+        by_name_all = {f["name"]: f for f in fields if f.get("name")}
+        for nm in ("state_s2", "state_chosen"):
+            check(f"hidden native select behind a custom widget is scanned ({nm})",
+                  nm in by_name_all, str(sorted(by_name_all)[:6]))
+        check("a hidden select with NO paired widget is still ignored",
+              "decoy_hidden_select" not in by_name_all)
+
+        # The profile stores the full name ("Arizona"). The case that matters is
+        # that value landing on a CODE-only option list ("AZ") and vice versa —
+        # passing "AZ" to an "AZ" option would only prove an exact match.
+        for nm, value in (("state_s2", "Arizona"), ("state_chosen", "Arizona")):
+            f = by_name_all.get(nm)
+            if not f:
+                continue
+            got = page.evaluate(
+                """([sel, v]) => {
+                    const el = document.querySelector(sel);
+                    const ok = ApplyPilotScanner.setSelectValue(el, v);
+                    const opt = el.options[el.selectedIndex];
+                    return { ok, text: opt ? opt.text : null, value: el.value };
+                }""", [f["selector"], value])
+            check(f"custom-widget select filled with {value!r} and read back ({nm})",
+                  got["ok"] is True and got["text"] and
+                  ("arizona" in got["text"].lower() or got["value"].upper().endswith("AZ")),
+                  json.dumps(got))
+
         # 5b. Résumé attachment. jsdom has no DataTransfer/DragEvent at all, so
         #     this mechanism is entirely unverified until it runs here. The
         #     failure mode that matters is a SILENT one: reporting success
