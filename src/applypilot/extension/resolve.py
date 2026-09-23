@@ -1,0 +1,208 @@
+"""The resolution ladder. Applied per field, first match wins:
+
+0. Secret guard   personal.password and anything on the denylist — never
+                   emitted, checked again at the point of emission no
+                   matter which tier produced the candidate.
+1. Canary         applypilot.apply.canary, used verbatim. Work auth,
+                   sponsorship, citizenship, salary, EEO, address, DOB,
+                   clearance, export control. A canary hit NEVER falls
+                   through to a lower tier — a canary with no resolvable
+                   answer stays a canary skip (mirrors the pipeline's
+                   invariant 7).
+2. Deterministic  applypilot.extension.matcher — autocomplete, then
+                   name/id/label regex.
+3. Laya           optional, lazy, absent by default. Gated on confidence.
+4. Unresolved     left for the human.
+"""
+from __future__ import annotations
+
+import re
+from typing import Protocol
+
+from applypilot.apply import canary
+from applypilot.extension import matcher
+from applypilot.extension.schema import FieldDescriptor, FillPlan, FillResult, SkipResult
+
+# ---------------------------------------------------------------------------
+# Tier 0: secret guard
+# ---------------------------------------------------------------------------
+
+# Profile paths that must never be emitted, under any circumstance, by any
+# tier. Checked twice: once against the field itself (name/label/autocomplete
+# smell like a credential field) and once against whatever profile_key a
+# tier produced — so a bug in a higher tier (e.g. a future Laya backend
+# mis-classifying a field as personal.password) still cannot leak it.
+SECRET_PROFILE_PATHS: set[str] = {"personal.password"}
+
+_SECRET_FIELD_RE = re.compile(
+    r"\b(password|passwd|pwd|ssn|social\s*security|credit\s*card|cvv|cvc|"
+    r"api[_ -]?key|secret)\b",
+    re.I,
+)
+
+
+def is_secret_path(path: str | None) -> bool:
+    if not path:
+        return False
+    bare = path.split("#", 1)[0]
+    return bare in SECRET_PROFILE_PATHS
+
+
+def is_secret_field(field: FieldDescriptor) -> bool:
+    hay = " ".join(
+        str(x or "") for x in (field.label, field.name, field.autocomplete, field.placeholder)
+    )
+    return bool(_SECRET_FIELD_RE.search(hay))
+
+
+def _secret_skip(field: FieldDescriptor) -> SkipResult:
+    return SkipResult(
+        id=field.id,
+        source="secret_guard",
+        reason="secret/credential field — never emitted",
+        auto_fill=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tier 3: Laya — narrow protocol only, absent by default
+# ---------------------------------------------------------------------------
+
+
+class LayaBackend(Protocol):
+    """What a Laya backend must implement. classify() answers a `choice`
+    question — which profile key (from candidate_keys) this field wants,
+    with a calibrated confidence — never generates free text and never
+    touches canary fields (the ladder never offers it one)."""
+
+    def classify(
+        self, field: FieldDescriptor, candidate_keys: list[str]
+    ) -> tuple[str, float] | None: ...
+
+
+_LAYA_CONFIDENCE_THRESHOLD = 0.75
+
+
+def get_backend() -> LayaBackend | None:
+    """Return the Laya backend if installed and usable, else None.
+
+    Lazy and fully defensive: any import failure or construction error
+    degrades to "absent" rather than raising. Laya is optional — the
+    ladder (and /health's tiers_available) must be correct whether or not
+    a separately-developed backend module exists yet.
+    """
+    try:
+        from applypilot.extension import laya_backend  # type: ignore
+    except ImportError:
+        return None
+    try:
+        return laya_backend.get_backend()
+    except Exception:
+        return None
+
+
+def tiers_available(laya: LayaBackend | None = None) -> list[str]:
+    tiers = ["canary", "deterministic"]
+    backend = laya if laya is not None else get_backend()
+    if backend is not None:
+        tiers.append("laya")
+    return tiers
+
+
+def _canary_category(question: str) -> str:
+    """Best-effort label for observability only (which canary rule fired) —
+    resolution itself always goes through canary.is_canary/resolve_canary
+    verbatim, this never influences the decision."""
+    q = question or ""
+    for name, rx in canary._MARKERS.items():
+        if rx.search(q):
+            return name
+    return "canary"
+
+
+# ---------------------------------------------------------------------------
+# The ladder
+# ---------------------------------------------------------------------------
+
+
+def resolve_field(
+    field: FieldDescriptor, profile: dict, laya: LayaBackend | None = None
+) -> FillResult | SkipResult:
+    # tier 0
+    if is_secret_field(field):
+        return _secret_skip(field)
+
+    label = field.label or field.name or field.placeholder or ""
+
+    # tier 1: canary — never falls through to a lower tier
+    if canary.is_canary(label):
+        answer = canary.resolve_canary(label, profile)
+        category = _canary_category(label)
+        if answer:
+            return FillResult(
+                id=field.id,
+                value=answer,
+                source="canary",
+                profile_key=f"canary:{category}",
+                confidence=1.0,
+                auto_fill=True,
+                reason=f"canary match ({category})",
+            )
+        return SkipResult(
+            id=field.id,
+            source="canary",
+            reason=f"canary:{category} not resolvable from profile — answer this yourself",
+            auto_fill=False,
+        )
+
+    # tier 2: deterministic
+    det = matcher.match(field, profile)
+    if det is not None:
+        if isinstance(det, FillResult) and is_secret_path(det.profile_key):
+            return _secret_skip(field)
+        return det
+
+    # tier 3: laya (optional)
+    backend = laya if laya is not None else get_backend()
+    if backend is not None:
+        try:
+            result = backend.classify(field, matcher.CANDIDATE_KEYS)
+        except Exception:
+            result = None
+        if result is not None:
+            key, confidence = result
+            if confidence >= _LAYA_CONFIDENCE_THRESHOLD and not is_secret_path(key):
+                value = matcher.value_for_key(key, profile)
+                if value:
+                    return FillResult(
+                        id=field.id,
+                        value=value,
+                        source="laya",
+                        profile_key=key.split("#", 1)[0],
+                        confidence=confidence,
+                        auto_fill=True,
+                        reason=f"laya classification (confidence {confidence:.2f})",
+                    )
+
+    # tier 4: unresolved
+    return SkipResult(
+        id=field.id,
+        source="unresolved",
+        reason="no deterministic match — left for you to fill",
+        auto_fill=False,
+    )
+
+
+def resolve_fields(fields: list[FieldDescriptor], profile: dict) -> FillPlan:
+    """Resolve a batch of fields into a FillPlan. Values are returned only
+    for the fields actually passed in — the profile itself never leaves
+    this function."""
+    backend = get_backend()
+    plan = FillPlan(tiers_available=tiers_available(backend))
+    for f in fields:
+        result = resolve_field(f, profile, laya=backend)
+        if isinstance(result, FillResult):
+            plan.fills.append(result)
+        else:
+            plan.skipped.append(result)
+    return plan

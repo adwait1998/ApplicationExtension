@@ -1112,6 +1112,45 @@ def ui(
                 host=host, port=port, log_level="warning")
 
 
+@app.command("serve-extension")
+def serve_extension(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address (must stay 127.0.0.1)."),
+    port: int = typer.Option(8787, "--port", "-p", help="Port for the local Copilot extension service."),
+) -> None:
+    """Launch the local resolution service for the ApplyPilot Copilot Chrome extension.
+
+    Human-in-the-loop, not the pipeline's autonomous apply: this service only
+    answers "which profile value belongs in this field" for a page the
+    operator already has open. It never clicks submit and never navigates —
+    the extension fills and highlights, the human reviews and submits.
+    """
+    _bootstrap()
+
+    try:
+        import uvicorn  # noqa: F401
+        from applypilot.extension.server import create_app
+    except ImportError:
+        console.print("[red]The extension service needs extra packages:[/red] pip install 'applypilot[ui]'")
+        console.print("(or: pip install fastapi uvicorn)")
+        raise typer.Exit(1)
+
+    from applypilot import config
+
+    try:
+        extension_app = create_app(app_dir=config.APP_DIR, host=host)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    token = extension_app.state.token
+    url = f"http://{host}:{port}"
+    console.print(f"[bold]ApplyPilot Copilot service[/bold] -> {url}  (Ctrl+C to stop)")
+    console.print(f"[bold]Token[/bold] (paste into the extension's options page): [yellow]{token}[/yellow]")
+    console.print("[dim]This service only fills forms — it never clicks submit or navigates.[/dim]")
+
+    uvicorn.run(extension_app, host=host, port=port, log_level="warning")
+
+
 @app.command("prune-expired")
 def prune_expired(
     min_score: int = typer.Option(7, "--min-score", help="Only check jobs at or above this score."),
