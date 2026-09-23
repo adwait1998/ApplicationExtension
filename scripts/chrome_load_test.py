@@ -77,6 +77,31 @@ with sync_playwright() as p:
         check("radio group collapsed to one descriptor",
               len([f for f in fields if f["type"] == "radio"]) == 1)
 
+        # 2b. Repeating-section detection, against a real layout engine. This is
+        #     what lets the structured tier put "Work Experience 2" into the
+        #     SECOND position rather than overwriting the first.
+        def block(idx):
+            return {f["label"]: f for f in fields if f.get("section_index") == idx}
+
+        b1, b2, b3 = block(1), block(2), block(3)
+        check("Work Experience 1 fields carry section_index 1", len(b1) >= 6, str(len(b1)))
+        check("Work Experience 2 fields carry section_index 2", len(b2) >= 6, str(len(b2)))
+        check("index derived from field NAMES when the heading has no digit",
+              len(b3) >= 2, str(len(b3)))
+        check("section heading text captured",
+              (b1.get("Job Title") or {}).get("section", "").lower().startswith("work experience"),
+              (b1.get("Job Title") or {}).get("section", ""))
+        # The false positive that would matter: a stray number near a field
+        # becoming a section index and misplacing a whole block.
+        alt = next((f for f in fields if f.get("name") == "altPhone"), None)
+        check("a nearby digit ('Phone Numbers (2 max)') does NOT become a section index",
+              alt is not None and alt.get("section_index") is None,
+              str(alt.get("section_index") if alt else "field missing"))
+        no_idx = [f for f in fields
+                  if f.get("section_index") is None and f.get("name") in
+                  ("full_name", "email", "phone")]
+        check("ordinary top-level fields carry no section index", len(no_idx) == 3, str(len(no_idx)))
+
         # 3. Every selector must resolve. A radio GROUP is deliberately one
         #    descriptor covering several elements that share a name, so it is
         #    expected to match >1; everything else must be unique or the fill
