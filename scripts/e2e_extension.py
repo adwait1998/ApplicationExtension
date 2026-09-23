@@ -40,6 +40,14 @@ tmp = pathlib.Path(tempfile.mkdtemp(prefix="apc-e2e-"))
                    "current_company": "Example Co",
                    "years_of_experience_total": "6"},
     "eeo_voluntary": {},
+    "work_history": [
+        {"title": "Staff Designer", "company": "Example Co",
+         "location": "Seattle, WA", "start": "03/2022", "end": "",
+         "current": True, "description": "Led design for the analytics suite."},
+        {"title": "Product Designer", "company": "Globex Inc",
+         "location": "San Jose, CA", "start": "06/2019", "end": "02/2022",
+         "current": False, "description": "Design systems and onboarding."},
+    ],
 }), encoding="utf-8")
 
 env = dict(os.environ)
@@ -120,13 +128,27 @@ try:
                                           "X-ApplyPilot-Token": token})
     plan = json.load(urllib.request.urlopen(req, timeout=30))
 
-    fills = {f["id"]: f for f in plan["fills"]}
-    skips = {s["id"]: s for s in plan["skipped"]}
+    by_id = {f["id"]: f for f in fields}
+
+    def _label(entry):
+        return (by_id.get(entry["id"], {}).get("label") or "").strip().lower()
+
+    def _section(entry):
+        return (by_id.get(entry["id"], {}).get("section") or "").strip().lower()
+
+    # Keyed by label: scanner-assigned ids shift whenever the mock page changes,
+    # and an assertion that silently stops matching anything is worse than no
+    # assertion at all.
+    fills = {_label(f): f for f in plan["fills"]}
+    skips = {_label(s_): s_ for s_ in plan["skipped"]}
+    fills_by_section = {}
+    for f in plan["fills"]:
+        fills_by_section.setdefault(_section(f), {})[_label(f)] = f
     print(f"\n[ok] resolved {len(fields)} fields -> {len(fills)} fills, {len(skips)} skips")
     for f in plan["fills"]:
-        print(f"   FILL  {f['id']:4} {f['source']:14} {f.get('profile_key',''):28} = {f['value']!r}")
-    for s in plan["skipped"]:
-        print(f"   SKIP  {s['id']:4} {s['source']:14} {s['reason']}")
+        print(f"   FILL  {_label(f)[:30]:32} {f['source']:12} {str(f.get('profile_key'))[:26]:28} = {str(f['value'])[:34]!r}")
+    for s_ in plan["skipped"]:
+        print(f"   SKIP  {_label(s_)[:30]:32} {s_['source']:12} {s_['reason'][:44]}")
 
     raw = json.dumps(plan)
     failures = []
@@ -139,24 +161,49 @@ try:
     print("\n--- assertions ---")
     check("secret never appears anywhere in the response",
           "SUPER-SECRET-SHOULD-NEVER-APPEAR" not in raw)
-    check("password field is not filled", "x3" not in fills)
+    check("password field is not filled", "password" not in fills)
     check("password field skipped by the secret guard",
-          skips.get("x3", {}).get("source") == "secret_guard")
-    check("full name filled from profile", fills.get("f0", {}).get("value") == "Alex Rivera")
-    check("email filled", fills.get("f1", {}).get("value") == "alex@example.test")
-    check("work-auth radio answered by the CANARY tier",
-          fills.get("f8", {}).get("source") == "canary")
-    check("work-auth answer is Yes", fills.get("f8", {}).get("value") == "Yes")
-    check("sponsorship answered by the CANARY tier",
-          fills.get("x1", {}).get("source") == "canary")
-    check("sponsorship answer is No (profile says no sponsorship needed)",
-          fills.get("x1", {}).get("value") == "No")
-    check("salary NOT guessed (empty in profile)", "x2" not in fills)
-    check("free-text 'why do you want to work here' NOT answered", "x4" not in fills)
+          skips.get("password", {}).get("source") == "secret_guard")
+    check("full name filled from profile", fills.get("full name", {}).get("value") == "Alex Rivera")
+    check("email filled", fills.get("email address", {}).get("value") == "alex@example.test")
+    wa = fills.get("are you legally authorized to work in the us?", {})
+    check("work-auth answered by the CANARY tier", wa.get("source") == "canary")
+    check("work-auth answer is Yes", wa.get("value") == "Yes")
+    sp = fills.get("will you now or in the future require sponsorship for employment visa status?", {})
+    check("sponsorship answered by the CANARY tier", sp.get("source") == "canary")
+    check("sponsorship answer is No (profile says no sponsorship needed)", sp.get("value") == "No")
+    check("salary NOT guessed (empty in profile)", "desired salary" not in fills)
+    check("free-text 'why do you want to work here' NOT answered",
+          "why do you want to work here?" not in fills)
+
+    # --- tier 3: repeating work-experience blocks (the real Workday failure) ---
+    b1 = fills_by_section.get("work experience 1", {})
+    b2 = fills_by_section.get("work experience 2", {})
+    check("Work Experience 1 filled from the MOST RECENT position",
+          b1.get("job title", {}).get("value") == "Staff Designer"
+          and b1.get("company", {}).get("value") == "Example Co")
+    check("Work Experience 2 filled from the PREVIOUS position",
+          b2.get("job title", {}).get("value") == "Product Designer"
+          and b2.get("company", {}).get("value") == "Globex Inc")
+    check("block 1 and block 2 got DIFFERENT employers (no cross-contamination)",
+          b1.get("company", {}).get("value") != b2.get("company", {}).get("value"))
+    check("structured tier is the source for work-history fields",
+          b1.get("job title", {}).get("source") == "structured")
+    check("current role leaves the End date blank",
+          b1.get("to", {}).get("value", "SENTINEL") == "")
+    check("previous role has a real End date", b2.get("to", {}).get("value") == "02/2022")
+    third = [s_ for s_ in plan["skipped"]
+             if "work history" in s_["reason"] and "never" in s_["reason"]]
+    check("3rd block SKIPPED, not wrapped back to position 1", len(third) >= 1)
     check("auth enforced with 401", not bad_auth)
     check("tiers_available reported", isinstance(health.get("tiers_available"), list))
+    submitted_ids = {f["id"] for f in fields}
     check("every fill corresponds to a submitted field",
-          set(fills) <= {f["id"] for f in fields})
+          {f["id"] for f in plan["fills"]} <= submitted_ids)
+    check("every skip corresponds to a submitted field",
+          {s_["id"] for s_ in plan["skipped"]} <= submitted_ids)
+    check("no field is both filled and skipped",
+          not ({f["id"] for f in plan["fills"]} & {s_["id"] for s_ in plan["skipped"]}))
 
     print(f"\n{len(failures)} failure(s)" if failures else "\nALL E2E ASSERTIONS PASSED")
     sys.exit(1 if failures else 0)
