@@ -478,6 +478,23 @@
     }
   }
 
+  // The ONE invariant this extension must never violate is that it does not submit
+  // the form. Filling a radio or checkbox legitimately needs a native .click(), so
+  // the click target is re-checked here at the point of action rather than trusting
+  // that scanning filtered correctly upstream. A bug in the scanner, a spoofed
+  // descriptor, or a future refactor then still cannot turn a fill into a submit.
+  function isClickSafe(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
+    var t = String(el.type || '').toLowerCase();
+    return t === 'radio' || t === 'checkbox';
+  }
+
+  function safeClick(el) {
+    if (!isClickSafe(el)) return false;
+    el.click();
+    return true;
+  }
+
   function setRadioValue(elements, text) {
     var target = String(text == null ? '' : text).trim().toLowerCase();
     if (!target) { clearRadioGroup(elements); return true; }
@@ -493,14 +510,13 @@
     // A native click is the most faithful simulation of a real user selecting a radio
     // button: it flips `checked`, unchecks its siblings, and fires click/input/change —
     // exactly what React's onChange handlers listen for.
-    match.click();
-    return true;
+    return safeClick(match);
   }
 
   function setCheckboxValue(el, boolLike) {
     var want = boolLike === true || /^(true|yes|1|on)$/i.test(String(boolLike));
-    if (el.checked !== want) el.click();
-    return true;
+    if (el.checked === want) return true;
+    return safeClick(el);
   }
 
   /** Reads the field's current value, in the same shape applyFill expects to receive it back. */
@@ -549,6 +565,7 @@
     setCheckboxValue: setCheckboxValue,
     getCurrentValue: getCurrentValue,
     applyFill: applyFill,
-    getHighlightTargets: getHighlightTargets
+    getHighlightTargets: getHighlightTargets,
+    isClickSafe: isClickSafe
   };
 });

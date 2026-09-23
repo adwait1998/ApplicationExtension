@@ -99,6 +99,21 @@ expect('auto-generated-id field still captured, with a non-#id selector', (() =>
 })());
 expect('every selector is present and non-empty', fields.every(f => typeof f.selector === 'string' && f.selector.length > 0));
 
+// --- the defining safety invariant ------------------------------------------
+// Filling a radio/checkbox needs a native .click(). Nothing else may ever be
+// clicked, because a click on a submit button would send a real application.
+(() => {
+  const mk = (tag, type) => { const e = dom.window.document.createElement(tag); if (type) e.type = type; return e; };
+  expect('click guard allows radio', Scanner.isClickSafe(mk('input', 'radio')) === true);
+  expect('click guard allows checkbox', Scanner.isClickSafe(mk('input', 'checkbox')) === true);
+  expect('click guard REFUSES submit input', Scanner.isClickSafe(mk('input', 'submit')) === false);
+  expect('click guard REFUSES button input', Scanner.isClickSafe(mk('input', 'button')) === false);
+  expect('click guard REFUSES image input', Scanner.isClickSafe(mk('input', 'image')) === false);
+  expect('click guard REFUSES a <button>', Scanner.isClickSafe(mk('button')) === false);
+  expect('click guard REFUSES a text input', Scanner.isClickSafe(mk('input', 'text')) === false);
+  expect('click guard REFUSES null', Scanner.isClickSafe(null) === false);
+})();
+
 let failed = 0;
 console.log('\n--- checks ---');
 for (const c of checks) {
