@@ -62,6 +62,40 @@ def _yn(flag: bool) -> str:
     return "Yes" if flag else "No"
 
 
+# Which part of an address a label is asking for. Checked in order: the most
+# specific component wins, because "Zip/Postal Code" also contains the generic
+# word that made it an address canary in the first place.
+_ADDR_POSTAL = re.compile(r"\b(zip|postal|post\s*code|postcode)\b", re.I)
+_ADDR_LINE2 = re.compile(
+    r"\b(address\s*(line)?\s*2|address\s*line\s*two|line\s*2|apt|apartment|suite|unit)\b", re.I)
+_ADDR_FULL = re.compile(
+    r"\b(full|complete|mailing|home|current|permanent|residential)\s+address\b", re.I)
+
+
+def _address_component(question: str, per: dict) -> str | None:
+    """Answer only the part of the address the label asks for.
+
+    This used to join every component into one string for ANY address-shaped
+    label, so a form with separate fields got the whole address pasted into
+    "Zip/Postal Code" and duplicated into "Address 2" — caught on a real ATS.
+    Most application forms that ask for an address split it into fields, so a
+    bare "Address" means the street line; only an explicitly full/mailing
+    address gets the joined form.
+    """
+    if _ADDR_POSTAL.search(question):
+        return per.get("postal_code") or None
+    if _ADDR_LINE2.search(question):
+        # The profile holds a single street line. The honest answer to a
+        # second-line field is "leave it blank", never a copy of line one.
+        return None
+    if _ADDR_FULL.search(question):
+        parts = [per.get("address"), per.get("city"), per.get("province_state"),
+                 per.get("postal_code"), per.get("country")]
+        joined = ", ".join(x for x in parts if x)
+        return joined or None
+    return per.get("address") or None
+
+
 def resolve_canary(question: str, profile: dict) -> str | None:
     """Deterministic answer from exact profile paths, or None (-> stay unresolved)."""
     q = question or ""
@@ -113,10 +147,7 @@ def resolve_canary(question: str, profile: dict) -> str | None:
         return None  # no DOB in profile — never guess
 
     if _MARKERS["address"].search(q):
-        parts = [per.get("address"), per.get("city"), per.get("province_state"),
-                 per.get("postal_code"), per.get("country")]
-        joined = ", ".join(x for x in parts if x)
-        return joined or None
+        return _address_component(q, per)
 
     if _MARKERS["clearance"].search(q):
         return None  # not in profile — refuse

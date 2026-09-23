@@ -120,3 +120,42 @@ def test_email_address_does_not_resolve_to_the_postal_address():
     }
     assert _canary.resolve_canary("Email Address", profile) is None
     assert "Test Street" in (_canary.resolve_canary("Street Address", profile) or "")
+
+
+# ---------------------------------------------------------------------------
+# An address canary must answer only the COMPONENT the label asks for. It used
+# to join every part into one string for any address-shaped label, so a real
+# ATS form got the whole address pasted into "Zip/Postal Code" and duplicated
+# into "Address 2".
+# ---------------------------------------------------------------------------
+
+_ADDR_PROFILE = {"personal": {
+    "address": "1221 E Apache Blvd", "city": "Tempe", "province_state": "Arizona",
+    "postal_code": "85281", "country": "United States"}}
+_FULL = "1221 E Apache Blvd, Tempe, Arizona, 85281, United States"
+
+
+@pytest.mark.parametrize("label,expected", [
+    ("Zip/Postal Code", "85281"),
+    ("Postal Code", "85281"),
+    ("ZIP", "85281"),
+    ("Address", "1221 E Apache Blvd"),
+    ("Street Address", "1221 E Apache Blvd"),
+    ("Address Line 1", "1221 E Apache Blvd"),
+    ("Mailing Address", _FULL),
+    ("Full address", _FULL),
+])
+def test_address_canary_answers_only_the_requested_component(label, expected):
+    assert _canary.resolve_canary(label, _ADDR_PROFILE) == expected
+
+
+@pytest.mark.parametrize("label", ["Address 2", "Address Line 2", "Apt / Suite", "Unit"])
+def test_second_address_line_is_left_blank_not_duplicated(label):
+    """The profile holds one street line. A second-line field's honest answer
+    is blank, never a copy of line one."""
+    assert _canary.resolve_canary(label, _ADDR_PROFILE) is None
+
+
+def test_zip_never_receives_the_whole_address():
+    got = _canary.resolve_canary("Zip/Postal Code", _ADDR_PROFILE)
+    assert "Apache" not in (got or "") and "Tempe" not in (got or "")
