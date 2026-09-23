@@ -63,6 +63,51 @@ to switch while a batch is running. The spend cap is global (one wallet);
 
 ---
 
+## 0c. Copilot Chrome extension (fill a form you opened yourself)
+
+The pipeline applies autonomously. The Copilot extension is the opposite: **you** open a job
+application in your own Chrome, click once, and it fills what it can from your profile and
+highlights what it deliberately left alone.
+
+> **It never clicks submit and never navigates.** It fills and highlights; you review and
+> submit. The only clicks it can make are on radios and checkboxes, and the click target is
+> re-checked at the point of action so a bug cannot turn a fill into a submitted application.
+
+Start the local service (it binds `127.0.0.1` only and prints a token):
+
+```powershell
+& $PY -m applypilot serve-extension            # default port 8787
+```
+
+Then load the extension once: Chrome → `chrome://extensions` → enable **Developer mode** →
+**Load unpacked** → select `E:\auto-apply-pipeline\extension`. Open its **Options**, paste the
+token the command printed, and hit **Test Connection**.
+
+Day to day: open an application, click the extension, then **Scan & Fill**. Green means
+filled, amber means deliberately skipped — hover for the reason. **Undo** restores the
+previous values.
+
+How each field is decided, first match wins:
+
+| Tier | What it does | Fills? |
+|---|---|---|
+| secret guard | passwords/SSN/card fields | never |
+| canary | work auth, sponsorship, salary, EEO, address, DOB — from exact profile paths only | only on an exact hit, else skipped |
+| deterministic | `autocomplete` attribute, then name/id/label patterns | yes |
+| laya | local semantic classification, confidence ≥ 0.75 | yes, above threshold |
+| unresolved | — | no, left for you |
+
+Canary questions are **never** answered by a model, and free-text questions ("why do you want
+to work here?") are never answered at all. An unanswerable canary is left blank on purpose —
+that is the design, not a failure.
+
+Laya is optional and **off unless `APPLYPILOT_LAYA=1`**; without it the extension runs on the
+deterministic tier, which covers the standard fields. `GET /health` reports which tiers are
+live. See `extension/README.md` for details and known limitations (cross-origin iframes,
+shadow DOM, multi-step forms).
+
+---
+
 ## 1. TL;DR daily flow
 
 ```powershell
