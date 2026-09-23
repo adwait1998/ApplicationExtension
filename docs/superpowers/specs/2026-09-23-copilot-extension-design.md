@@ -44,6 +44,45 @@ Laya is not a text generator. It answers `choice` questions with a calibrated co
 one forward pass, which is exactly the shape of "which profile field does this input want?".
 It is used **only** for semantic field classification, never to invent an answer.
 
+### Measured reality of Laya on this machine (probe, 2026-09-23)
+
+`pip install laya` works and is legitimate (PyPI matches the repo; publisher Convai
+Innovations). Resolved `laya==0.3.6`, `torch==2.14.0+cpu`, `transformers==5.17.0`.
+**This laptop has no GPU**, so everything below is CPU numbers.
+
+Three findings shape the design, and none of them was obvious from the README:
+
+1. **Laya does not batch across fields.** Its single-pass batching covers *many questions
+   about one state*, not *one question about many states*. A form has N fields = N separate
+   states, so it costs N sequential calls. Measured: ~370ms warm per call, so a 20-field
+   form would block ~7 seconds.
+   **Consequence:** Laya runs ONLY on fields tiers 0–2 could not resolve. On a typical ATS
+   form the deterministic tier handles most standard inputs via `autocomplete`, leaving a
+   handful of ambiguous ones — a few hundred ms to ~2s, not 7. The extension also fills the
+   deterministic results immediately and applies Laya's asynchronously, so the UI never
+   blocks on it.
+
+2. **Confidence is only calibrated up to ~10 options.** The library itself warns that
+   choice questions with 11+ options ship out-of-range temperatures and that confidence
+   should then be treated as uncalibrated. Our profile has ~35 leaf keys, which would blow
+   straight past that — and the confidence gate is the entire safety mechanism for this tier.
+   **Consequence:** candidates are pre-ranked by the deterministic matcher and the top
+   **≤9 plus `none`** are offered to Laya. One call per field, always inside the calibrated
+   range.
+
+3. **`Router(preload=True)` silently downloads all three checkpoints (2.26 GB)** when a
+   US-English job-application use case needs only the English one (807 MB), and peaks at
+   4.4 GB RSS with all three resident.
+   **Consequence:** load the English checkpoint explicitly. Never call bare `preload=True`.
+
+Quality spot-check: 5/6 realistic field labels classified correctly. The one miss
+("First Name" → `none`) carried the lowest confidence of the set (0.461 vs 0.83–1.00 for
+the correct ones), so the gate would have caught it. Threshold is set at **0.75**.
+
+That miss is also reassuring about the tier ordering: "First Name" is precisely the kind of
+field the deterministic tier nails via `autocomplete="given-name"`, so Laya is never asked.
+Laya's weakness sits where the deterministic tier is strongest.
+
 ## Resolution ladder
 
 Applied per field, first match wins:
