@@ -5,8 +5,23 @@ always an inline dict passed directly to resolve_fields()/resolve_field().
 """
 from __future__ import annotations
 
-from applypilot.extension import resolve
+import pytest
+
+from applypilot.extension import answers, resolve
 from applypilot.extension.schema import FieldDescriptor, FillResult, SkipResult
+
+
+@pytest.fixture(autouse=True)
+def _clean_answers_env(monkeypatch):
+    # Tiers 5/6 read these live on every call (no cached singleton). A
+    # module-wide autouse reset keeps every test in this file -- old ones
+    # included -- independent of whatever the ambient shell happens to have
+    # set, the same guarantee test_extension_answers.py makes for its own
+    # tier-5/6 tests.
+    monkeypatch.delenv("APPLYPILOT_ANSWERS", raising=False)
+    monkeypatch.delenv("APPLYPILOT_DRAFTS", raising=False)
+    monkeypatch.delenv("APPLYPILOT_MAX_DRAFTS", raising=False)
+    yield
 
 PROFILE = {
     "personal": {
@@ -367,3 +382,154 @@ def test_workday_step_with_no_work_history_behaves_exactly_as_before():
     for s in plan.skipped:
         assert s.source == "unresolved"
         assert s.auto_fill is False
+
+
+# ---------------------------------------------------------------------------
+# tiers 5/6: answer bank + draft — off by default, wired at the end of the
+# ladder. These tests never touch the real repo-root answer_bank.json:
+# resolve_field()'s answer_cache= override (built against a tmp bank path)
+# covers direct ladder calls, and answers._DEFAULT_BANK_PATH is monkeypatched
+# to a tmp path for the resolve_fields()-batch tests that can't take an
+# override directly.
+# ---------------------------------------------------------------------------
+
+
+def test_tiers_available_reports_nothing_extra_by_default():
+    assert resolve.tiers_available() == ["canary", "deterministic"]
+
+
+def test_tiers_available_reports_answer_bank_when_enabled(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    tiers = resolve.tiers_available()
+    assert "answer_bank" in tiers
+    assert "draft" not in tiers
+
+
+def test_tiers_available_reports_draft_only_with_both_flags(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")  # APPLYPILOT_ANSWERS unset
+    assert "draft" not in resolve.tiers_available()
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    assert "draft" in resolve.tiers_available()
+
+
+def test_ladder_fills_from_the_answer_bank_before_falling_to_unresolved(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    bank = tmp_path / "bank.json"
+    bank.write_text('[{"q": "Why do you want to join this company?", '
+                     '"a": "I admire the mission."}]', encoding="utf-8")
+    cache = answers.make_cache(PROFILE, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(tag="textarea", label="Why are you interested in this role?"),
+        PROFILE, answer_cache=cache,
+    )
+    assert isinstance(result, FillResult)
+    assert result.source == "answer_bank"
+    assert result.value == "I admire the mission."
+    assert result.draft is False
+    assert result.auto_fill is True
+
+
+def test_ladder_produces_a_marked_draft_on_a_genuine_miss(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+    monkeypatch.setattr(answers, "_real_llm_fn", lambda q, c: "A drafted, ungrounded-looking answer.")
+    bank = tmp_path / "bank.json"
+    bank.write_text("[]", encoding="utf-8")
+    cache = answers.make_cache(PROFILE, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(tag="textarea", label="Tell us about a challenge you overcame."),
+        PROFILE, answer_cache=cache,
+    )
+    assert isinstance(result, FillResult)
+    assert result.source == "draft"
+    assert result.draft is True
+    assert result.auto_fill is True
+    assert result.value == "A drafted, ungrounded-looking answer."
+
+
+def test_ladder_never_calls_the_llm_when_drafts_are_off(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")  # drafts NOT enabled
+
+    def _explode(q, c):
+        raise AssertionError("drafts are off — the LLM must never run")
+
+    monkeypatch.setattr(answers, "_real_llm_fn", _explode)
+    bank = tmp_path / "bank.json"
+    bank.write_text("[]", encoding="utf-8")
+    cache = answers.make_cache(PROFILE, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(tag="textarea", label="Tell us about a challenge you overcame."),
+        PROFILE, answer_cache=cache,
+    )
+    assert isinstance(result, SkipResult)
+    assert result.source == "unresolved"
+
+
+def test_canary_never_reaches_answer_bank_or_draft_even_with_both_flags_on(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+
+    def _explode(q, c):
+        raise AssertionError("a canary question must never reach the LLM")
+
+    monkeypatch.setattr(answers, "_real_llm_fn", _explode)
+    bank = tmp_path / "bank.json"
+    # A tempting, wrong-for-this-profile bank entry — proves the canary
+    # tier's early return (tier 1, terminal) is what's blocking this, not
+    # merely an empty bank.
+    bank.write_text('[{"q": "Will you now or in the future require '
+                     'sponsorship to work in the United States?", "a": "Yes"}]',
+                     encoding="utf-8")
+    cache = answers.make_cache(PROFILE, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(label="Will you now or in the future require sponsorship to work in the United States?"),
+        PROFILE, answer_cache=cache,
+    )
+    assert result.source == "canary"
+    assert result.value == "No"  # PROFILE's real work_authorization answer, not the poisoned bank
+
+
+def test_secret_field_never_reaches_answer_bank_or_draft(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+    bank = tmp_path / "bank.json"
+    bank.write_text("[]", encoding="utf-8")
+    cache = answers.make_cache(PROFILE, bank_path=bank)
+
+    result = resolve.resolve_field(_field(label="Password", type="password"), PROFILE, answer_cache=cache)
+    assert isinstance(result, SkipResult)
+    assert result.source == "secret_guard"
+
+
+def test_resolve_fields_batch_shares_one_draft_cap_across_the_request(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+    monkeypatch.setenv("APPLYPILOT_MAX_DRAFTS", "2")
+    bank = tmp_path / "bank.json"
+    bank.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(answers, "_DEFAULT_BANK_PATH", bank)
+
+    calls = []
+    monkeypatch.setattr(answers, "_real_llm_fn",
+                         lambda q, c: calls.append(q) or f"draft: {q}")
+
+    fields = [
+        _field(id="f0", tag="textarea", label="Describe your design process."),
+        _field(id="f1", tag="textarea", label="What is your biggest weakness."),
+        _field(id="f2", tag="textarea", label="Tell us about a time you failed."),
+    ]
+    plan = resolve.resolve_fields(fields, PROFILE)
+
+    assert len(calls) == 2  # the cap, not the field count
+    drafts = [f for f in plan.fills if f.source == "draft"]
+    assert len(drafts) == 2
+    for f in drafts:
+        assert f.draft is True
+    cap_skips = [s for s in plan.skipped if s.source == "draft"]
+    assert len(cap_skips) == 1
+    assert "cap" in cap_skips[0].reason.lower()
+    assert plan.tiers_available == ["canary", "deterministic", "answer_bank", "draft"]

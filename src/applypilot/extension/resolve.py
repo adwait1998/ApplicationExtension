@@ -19,7 +19,16 @@
                    stays a structured skip rather than risking Laya
                    guessing a value into the wrong position.
 4. Laya           optional, lazy, absent by default. Gated on confidence.
-5. Unresolved     left for the human.
+5. Answer bank    applypilot.extension.answers — AnswerCache seed/cache
+                   hit (a standard screening question, or one this bank
+                   has answered before). Optional, off by default
+                   (APPLYPILOT_ANSWERS=1).
+6. Draft          same AnswerCache.answer() call as tier 5, but its LLM
+                   missed the bank and generated new text. Filled, but
+                   marked draft=True for distinct review in the UI.
+                   Optional, off by default (APPLYPILOT_DRAFTS=1, which
+                   also requires APPLYPILOT_ANSWERS=1 — see answers.py).
+7. Unresolved     left for the human.
 """
 from __future__ import annotations
 
@@ -27,7 +36,7 @@ import re
 from typing import Protocol
 
 from applypilot.apply import canary
-from applypilot.extension import matcher, structured
+from applypilot.extension import answers, matcher, structured
 from applypilot.extension.schema import FieldDescriptor, FillPlan, FillResult, SkipResult
 
 # ---------------------------------------------------------------------------
@@ -113,6 +122,10 @@ def tiers_available(laya: LayaBackend | None = None) -> list[str]:
     backend = laya if laya is not None else get_backend()
     if backend is not None:
         tiers.append("laya")
+    if answers.answers_enabled():
+        tiers.append("answer_bank")
+    if answers.drafts_enabled():
+        tiers.append("draft")
     return tiers
 
 
@@ -133,7 +146,12 @@ def _canary_category(question: str) -> str:
 
 
 def resolve_field(
-    field: FieldDescriptor, profile: dict, laya: LayaBackend | None = None
+    field: FieldDescriptor,
+    profile: dict,
+    laya: LayaBackend | None = None,
+    *,
+    answer_cache: "answers.AnswerCache | None" = None,
+    draft_budget: "answers.DraftBudget | None" = None,
 ) -> FillResult | SkipResult:
     # tier 0
     if is_secret_field(field):
@@ -204,7 +222,17 @@ def resolve_field(
                         reason=f"laya classification (confidence {confidence:.2f})",
                     )
 
-    # tier 5: unresolved
+    # tier 5/6: answer bank + draft — one AnswerCache.answer() call, split
+    # on its returned source. Optional, off by default; answers.match()
+    # itself returns None immediately when APPLYPILOT_ANSWERS is unset, so
+    # this is a no-op call for everyone who hasn't opted in.
+    ans = answers.match(field, profile, cache=answer_cache, budget=draft_budget)
+    if ans is not None:
+        if isinstance(ans, FillResult) and is_secret_path(ans.profile_key):
+            return _secret_skip(field)
+        return ans
+
+    # tier 7: unresolved
     return SkipResult(
         id=field.id,
         source="unresolved",
@@ -218,9 +246,18 @@ def resolve_fields(fields: list[FieldDescriptor], profile: dict) -> FillPlan:
     for the fields actually passed in — the profile itself never leaves
     this function."""
     backend = get_backend()
+    # One AnswerCache and one draft budget for the whole batch: the answer
+    # bank only needs loading once per request, and the draft cap (tier 6)
+    # is only meaningful shared across every field in it — see
+    # answers.DraftBudget. Built only when actually enabled, so a caller
+    # who never opted in never pays for loading the bank file at all.
+    answer_cache = answers.make_cache(profile) if answers.answers_enabled() else None
+    draft_budget = answers.DraftBudget() if answers.drafts_enabled() else None
     plan = FillPlan(tiers_available=tiers_available(backend))
     for f in fields:
-        result = resolve_field(f, profile, laya=backend)
+        result = resolve_field(
+            f, profile, laya=backend, answer_cache=answer_cache, draft_budget=draft_budget
+        )
         if isinstance(result, FillResult):
             plan.fills.append(result)
         else:

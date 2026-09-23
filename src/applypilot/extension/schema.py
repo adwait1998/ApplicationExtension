@@ -46,11 +46,17 @@ class FillResult:
 
     id: str
     value: str
-    source: str  # "canary" | "deterministic" | "structured" | "laya"
+    source: str  # "canary" | "deterministic" | "structured" | "laya" | "answer_bank" | "draft"
     profile_key: str
     confidence: float
     auto_fill: bool
     reason: str
+    # Tier 6 only: this value is LLM-generated text, not a fact pulled from
+    # the profile. Defaults False so every other tier (and every existing
+    # caller/test) is unchanged. The extension renders draft=True fills
+    # distinctly (blue, "review before submitting") -- see content.js /
+    # popup.js, which check `fill.draft || fill.source === "draft"`.
+    draft: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -61,7 +67,7 @@ class SkipResult:
     """A field the ladder left for the human, with why."""
 
     id: str
-    source: str  # "canary" | "deterministic" | "structured" | "secret_guard" | "unresolved"
+    source: str  # "canary" | "deterministic" | "structured" | "secret_guard" | "draft" | "unresolved"
     reason: str
     auto_fill: bool = False
 
