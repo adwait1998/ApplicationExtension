@@ -64,7 +64,7 @@ if (!Scanner) {
   process.exit(1);
 }
 
-const { fields } = Scanner.scanFields(dom.window.document);
+const { fields, registry } = Scanner.scanFields(dom.window.document);
 
 console.log(`Scanned ${fields.length} field descriptor(s):\n`);
 for (const f of fields) {
@@ -135,6 +135,116 @@ expect('negative case: digit near an unrelated heading does not yield a bogus se
 expect('negative case: unrelated pre-existing field has no section_index bleed-through',
   byName.full_name && byName.full_name.section_index === null);
 
+// --- custom select widgets (select2 / Chosen pairing) -----------------------
+// The real bug from a live Avature/Viasat form: a select2- or Chosen-style
+// library hides the native <select> (display:none) and renders a styled
+// div/span in its place. The plain visibility filter correctly drops the
+// hidden <select> on its own — proving the field would otherwise vanish
+// entirely is as important as proving the fix works.
+(() => {
+  const doc = dom.window.document;
+
+  expect('select2-style hidden <select> is scanned (would vanish without pairing)',
+    !!byName.state_s2);
+  expect('select2 field labelled "State/Province" (via its own <label for>)',
+    byName.state_s2 && byName.state_s2.label === 'State/Province');
+  expect('select2 field options captured from the hidden native <select>',
+    byName.state_s2 && byName.state_s2.options.join(',') === '— Make a Selection —,Arizona,California,New York');
+
+  expect('Chosen-style hidden <select> is scanned (would vanish without pairing)',
+    !!byName.state_chosen);
+  expect('Chosen field labelled from nearby preceding text (contains "State")',
+    byName.state_chosen && /state/i.test(byName.state_chosen.label));
+
+  expect('decoy hidden <select> with no paired widget stays excluded',
+    !byName.decoy_hidden_select);
+
+  // Highlighting must target the VISIBLE widget, never the hidden <select>
+  // the operator can't see (see scanner.js getHighlightTargets()).
+  const s2Entry = registry[byName.state_s2.id];
+  const s2Highlight = Scanner.getHighlightTargets(s2Entry)[0];
+  expect('select2 highlight target is the visible widget, not the hidden select',
+    s2Highlight !== s2Entry.el && /select2/.test(s2Highlight.className));
+
+  const chosenEntry = registry[byName.state_chosen.id];
+  const chosenHighlight = Scanner.getHighlightTargets(chosenEntry)[0];
+  expect('Chosen highlight target is the visible widget, not the hidden select',
+    chosenHighlight !== chosenEntry.el && /chosen-container/.test(chosenHighlight.className));
+
+  // Filling writes to the underlying native <select>, and its value is read
+  // back afterwards — never trust the write blind (see setSelectValue()).
+  // select2 block: options are state NAMES with non-code values ("1"/"2"/"3"),
+  // so filling by the 2-letter code "AZ" can only succeed via the new
+  // state-code cross-match tier, not a pre-existing exact match.
+  let ok = Scanner.applyFill(s2Entry, 'Arizona');
+  expect('select2 select filled by full state NAME, applyFill reports success', ok === true);
+  expect('select2 select value read back after fill-by-name matches "Arizona" (value="1")',
+    s2Entry.el.value === '1');
+
+  s2Entry.el.selectedIndex = 0; // reset to the placeholder before the next fill
+  ok = Scanner.applyFill(s2Entry, 'AZ');
+  expect('select2 select filled by 2-letter CODE, applyFill reports success', ok === true);
+  expect('select2 select value read back after fill-by-code cross-matched to "Arizona" (value="1")',
+    s2Entry.el.value === '1');
+
+  // Chosen block: the opposite shape — options are 2-letter CODES, so
+  // filling by the full name "Arizona" can only succeed via the same
+  // cross-match tier from the other direction.
+  ok = Scanner.applyFill(chosenEntry, 'AZ');
+  expect('Chosen select filled by 2-letter CODE, applyFill reports success', ok === true);
+  expect('Chosen select value read back after fill-by-code matches "AZ"',
+    chosenEntry.el.value === 'AZ');
+
+  chosenEntry.el.selectedIndex = 0; // reset to the placeholder before the next fill
+  ok = Scanner.applyFill(chosenEntry, 'Arizona');
+  expect('Chosen select filled by full state NAME, applyFill reports success', ok === true);
+  expect('Chosen select value read back after fill-by-name cross-matched to "AZ"',
+    chosenEntry.el.value === 'AZ');
+
+  // getFieldLabel()'s widget-fallback branch specifically: when the hidden
+  // <select> itself has NO resolvable label at all (no <label for>, no
+  // wrapping <label>, no aria-label/aria-labelledby, no placeholder, no
+  // nearby text), the label must come from the visible widget instead.
+  //
+  // Built in a fresh, otherwise-empty JSDOM document rather than appended to
+  // the shared test-page.html one: getLabel()'s "nearby preceding text"
+  // fallback walks up to 4 ancestor levels and, at each level, back through
+  // EVERY earlier sibling looking for text -- appended to the real page's
+  // <body> it would walk straight past the empty wrapper and pick up the
+  // page's own <h1>, defeating the point of this test.
+  const freshDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  freshDom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 };
+  };
+  const fdoc = freshDom.window.document;
+
+  const wrap = fdoc.createElement('div');
+  const hiddenSelect = fdoc.createElement('select');
+  hiddenSelect.id = 'synthetic_hidden_select';
+  hiddenSelect.className = 'select2-hidden-accessible';
+  hiddenSelect.setAttribute('aria-hidden', 'true');
+  hiddenSelect.style.display = 'none';
+  const opt = fdoc.createElement('option');
+  opt.value = 'x';
+  opt.textContent = 'X';
+  hiddenSelect.appendChild(opt);
+  const widget = fdoc.createElement('span');
+  widget.className = 'select2-container';
+  widget.setAttribute('aria-label', 'Synthetic Widget Label');
+  wrap.appendChild(hiddenSelect);
+  wrap.appendChild(widget);
+  fdoc.body.appendChild(wrap);
+
+  expect('getLabel() alone finds nothing for the synthetic select (sanity check for the fixture itself)',
+    Scanner.getLabel(hiddenSelect) === '');
+
+  const foundWidget = Scanner.findPairedWidget(hiddenSelect);
+  expect('findPairedWidget() finds a marker-class widget with no <label for> on the select',
+    foundWidget === widget);
+  expect('getFieldLabel() falls back to the widget\'s own aria-label when the select has none',
+    Scanner.getFieldLabel(hiddenSelect, foundWidget) === 'Synthetic Widget Label');
+})();
+
 // --- the defining safety invariant ------------------------------------------
 // Filling a radio/checkbox needs a native .click(). Nothing else may ever be
 // clicked, because a click on a submit button would send a real application.
@@ -201,6 +311,36 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   const noTargetResult = Scanner.attachResumeFile(doc, new dom.window.File(['x'], 'resume.pdf', { type: 'application/pdf' }));
   expect('attachResumeFile() reports attempted:false when there is nothing to attach to',
     noTargetResult && noTargetResult.attempted === false);
+})();
+
+// --- résumé attachment: accept-attribute tie-break (no explicit label anywhere) ---
+// Built in its own isolated JSDOM instance for the same reason as the custom-select
+// label-fallback test above: it needs to control every file input on the "page" with
+// no interference from (or from being removed by) the destructive steps in the block
+// above.
+(() => {
+  const freshDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  const fdoc = freshDom.window.document;
+
+  const photoInput = fdoc.createElement('input');
+  photoInput.type = 'file';
+  photoInput.id = 'photo_upload';
+  photoInput.name = 'photo';
+  photoInput.setAttribute('accept', 'image/*');
+  fdoc.body.appendChild(photoInput);
+
+  const docInput = fdoc.createElement('input');
+  docInput.type = 'file';
+  docInput.id = 'doc_upload';
+  docInput.name = 'attachment';
+  docInput.setAttribute('accept', '.pdf,.doc,.docx');
+  fdoc.body.appendChild(docInput);
+
+  // Neither input has any résumé-ish label at all (rule 1 finds nothing) — the
+  // document-shaped accept attribute is the only signal distinguishing them.
+  const target = Scanner.findResumeFileTarget(fdoc);
+  expect('no explicit résumé label anywhere: a document-shaped accept ("pdf/doc") wins over a photo-only accept ("image/*")',
+    target && target.el.id === 'doc_upload');
 })();
 
 // --- résumé attachment: fail-soft guard when DataTransfer is unavailable ----

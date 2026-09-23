@@ -6,13 +6,17 @@
  *   2. asks the content script to scan -> FieldDescriptor[]
  *   3. asks the background worker to resolve them against the local service
  *   4. asks the content script to apply only the auto_fill:true results, and highlight the rest
- *      — this also drives résumé attachment: content.js's APPLY_FILLS response includes a
- *      `resume` key ({attempted:false} | {attempted:true, attached, filename} |
- *      {attempted:true, attached:false, reason}), which renderResumeLine() below surfaces as
- *      its own line. If `resume` is absent entirely, the line stays hidden rather than
- *      guessing — no news is not "attached".
- *   5. renders the review list (facts / drafts / needs-you, never merged into one flat list)
- *      and offers Undo
+ *      — this also drives résumé attachment: content.js's APPLY_FILLS response always includes
+ *      a `resume` key ({attempted:false} | {attempted:true, attached, filename} |
+ *      {attempted:true, attached:false, reason, errorCode}), and renderResumeLine() below
+ *      ALWAYS shows a line built from it — one of "Attached <file>", "Couldn't attach —
+ *      <reason>", "No résumé upload on this page", or "No résumé stored — upload one in
+ *      Settings". Silently hiding this line is exactly the bug report that prompted it: with
+ *      no line at all, an operator on a page with no file field reasonably concludes résumé
+ *      attachment doesn't work at all.
+ *   5. renders the review list (facts / drafts / needs-you, never merged into one flat list),
+ *      a one-line nudge toward Settings when open-ended questions were left for the human
+ *      because drafts are off, and offers Undo
  *
  * This file never injects into every tab automatically and never triggers a submit/navigate.
  */
@@ -130,24 +134,35 @@
   }
 
   // Résumé attachment gets its own clear line, independent of the field
-  // results — content.js reports it as part of APPLY_FILLS (see file header).
+  // results — content.js reports it as part of APPLY_FILLS (see file header)
+  // and this ALWAYS renders something from it. Hiding this line whenever
+  // there was nothing to report is precisely how an operator on a page with
+  // no file field ends up concluding résumé attachment doesn't work at all.
   function renderResumeLine(applyResp) {
-    var r = applyResp && applyResp.resume;
-    if (!r || !r.attempted) {
-      resumeLineEl.hidden = true;
+    var r = (applyResp && applyResp.resume) || { attempted: false };
+    resumeLineEl.hidden = false;
+
+    if (r.attempted && r.attached) {
+      resumeLineEl.className = 'resume-line ok';
+      resumeLineEl.textContent = '✓ Attached ' + (r.filename || 'résumé file') + '.';
       return;
     }
-    resumeLineEl.hidden = false;
-    if (r.attached) {
-      resumeLineEl.className = 'resume-line ok';
-      resumeLineEl.textContent = '✓ Résumé attached: ' + (r.filename || 'resume file');
-    } else {
-      resumeLineEl.className = 'resume-line err';
-      resumeLineEl.textContent = '✗ Résumé not attached' + (r.reason ? ' — ' + r.reason : '') + '. Attach it yourself before submitting.';
+    if (r.attempted && !r.attached && r.errorCode === 'no-resume') {
+      resumeLineEl.className = 'resume-line warn';
+      resumeLineEl.textContent = 'No résumé stored — upload one in Settings.';
+      return;
     }
+    if (r.attempted && !r.attached) {
+      resumeLineEl.className = 'resume-line err';
+      resumeLineEl.textContent = "Couldn't attach" + (r.reason ? ' — ' + r.reason : '') + '. Attach it yourself before submitting.';
+      return;
+    }
+    // !r.attempted: findResumeFileTarget() found no file input on this page at all.
+    resumeLineEl.className = 'resume-line muted';
+    resumeLineEl.textContent = 'No résumé upload on this page.';
   }
 
-  function renderResults(applyResp, resolveData) {
+  function renderResults(applyResp, resolveData, scannedFields, draftsEnabledLocally) {
     resultsBox.innerHTML = '';
     var fills = (resolveData && resolveData.fills) || [];
     var skipped = (resolveData && resolveData.skipped) || [];
@@ -202,6 +217,26 @@
         row.innerHTML = '<div class="reason">' + escapeHtml(s.reason || 'Left for you to fill in') + '</div>';
         resultsBox.appendChild(row);
       });
+
+      // A single, once-per-scan nudge: only when drafts are off (the operator's own
+      // Settings toggle, read from local storage into `draftsEnabledLocally` by the
+      // caller below) AND at least one "need you" field is a genuinely open-ended
+      // question (a <textarea> — a free-text essay-style prompt, not just any short
+      // text input).
+      if (!draftsEnabledLocally) {
+        var fieldById = {};
+        (scannedFields || []).forEach(function (f) { fieldById[f.id] = f; });
+        var hasOpenEnded = skipRows.some(function (s) {
+          var f = fieldById[s.id];
+          return f && f.tag === 'textarea';
+        });
+        if (hasOpenEnded) {
+          var hint = document.createElement('div');
+          hint.className = 'draft-hint';
+          hint.textContent = 'Turn on drafts in Settings to get a first draft of open-ended answers.';
+          resultsBox.appendChild(hint);
+        }
+      }
     }
 
     if (applyResp.failed && applyResp.failed.length) {
@@ -261,11 +296,17 @@
       var skippedCount = ((data.skipped || []).length) + ((data.fills || []).filter(function (f) { return !f.auto_fill; }).length);
       var failedCount = (applyResp.failed || []).length;
 
+      // Local-only UI preference (see options.js "Smart fill" section) — read directly
+      // from storage rather than round-tripping through the background worker, purely
+      // to decide whether the "turn on drafts" hint below is still relevant to show.
+      var draftsPref = await chrome.storage.local.get(['smartFillDraftsEnabled']);
+      var draftsEnabledLocally = draftsPref.smartFillDraftsEnabled === true;
+
       setStatus('Done. Review below, then submit yourself when ready.');
       fillSummaryEl.hidden = false;
       fillSummaryEl.textContent = buildSummaryLine(appliedList, skippedCount, failedCount);
       renderResumeLine(applyResp);
-      renderResults(applyResp, data);
+      renderResults(applyResp, data, fields, draftsEnabledLocally);
       undoBtn.disabled = appliedList.length === 0;
     } catch (e) {
       setStatus('Something went wrong: ' + (e && e.message ? e.message : e), true);

@@ -126,14 +126,18 @@
     margin-bottom: 18px;
   }
 
-  #status, #profileStatus, #importStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
-  #status.ok, #profileStatus.ok, #importStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
-  #status.err, #profileStatus.err, #importStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
-  #status.info, #profileStatus.info, #importStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
-  #status.warn, #profileStatus.warn, #importStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+  #status, #profileStatus, #importStatus, #smartFillStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
+  #status.ok, #profileStatus.ok, #importStatus.ok, #smartFillStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+  #status.err, #profileStatus.err, #importStatus.err, #smartFillStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
+  #status.info, #profileStatus.info, #importStatus.info, #smartFillStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
+  #status.warn, #profileStatus.warn, #importStatus.warn, #smartFillStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
 
   .hint { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
   .hint.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 8px 10px; border-radius: 6px; }
+  /* Drafts are model-written, not pulled from the profile — deliberately blue (matches the
+     popup's draft-fill colour) so this reads as "different from a fact", never decoration. */
+  .hint.draft-note { color: var(--info); }
+  .card.section-disabled { opacity: 0.55; pointer-events: none; }
   code { background: var(--card-2); border: 1px solid var(--border-soft); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   hr.section-divider { border: none; border-top: 1px solid var(--border-soft); margin: 30px 0 18px; }
 
@@ -341,6 +345,35 @@
       <button type="button" class="secondary" id="test">Test connection</button>
     </div>
     <div id="status"></div>
+  </div>
+
+  <hr class="section-divider">
+
+  <h1>Smart fill</h1>
+  <p class="sub">Optional extras beyond plain profile facts.</p>
+
+  <div class="card" id="smartFillCard">
+    <div class="checkbox-line">
+      <input type="checkbox" id="smartFillAnswers" checked>
+      <label for="smartFillAnswers" style="margin:0;font-weight:600;">Reuse my past answers</label>
+    </div>
+    <div class="hint">Matches open-ended questions against ones you've answered before and reuses that answer instead of leaving the field for you.</div>
+
+    <div class="checkbox-line" style="margin-top:16px;">
+      <input type="checkbox" id="smartFillDrafts">
+      <label for="smartFillDrafts" style="margin:0;font-weight:600;">Draft answers to open-ended questions</label>
+    </div>
+    <div class="hint draft-note">Drafts are written by an AI model, not pulled from your profile — always review a drafted answer before you submit.</div>
+    <div class="hint warn" id="smartFillLlmWarning" style="display:none;">No AI model available — drafts will be skipped.</div>
+
+    <label for="smartFillMaxDrafts" style="margin-top:16px;">Max drafts per page</label>
+    <input type="number" id="smartFillMaxDrafts" min="0" max="50" value="5" style="max-width:120px;">
+    <div class="hint">Caps how many AI drafts one page can request at once, so a form with dozens of unanswered questions can't turn into a multi-minute wait.</div>
+
+    <div class="save-row" style="margin-top:16px;">
+      <button type="button" id="smartFillSave">Save smart-fill settings</button>
+    </div>
+    <div id="smartFillStatus"></div>
   </div>
 
   <hr class="section-divider">

@@ -84,6 +84,61 @@
   <input type="text" id=":r3:" name="weird_id_field">
 
   <!-- ===================================================================
+       Custom select widgets — the real bug from a live Avature/Viasat form:
+       a select2- or Chosen-style library hides the native <select> and
+       renders a styled div in its place. The plain visibility filter
+       correctly drops the hidden <select> on its own, which makes the
+       field vanish entirely unless the scanner pairs it with the visible
+       widget sitting next to it (see scanner.js findPairedWidget()).
+       =================================================================== -->
+
+  <!-- select2-style: hidden native <select> (aria-hidden + the library's own
+       marker class) immediately followed by its visible replacement span,
+       exactly how select2 renders when left at its default dropdownParent.
+       Options carry state NAMES as text, with values that are deliberately
+       NOT the 2-letter code (so filling by code "AZ" can only succeed via
+       the new state-code cross-match tier, not a plain exact match). -->
+  <label for="state_select_s2">State/Province</label>
+  <div class="field-wrap">
+    <select id="state_select_s2" name="state_s2" class="select2-hidden-accessible" aria-hidden="true" tabindex="-1" style="display:none;">
+      <option value="">— Make a Selection —</option>
+      <option value="1">Arizona</option>
+      <option value="2">California</option>
+      <option value="3">New York</option>
+    </select>
+    <span class="select2 select2-container" role="combobox" aria-haspopup="listbox">
+      <span class="select2-selection__rendered">— Make a Selection —</span>
+    </span>
+  </div>
+
+  <!-- Chosen-style: hidden native <select> (chosen-processed marker,
+       display:none) immediately followed by its visible chosen-container
+       replacement, no <label for> on the select itself — label must be
+       resolved from the nearby preceding text via getLabel(), same as any
+       ordinary hidden-but-paired field. Options carry 2-letter CODES as
+       text/value (the opposite shape of the select2 block above), so
+       filling by the full name "Arizona" can only succeed via the same
+       cross-match tier from the other direction. -->
+  <p>State (Chosen widget)</p>
+  <select id="state_select_chosen" name="state_chosen" class="chosen-processed" style="display:none;">
+    <option value="">Select a state</option>
+    <option value="AZ">AZ</option>
+    <option value="CA">CA</option>
+    <option value="NY">NY</option>
+  </select>
+  <div class="chosen-container" role="listbox">
+    <a class="chosen-single">Select a state</a>
+  </div>
+
+  <!-- Negative case: a hidden <select> with no widget-library marker and no
+       visible sibling standing in for it at all — must stay excluded, same
+       as any other hidden field. Proves findPairedWidget() only rescues a
+       genuinely-paired select, not every hidden <select> on the page. -->
+  <select id="decoy_hidden_select" name="decoy_hidden_select" style="display:none;">
+    <option value="x">X</option>
+  </select>
+
+  <!-- ===================================================================
        Repeating "Work Experience" blocks — Workday "My Experience" step shape.
        Exercises scanner.js section/section_index resolution via three different paths.
        =================================================================== -->

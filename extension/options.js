@@ -63,6 +63,8 @@
       } else {
         updateCompleteness();
       }
+      loadSmartFillSettings();
+      loadLlmAvailability();
     });
   }
 
@@ -95,8 +97,142 @@
       var data = resp.data || {};
       var tiers = Array.isArray(data.tiers_available) ? data.tiers_available.join(', ') : 'unknown';
       setStatus('ok', 'Connected. Decision tiers available: ' + tiers + '.');
+      applyHealthData(data);
     }, function (err) {
       setStatus('err', 'Could not reach the extension background worker: ' + err);
+    });
+  });
+
+  // ===============================================================================
+  // -- Smart fill: "reuse my past answers" / "draft open-ended answers" -----------
+  // ===============================================================================
+  //
+  // Talks to the (new, may not exist yet on an older service) GET/POST /settings
+  // endpoints, contract { answers_enabled, drafts_enabled, max_drafts }. Degrades
+  // gracefully when they 404: the toggles still work as a LOCAL-ONLY preference
+  // (chrome.storage.local, keys smartFillAnswersEnabled/smartFillDraftsEnabled —
+  // also what popup.js reads to decide whether to show its "turn on drafts" hint),
+  // the section is visibly disabled with an explanation, and nothing else on this
+  // page is affected.
+  //
+  // "Drafts" also depends on an LLM actually being configured server-side — GET
+  // /health is extended with `llm_available`/`llm_provider` for that. When the
+  // operator has drafts on but no model is available, this says so plainly rather
+  // than letting the toggle silently do nothing on every /resolve call.
+
+  var smartFillCardEl = document.getElementById('smartFillCard');
+  var smartFillAnswersEl = document.getElementById('smartFillAnswers');
+  var smartFillDraftsEl = document.getElementById('smartFillDrafts');
+  var smartFillMaxDraftsEl = document.getElementById('smartFillMaxDrafts');
+  var smartFillLlmWarningEl = document.getElementById('smartFillLlmWarning');
+  var smartFillSaveEl = document.getElementById('smartFillSave');
+  var smartFillStatusEl = document.getElementById('smartFillStatus');
+
+  // null = not known yet (no HEALTH response received). Only an explicit `false`
+  // shows the warning — never guess "no model" before we've actually asked.
+  var llmAvailable = null;
+
+  function setSmartFillStatus(kind, text) {
+    smartFillStatusEl.className = kind;
+    smartFillStatusEl.textContent = text;
+  }
+
+  function updateLlmWarning() {
+    smartFillLlmWarningEl.style.display = (smartFillDraftsEl.checked && llmAvailable === false) ? 'block' : 'none';
+  }
+
+  function applyHealthData(data) {
+    llmAvailable = data && typeof data.llm_available === 'boolean' ? data.llm_available : null;
+    updateLlmWarning();
+  }
+
+  function loadLlmAvailability() {
+    chrome.runtime.sendMessage({ type: 'HEALTH' }).then(function (resp) {
+      applyHealthData(resp && resp.ok ? resp.data : null);
+    }, function () {
+      applyHealthData(null);
+    });
+  }
+
+  // The operator's toggle state is the source of truth for popup.js's local hint
+  // regardless of whether the service has caught up with /settings yet — persisted
+  // on every change, not just on Save, so it's never stale relative to what's on screen.
+  function persistSmartFillLocally() {
+    chrome.storage.local.set({
+      smartFillAnswersEnabled: smartFillAnswersEl.checked,
+      smartFillDraftsEnabled: smartFillDraftsEl.checked
+    });
+  }
+
+  smartFillAnswersEl.addEventListener('change', persistSmartFillLocally);
+  smartFillDraftsEl.addEventListener('change', function () {
+    updateLlmWarning();
+    persistSmartFillLocally();
+  });
+
+  function loadSmartFillSettings() {
+    return chrome.storage.local.get(['smartFillAnswersEnabled', 'smartFillDraftsEnabled']).then(function (local) {
+      // Reuse my past answers: on by default. Draft answers: off by default.
+      smartFillAnswersEl.checked = local.smartFillAnswersEnabled !== false;
+      smartFillDraftsEl.checked = local.smartFillDraftsEnabled === true;
+      smartFillCardEl.classList.remove('section-disabled');
+      updateLlmWarning();
+
+      if (!tokenEl.value) {
+        setSmartFillStatus('info', 'Set a service token above to sync these with your ApplyPilot service.');
+        return;
+      }
+
+      return apiGet('/settings').then(function (data) {
+        data = data || {};
+        if (typeof data.answers_enabled === 'boolean') smartFillAnswersEl.checked = data.answers_enabled;
+        if (typeof data.drafts_enabled === 'boolean') smartFillDraftsEl.checked = data.drafts_enabled;
+        if (data.max_drafts != null) smartFillMaxDraftsEl.value = data.max_drafts;
+        smartFillStatusEl.className = '';
+        smartFillStatusEl.textContent = '';
+        persistSmartFillLocally();
+        updateLlmWarning();
+      }, function (err) {
+        if (err && err.status === 404) {
+          // Graceful degrade: the Python side hasn't shipped /settings yet on this
+          // install. Disable the section rather than pretend a Save does anything
+          // server-side, but leave the toggles' last-known state visible.
+          smartFillCardEl.classList.add('section-disabled');
+          setSmartFillStatus('info', "This ApplyPilot service doesn't support smart-fill settings yet — update it, or your choices here stay local to this browser only.");
+        } else {
+          setSmartFillStatus('err', 'Could not load smart-fill settings: ' + err.message);
+        }
+      });
+    });
+  }
+
+  smartFillSaveEl.addEventListener('click', function () {
+    if (!tokenEl.value) {
+      setSmartFillStatus('err', 'Set a service token above first.');
+      return;
+    }
+    var maxDrafts = parseInt(smartFillMaxDraftsEl.value, 10);
+    if (!(maxDrafts >= 0)) maxDrafts = 5;
+    smartFillMaxDraftsEl.value = maxDrafts;
+    persistSmartFillLocally();
+
+    smartFillSaveEl.disabled = true;
+    setSmartFillStatus('info', 'Saving…');
+    apiPost('/settings', {
+      answers_enabled: smartFillAnswersEl.checked,
+      drafts_enabled: smartFillDraftsEl.checked,
+      max_drafts: maxDrafts
+    }).then(function () {
+      smartFillCardEl.classList.remove('section-disabled');
+      setSmartFillStatus('ok', 'Saved.');
+      smartFillSaveEl.disabled = false;
+    }, function (err) {
+      smartFillSaveEl.disabled = false;
+      if (err && err.status === 404) {
+        setSmartFillStatus('warn', "Saved locally in this browser only — this ApplyPilot service doesn't support smart-fill settings yet.");
+      } else {
+        setSmartFillStatus('err', 'Could not save smart-fill settings: ' + err.message);
+      }
     });
   });
 

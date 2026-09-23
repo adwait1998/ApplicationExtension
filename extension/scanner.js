@@ -67,6 +67,116 @@
   }
 
   // ---------------------------------------------------------------------
+  // custom select widgets (select2 / Chosen / React-select / Avature, ...)
+  // ---------------------------------------------------------------------
+  //
+  // These libraries hide the real <select> (display:none, visually-hidden, or
+  // aria-hidden) and render a styled div/span in its place that the operator
+  // actually sees and interacts with. The plain isVisible() check above
+  // correctly drops the hidden native <select> -- which makes the whole
+  // field vanish from the scan, even though it is perfectly fillable: set
+  // the hidden select's value programmatically and dispatch `change`, and
+  // every one of these widget libraries re-renders itself off that event.
+  //
+  // Detection is purely structural, never by clicking anything (see
+  // isClickSafe()'s file-level invariant -- this module must never grow a
+  // new .click() path):
+  //   - well-known marker classes/attributes these libraries put on the
+  //     <select> itself (select2-hidden-accessible, chosen-select/
+  //     chosen-processed/chzn-done, aria-hidden="true");
+  //   - well-known marker classes/roles on the replacement widget node
+  //     (select2/select2-container, chosen-container, role=combobox,
+  //     aria-haspopup=listbox);
+  //   - falling back to "the select's next visible sibling, or another
+  //     visible child of its immediate wrapper" when the select itself
+  //     carries one of those hidden-native markers, so a widget library we
+  //     don't recognize by name still gets picked up as long as it left
+  //     evidence that it took the select over.
+
+  var CUSTOM_WIDGET_CLASS_RE = /select2|chosen|combobox|custom-select|react-select|dropdown/i;
+  var HIDDEN_NATIVE_SELECT_MARKER_RE = /select2-hidden-accessible|chosen-select|chosen-processed|chzn-done/i;
+
+  function looksLikeSelectWidget(node) {
+    if (!node || node.nodeType !== 1) return false;
+    var cls = (node.getAttribute && node.getAttribute('class')) || '';
+    if (CUSTOM_WIDGET_CLASS_RE.test(cls)) return true;
+    var role = node.getAttribute && node.getAttribute('role');
+    if (role === 'combobox' || role === 'listbox') return true;
+    if (node.getAttribute && node.getAttribute('aria-haspopup') === 'listbox') return true;
+    if (node.querySelector) {
+      try {
+        if (node.querySelector('[role="combobox"], [aria-haspopup="listbox"]')) return true;
+      } catch (e) { /* ignore */ }
+    }
+    return false;
+  }
+
+  /**
+   * Finds the visible custom widget standing in for a hidden native
+   * <select>, if any. Returns the widget element, or null when `select` is
+   * just an ordinary hidden field with no replacement widget (correctly
+   * left excluded from the scan).
+   */
+  function findPairedWidget(select) {
+    if (!select || select.tagName !== 'SELECT') return null;
+
+    var cls = select.className || '';
+    var markedHidden = HIDDEN_NATIVE_SELECT_MARKER_RE.test(String(cls)) ||
+      (select.getAttribute && select.getAttribute('aria-hidden') === 'true');
+
+    // 1. next element sibling(s) -- select2/Chosen both insert their widget
+    //    immediately after the original <select> in the DOM.
+    var sib = select.nextElementSibling;
+    var hops = 0;
+    while (sib && hops < 3) {
+      if (isVisible(sib) && looksLikeSelectWidget(sib)) return sib;
+      sib = sib.nextElementSibling;
+      hops++;
+    }
+
+    // 2. shared wrapper -- a custom widget (Avature-style, React select, ...)
+    //    that renders both the hidden <select> and its styled replacement as
+    //    sibling children of the same parent. Deliberately bounded to a
+    //    SMALL parent (a dedicated per-field wrapper div realistically has
+    //    only the select + its widget, maybe + an error span -- a handful
+    //    of children at most). Without this bound, a select sitting
+    //    directly in a big <form> (the common case -- most fields on a real
+    //    application form are direct children of one <form>) would treat
+    //    every other field's widget-shaped element anywhere in that form as
+    //    "its" pairing, which is exactly the kind of wrong-field mistake
+    //    this module cannot afford.
+    var parent = select.parentElement;
+    var MAX_WRAPPER_CHILDREN = 6;
+    if (parent && parent.children.length <= MAX_WRAPPER_CHILDREN) {
+      var children = Array.prototype.slice.call(parent.children);
+      for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (child === select) continue;
+        if (isVisible(child) && looksLikeSelectWidget(child)) return child;
+      }
+    }
+
+    // 3. last resort: the select itself carries a known "I've been replaced"
+    //    marker, but nothing nearby matched a widget class/role by name --
+    //    fall back to the nearest visible sibling rather than silently
+    //    dropping the field, but ONLY when there is real evidence (a
+    //    marker) that a widget library actually took this select over, and
+    //    only within that same small-wrapper bound as step 2.
+    if (markedHidden) {
+      var s2 = select.nextElementSibling;
+      if (s2 && isVisible(s2)) return s2;
+      if (parent && parent.children.length <= MAX_WRAPPER_CHILDREN) {
+        var kids = Array.prototype.slice.call(parent.children).filter(function (c) { return c !== select; });
+        for (var k = 0; k < kids.length; k++) {
+          if (isVisible(kids[k])) return kids[k];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // ---------------------------------------------------------------------
   // label resolution
   // ---------------------------------------------------------------------
 
@@ -155,6 +265,20 @@
     var nearby = getPrecedingText(el);
     if (nearby) return nearby;
 
+    return '';
+  }
+
+  // For a hidden native <select> paired with a visible custom widget: try the
+  // select's own label first (a `<label for>` pointing at the select's id is
+  // still valid even though the select itself is hidden), then fall back to
+  // labelling from the widget the operator actually sees.
+  function getFieldLabel(el, widget) {
+    var label = getLabel(el);
+    if (label) return label;
+    if (widget) {
+      var widgetLabel = getLabel(widget);
+      if (widgetLabel) return widgetLabel;
+    }
     return '';
   }
 
@@ -442,9 +566,18 @@
     for (var i = 0; i < candidates.length; i++) {
       var el = candidates[i];
       if (el.disabled) continue;
-      if (!isVisible(el)) continue;
 
       var tagLower = el.tagName.toLowerCase();
+
+      // Normally an invisible field is dropped outright. The one exception:
+      // a hidden native <select> that a custom widget (select2/Chosen/...)
+      // has taken over visually — still scan it, but only when we can find
+      // that visible replacement (see findPairedWidget's file-level comment).
+      var pairedWidget = null;
+      if (!isVisible(el)) {
+        if (tagLower === 'select') pairedWidget = findPairedWidget(el);
+        if (!pairedWidget) continue;
+      }
 
       if (tagLower === 'input' && (el.type || 'text').toLowerCase() === 'radio') {
         var key = radioGroupKey(el, doc) || ('radio:noname:' + counter);
@@ -501,7 +634,7 @@
       var fid = 'f' + (counter++);
       var selector = buildSelector(el);
       var fieldSection = getSectionContext(el);
-      registry[fid] = { kind: 'element', el: el };
+      registry[fid] = pairedWidget ? { kind: 'element', el: el, highlightEl: pairedWidget } : { kind: 'element', el: el };
       fields.push({
         id: fid,
         selector: selector,
@@ -509,7 +642,7 @@
         type: type,
         name: el.name || '',
         autocomplete: el.getAttribute('autocomplete') || '',
-        label: getLabel(el),
+        label: pairedWidget ? getFieldLabel(el, pairedWidget) : getLabel(el),
         placeholder: el.placeholder || '',
         required: !!el.required,
         options: tagLower === 'select' ? getSelectOptions(el) : [],
@@ -592,30 +725,89 @@
     fireEvents(el, ['input', 'change']);
   }
 
-  function setSelectValue(el, text) {
+  // US state name <-> 2-letter code table. The profile stores a full name
+  // (e.g. "Arizona"); a page's <select> may list the same state as
+  // "Arizona", "AZ", or "US-AZ" — findOptionMatch() below tries all three.
+  var US_STATE_TABLE = [
+    ['Alabama', 'AL'], ['Alaska', 'AK'], ['Arizona', 'AZ'], ['Arkansas', 'AR'],
+    ['California', 'CA'], ['Colorado', 'CO'], ['Connecticut', 'CT'], ['Delaware', 'DE'],
+    ['Florida', 'FL'], ['Georgia', 'GA'], ['Hawaii', 'HI'], ['Idaho', 'ID'],
+    ['Illinois', 'IL'], ['Indiana', 'IN'], ['Iowa', 'IA'], ['Kansas', 'KS'],
+    ['Kentucky', 'KY'], ['Louisiana', 'LA'], ['Maine', 'ME'], ['Maryland', 'MD'],
+    ['Massachusetts', 'MA'], ['Michigan', 'MI'], ['Minnesota', 'MN'], ['Mississippi', 'MS'],
+    ['Missouri', 'MO'], ['Montana', 'MT'], ['Nebraska', 'NE'], ['Nevada', 'NV'],
+    ['New Hampshire', 'NH'], ['New Jersey', 'NJ'], ['New Mexico', 'NM'], ['New York', 'NY'],
+    ['North Carolina', 'NC'], ['North Dakota', 'ND'], ['Ohio', 'OH'], ['Oklahoma', 'OK'],
+    ['Oregon', 'OR'], ['Pennsylvania', 'PA'], ['Rhode Island', 'RI'], ['South Carolina', 'SC'],
+    ['South Dakota', 'SD'], ['Tennessee', 'TN'], ['Texas', 'TX'], ['Utah', 'UT'],
+    ['Vermont', 'VT'], ['Virginia', 'VA'], ['Washington', 'WA'], ['West Virginia', 'WV'],
+    ['Wisconsin', 'WI'], ['Wyoming', 'WY'],
+    ['District of Columbia', 'DC'], ['Puerto Rico', 'PR'], ['American Samoa', 'AS'],
+    ['Guam', 'GU'], ['Northern Mariana Islands', 'MP'], ['U.S. Virgin Islands', 'VI']
+  ];
+  var US_STATE_NAME_TO_CODE = {};
+  var US_STATE_CODE_TO_NAME = {};
+  (function () {
+    for (var s = 0; s < US_STATE_TABLE.length; s++) {
+      var name = US_STATE_TABLE[s][0].toLowerCase();
+      var code = US_STATE_TABLE[s][1].toLowerCase();
+      US_STATE_NAME_TO_CODE[name] = code;
+      US_STATE_CODE_TO_NAME[code] = name;
+    }
+  })();
+
+  /**
+   * Finds the index of the <select> option matching `text`, trying (in
+   * order): exact text/value match, US state name<->code cross-match, then
+   * a loose case-insensitive substring match. Returns -1 when nothing
+   * matches. Shared by setSelectValue() and the read-back check inside it.
+   */
+  function findOptionMatch(el, text) {
     var target = String(text == null ? '' : text).trim().toLowerCase();
-    var matchIndex = -1;
     var i;
+
+    // 1. exact text or value match (also covers matching a blank placeholder
+    //    option like "-- Select --" when target is '').
     for (i = 0; i < el.options.length; i++) {
       var optText = cleanText(el.options[i].textContent).toLowerCase();
       var optValue = String(el.options[i].value).toLowerCase();
-      if (optText === target || optValue === target) { matchIndex = i; break; }
+      if (optText === target || optValue === target) return i;
     }
-    if (matchIndex === -1 && target) {
+    if (!target) return -1;
+
+    // 2. US state name <-> 2-letter code cross-match.
+    var code = US_STATE_NAME_TO_CODE[target];
+    var name = US_STATE_CODE_TO_NAME[target];
+    if (code || name) {
       for (i = 0; i < el.options.length; i++) {
-        var optText2 = cleanText(el.options[i].textContent).toLowerCase();
-        if (optText2 && (optText2.indexOf(target) !== -1 || target.indexOf(optText2) !== -1)) {
-          matchIndex = i;
-          break;
-        }
+        var ot = cleanText(el.options[i].textContent).toLowerCase();
+        var ov = String(el.options[i].value).toLowerCase();
+        var otNoPrefix = ot.replace(/^us[\s-]?/, '');
+        var ovNoPrefix = ov.replace(/^us[\s-]?/, '');
+        if (code && (ot === code || ov === code || otNoPrefix === code || ovNoPrefix === code)) return i;
+        if (name && (ot === name || ov === name)) return i;
       }
     }
+
+    // 3. case-insensitive contains (either direction).
+    for (i = 0; i < el.options.length; i++) {
+      var optText2 = cleanText(el.options[i].textContent).toLowerCase();
+      if (optText2 && (optText2.indexOf(target) !== -1 || target.indexOf(optText2) !== -1)) return i;
+    }
+    return -1;
+  }
+
+  function setSelectValue(el, text) {
+    var matchIndex = findOptionMatch(el, text);
     if (matchIndex === -1) return false;
     var setter = nativeSetterFor(el, 'selectedIndex');
     if (setter) setter.call(el, matchIndex);
     else el.selectedIndex = matchIndex;
     fireEvents(el, ['input', 'change']);
-    return true;
+    // Read back rather than trust the write: a custom-select widget's own
+    // change handler could in principle revert or ignore this — report
+    // failure honestly instead of claiming a fill the DOM disagrees with.
+    return el.selectedIndex === matchIndex;
   }
 
   function clearRadioGroup(elements) {
@@ -697,7 +889,10 @@
   /** The element(s) that should get the visual highlight for this field. */
   function getHighlightTargets(entry) {
     if (entry.kind === 'radio-group') return entry.elements.slice();
-    return [entry.el];
+    // A hidden native <select> paired with a custom widget (see
+    // findPairedWidget) highlights the visible widget, never the hidden
+    // select the operator can't see.
+    return [entry.highlightEl || entry.el];
   }
 
   // ---------------------------------------------------------------------
@@ -740,6 +935,22 @@
    * { el, contextText, isDropzone } or null when no eligible input exists on
    * the page (no file inputs at all, or every file input is cover-letter-labeled).
    */
+  // Matches an accept="" attribute that is document-shaped (pdf/doc/docx),
+  // as opposed to e.g. accept="image/*" on a photo-upload field. Used only
+  // as a tie-breaker below, never to exclude a candidate outright — plenty
+  // of real ATS file inputs carry no accept attribute at all.
+  var DOC_ACCEPT_RE = /pdf|msword|wordprocessingml|\.docx?\b/i;
+
+  /**
+   * Picks the single file input that should receive the résumé. Returns
+   * { el, contextText, isDropzone } or null when no eligible input exists on
+   * the page (no file inputs at all, or every file input is cover-letter-labeled).
+   *
+   * Considers hidden inputs too (deliberately no isVisible() filter below) —
+   * custom upload widgets routinely keep the real <input type=file> hidden
+   * (display:none) and drive it from a styled dropzone/button instead, the
+   * same pattern findPairedWidget() handles for <select>.
+   */
   function findResumeFileTarget(doc) {
     doc = doc || (typeof document !== 'undefined' ? document : null);
     if (!doc) return null;
@@ -758,6 +969,16 @@
     for (var c = 0; c < candidates.length; c++) {
       if (RESUME_LABEL_RE.test(candidates[c].contextText)) return candidates[c]; // rule 1
     }
+
+    // rule 1.5: no explicit résumé label anywhere — prefer a candidate whose
+    // accept attribute is document-shaped (pdf/doc/docx) over one that isn't
+    // (e.g. a photo-upload field with accept="image/*"), before falling back
+    // to plain DOM order among the rest.
+    for (var d = 0; d < candidates.length; d++) {
+      var accept = (candidates[d].el.getAttribute('accept') || '');
+      if (DOC_ACCEPT_RE.test(accept)) return candidates[d];
+    }
+
     return candidates[0]; // rule 2: first non-cover-letter file input, DOM order
   }
 
@@ -861,10 +1082,13 @@
     cssEscape: cssEscape,
     isVisible: isVisible,
     getLabel: getLabel,
+    getFieldLabel: getFieldLabel,
     getGroupLabel: getGroupLabel,
     getSectionContext: getSectionContext,
     extractSectionIndex: extractSectionIndex,
     buildSelector: buildSelector,
+    findPairedWidget: findPairedWidget,
+    findOptionMatch: findOptionMatch,
     scanFields: scanFields,
     scanAll: scanAll,
     setNativeValue: setNativeValue,

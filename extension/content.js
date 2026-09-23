@@ -160,14 +160,18 @@
     var target = ApplyPilotScanner.findResumeFileTarget(document);
     if (!target) return Promise.resolve({ attempted: false });
 
-    function fail(reason) {
+    // `errorCode` mirrors background.js's callResume() error codes (e.g.
+    // "no-resume") so popup.js can tell "nothing is stored yet — go add one"
+    // apart from a generic connectivity/attachment failure, without the two
+    // of them having to agree on parsing reason text.
+    function fail(reason, errorCode) {
       highlight(target.el, 'skipped', 'Résumé not attached — ' + reason);
-      return { attempted: true, attached: false, reason: reason };
+      return { attempted: true, attached: false, reason: reason, errorCode: errorCode || '' };
     }
 
     return chrome.runtime.sendMessage({ type: 'GET_RESUME' }).then(function (resp) {
       if (!resp || !resp.ok) {
-        return fail((resp && resp.message) || 'Could not reach the local service for the résumé file.');
+        return fail((resp && resp.message) || 'Could not reach the local service for the résumé file.', resp && resp.error);
       }
       var d = resp.data || {};
       var file;
