@@ -5,13 +5,16 @@ inline dict via create_app(profile=...) — this test suite must never touch
 E:\\applypilot-data or read a real profile.json.
 """
 from __future__ import annotations
+import json
 import threading
+from pathlib import Path
 
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
+from applypilot import profiles as profiles_mod  # noqa: E402
 from applypilot.extension.server import create_app, get_or_create_token, token_path  # noqa: E402
 
 PROFILE = {
@@ -350,3 +353,324 @@ def test_extension_default_port_matches_the_serve_extension_cli_default():
         assert ports, f"{rel} names no 127.0.0.1 port"
         assert ports == {cli_port}, (
             f"{rel} points at {sorted(ports)} but serve-extension listens on {cli_port}")
+
+
+# ---------------------------------------------------------------------------
+# Profile management: GET /profile/full, POST /profile, GET /profiles,
+# POST /profiles/{id}/activate, POST /profiles.
+#
+# These are disk-backed (create_app(app_dir=tmp_path, root=tmp_path), no
+# `profile=` injection) so writes and profile-switching are exercised for
+# real, exactly as the options page will use them. Every fixture lives
+# entirely under tmp_path — never E:\applypilot-data.
+# ---------------------------------------------------------------------------
+
+FULL_PROFILE = {
+    "personal": {
+        "full_name": "Nida Shah",
+        "email": "nida@example.com",
+        "password": "hunter2",
+    },
+    "work_authorization": {"legally_authorized_to_work": True, "require_sponsorship": True},
+}
+
+
+def _disk_app(tmp_path):
+    app = create_app(app_dir=tmp_path, root=tmp_path)
+    return app, app.state.token
+
+
+def _legacy_root(tmp_path, data: dict = FULL_PROFILE) -> None:
+    (tmp_path / "profile.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _multiprofile_root(tmp_path, profiles_data: dict[str, dict], active: str | None = None) -> None:
+    for pid, data in profiles_data.items():
+        pdir = tmp_path / "profiles" / pid
+        pdir.mkdir(parents=True)
+        (pdir / "profile.json").write_text(json.dumps(data), encoding="utf-8")
+    if active:
+        profiles_mod.set_active(tmp_path, active)
+
+
+# --- GET /profile/full: values, secret stripped -----------------------------
+
+
+def test_profile_full_strips_password_legacy(tmp_path):
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/full", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["personal"]["email"] == "nida@example.com"
+    assert "password" not in body["personal"]
+    assert "hunter2" not in str(body)
+
+
+def test_profile_full_strips_password_multiprofile(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE}, active="nida")
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/full", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["personal"]["email"] == "nida@example.com"
+    assert "password" not in body["personal"]
+    assert "hunter2" not in str(body)
+
+
+def test_profile_full_ambiguous_without_active_profile_is_409(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE, "adwait": FULL_PROFILE}, active=None)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/full", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 409
+
+
+# --- POST /profile: the secret round-trip bug -------------------------------
+
+
+def test_post_profile_round_trip_preserves_password_legacy(tmp_path):
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+
+    got = client.get("/profile/full", headers=headers).json()
+    assert "password" not in got.get("personal", {})  # the client truly never saw it
+
+    got["personal"]["email"] = "nida.updated@example.com"
+    resp = client.post("/profile", json=got, headers=headers)
+    assert resp.status_code == 200
+
+    on_disk = json.loads((tmp_path / "profile.json").read_text(encoding="utf-8"))
+    assert on_disk["personal"]["password"] == "hunter2"          # preserved, not wiped
+    assert on_disk["personal"]["email"] == "nida.updated@example.com"  # edit took
+
+
+def test_post_profile_round_trip_preserves_password_multiprofile(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE}, active="nida")
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+
+    got = client.get("/profile/full", headers=headers).json()
+    got["personal"]["email"] = "nida.updated@example.com"
+    resp = client.post("/profile", json=got, headers=headers)
+    assert resp.status_code == 200
+
+    on_disk = json.loads((tmp_path / "profiles" / "nida" / "profile.json").read_text(encoding="utf-8"))
+    assert on_disk["personal"]["password"] == "hunter2"
+    assert on_disk["personal"]["email"] == "nida.updated@example.com"
+
+
+def test_post_profile_honors_an_explicit_secret_value(tmp_path):
+    """The merge only rescues a secret the client never saw. A payload that
+    DOES include personal.password (however that might happen) is written
+    as sent, not silently overridden by the old value."""
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+
+    body = {"personal": {"full_name": "Nida Shah", "email": "nida@example.com",
+                          "password": "new-password"}}
+    resp = client.post("/profile", json=body, headers=headers)
+    assert resp.status_code == 200
+    on_disk = json.loads((tmp_path / "profile.json").read_text(encoding="utf-8"))
+    assert on_disk["personal"]["password"] == "new-password"
+
+
+def test_post_profile_rejects_non_object_body(tmp_path):
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profile", json=["not", "an", "object"],
+                        headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 422
+
+
+def test_post_profile_rejects_malformed_work_history(tmp_path):
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profile", json={"work_history": "not a list"},
+                        headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 422
+
+
+def test_post_profile_creates_backup(tmp_path):
+    _legacy_root(tmp_path, {"personal": {"full_name": "Original"}})
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profile", json={"personal": {"full_name": "Updated"}},
+                        headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+
+    backup = tmp_path / "profile.json.bak"
+    assert backup.exists()
+    assert json.loads(backup.read_text(encoding="utf-8"))["personal"]["full_name"] == "Original"
+    assert json.loads((tmp_path / "profile.json").read_text(encoding="utf-8"))["personal"]["full_name"] == "Updated"
+
+
+def test_post_profile_writes_atomically(tmp_path, monkeypatch):
+    _legacy_root(tmp_path, {"personal": {"full_name": "Original"}})
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+
+    from applypilot.extension import server as srv
+    calls = []
+    real_replace = srv.os.replace
+
+    def spy_replace(src, dst):
+        # at the moment of replace, the temp file must already hold the
+        # complete new content — proving the write-then-rename order.
+        assert json.loads(Path(src).read_text(encoding="utf-8"))["personal"]["full_name"] == "Updated"
+        calls.append((src, dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(srv.os, "replace", spy_replace)
+
+    resp = client.post("/profile", json={"personal": {"full_name": "Updated"}},
+                        headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][1] == tmp_path / "profile.json"
+    assert list(tmp_path.glob("*.tmp")) == []  # no leftover temp file
+
+
+def test_post_profile_bootstraps_first_profile_when_nothing_exists(tmp_path):
+    """No profile.json, no profiles/ — the operator's very first profile,
+    created entirely from the extension, no text editor involved."""
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profile", json={"personal": {"full_name": "Brand New"}},
+                        headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert json.loads((tmp_path / "profile.json").read_text(encoding="utf-8"))["personal"]["full_name"] == "Brand New"
+
+
+# --- GET /profiles -----------------------------------------------------------
+
+
+def test_profiles_endpoint_reports_legacy(tmp_path):
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profiles", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert resp.json() == {"profiles": [], "legacy": True}
+
+
+def test_profiles_endpoint_lists_and_marks_active(tmp_path):
+    _multiprofile_root(
+        tmp_path,
+        {"nida": {"personal": {"full_name": "Nida Shah"}}, "adwait": {"personal": {"full_name": "Adwait"}}},
+        active="adwait",
+    )
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profiles", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["legacy"] is False
+    by_id = {p["id"]: p for p in body["profiles"]}
+    assert by_id["nida"]["active"] is False
+    assert by_id["adwait"]["active"] is True
+    assert by_id["nida"]["name"] == "Nida Shah"
+
+
+# --- POST /profiles/{id}/activate --------------------------------------------
+
+
+def test_activate_switches_active_profile(tmp_path):
+    _multiprofile_root(
+        tmp_path,
+        {"nida": {"personal": {"full_name": "Nida"}}, "adwait": {"personal": {"full_name": "Adwait"}}},
+        active="nida",
+    )
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+
+    resp = client.post("/profiles/adwait/activate", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"active": "adwait"}
+    assert profiles_mod.get_active(tmp_path) == "adwait"
+
+    # takes effect immediately, no restart — /profile/full now serves adwait
+    full = client.get("/profile/full", headers=headers).json()
+    assert full["personal"]["full_name"] == "Adwait"
+
+
+def test_activate_rejects_invalid_id_shape(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE}, active="nida")
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles/../escape/activate", headers={"X-ApplyPilot-Token": token})
+    # path traversal collapses at the HTTP layer or is rejected as an invalid id either way
+    assert resp.status_code in (404, 422)
+
+
+def test_activate_rejects_unknown_profile(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE}, active="nida")
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles/ghost/activate", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 404
+
+
+def test_activate_rejected_in_legacy_layout(tmp_path):
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles/nida/activate", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 409
+
+
+# --- POST /profiles: create a new empty profile ------------------------------
+
+
+def test_create_profile_new_id_auto_activates_when_sole(tmp_path):
+    (tmp_path / "profiles").mkdir()  # already-migrated layout, zero profiles yet
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles", json={"id": "nida"}, headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert resp.json() == {"id": "nida", "created": True}
+    assert profiles_mod.get_active(tmp_path) == "nida"
+    assert (tmp_path / "profiles" / "nida" / "profile.json").exists()
+
+
+def test_create_profile_second_does_not_auto_activate(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE}, active="nida")
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles", json={"id": "adwait"}, headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert profiles_mod.get_active(tmp_path) == "nida"  # unchanged
+
+
+def test_create_profile_rejects_invalid_id(tmp_path):
+    (tmp_path / "profiles").mkdir()
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles", json={"id": "Bad ID!"}, headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 422
+
+
+def test_create_profile_rejects_duplicate(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE}, active="nida")
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles", json={"id": "nida"}, headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 409
+
+
+def test_create_profile_rejected_in_legacy_layout(tmp_path):
+    _legacy_root(tmp_path)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/profiles", json={"id": "second"}, headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 409

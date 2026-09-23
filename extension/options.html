@@ -7,23 +7,30 @@
   :root { color-scheme: light dark; }
   body {
     font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    max-width: 560px;
+    max-width: 720px;
     margin: 32px auto;
-    padding: 0 20px;
+    padding: 0 20px 60px;
     color: #1f2937;
   }
   h1 { font-size: 18px; margin-bottom: 4px; }
+  h2 { font-size: 15px; margin: 0 0 4px; }
   p.sub { color: #6b7280; margin-top: 0; font-size: 13px; }
   label { display: block; font-weight: 600; font-size: 13px; margin: 18px 0 6px; }
-  input[type="text"], input[type="password"] {
+  label.inline { display: inline-block; font-weight: 600; font-size: 13px; margin: 0 0 0 6px; }
+  input[type="text"], input[type="password"], input[type="email"], input[type="tel"],
+  input[type="url"], input[type="number"], select, textarea {
     width: 100%;
     box-sizing: border-box;
     padding: 8px 10px;
     font-size: 13px;
     border: 1px solid #d1d5db;
     border-radius: 6px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: inherit;
+    background: #fff;
+    color: inherit;
   }
+  input[type="text"], input[type="password"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  textarea { min-height: 56px; resize: vertical; }
   .row { display: flex; gap: 8px; align-items: center; }
   .row input { flex: 1; }
   button {
@@ -40,14 +47,66 @@
     background: #fff;
     color: #2563eb;
   }
+  button.small { margin-top: 0; padding: 4px 9px; font-size: 12px; }
+  button.danger { border-color: #dc2626; color: #dc2626; background: #fff; }
   button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
   #toggleToken { margin-top: 0; padding: 8px 10px; }
-  #status { margin-top: 14px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; }
-  #status.ok { display: block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
-  #status.err { display: block; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-  #status.info { display: block; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
+  #status, #profileStatus { margin-top: 14px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; }
+  #status.ok, #profileStatus.ok { display: block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+  #status.err, #profileStatus.err { display: block; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  #status.info, #profileStatus.info { display: block; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
   .hint { font-size: 12px; color: #6b7280; margin-top: 6px; }
+  .hint.warn { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; padding: 8px 10px; border-radius: 6px; }
   code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+  hr.section-divider { border: none; border-top: 1px solid #e5e7eb; margin: 32px 0 8px; }
+
+  fieldset {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin: 16px 0;
+    padding: 4px 14px 14px;
+  }
+  fieldset legend { font-weight: 700; font-size: 13px; padding: 0 6px; }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .field-grid label { margin: 14px 0 6px; }
+
+  /* Boolean work-auth controls: explicit Yes/No/Not-set, never a free-text
+     box and never pre-selected — see options.js renderEditor(). */
+  .bool-field { margin: 14px 0 6px; }
+  .bool-field .bool-label { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+  .bool-options { display: flex; gap: 16px; }
+  .bool-options label { display: inline-flex; align-items: center; gap: 5px; font-weight: 400; margin: 0; font-size: 13px; }
+
+  #profileSwitcher { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  #profileSwitcher select { width: auto; flex: 1; }
+
+  #newProfileRow { display: none; gap: 8px; margin-top: 10px; align-items: center; }
+  #newProfileRow input { flex: 1; }
+
+  .repeat-note { font-size: 12px; color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe;
+                 border-radius: 6px; padding: 8px 10px; margin: 10px 0; }
+
+  .repeat-row {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 12px 12px;
+    margin-bottom: 10px;
+    background: #fafafa;
+  }
+  .repeat-row-head { display: flex; justify-content: space-between; align-items: center; }
+  .repeat-row-head .badge {
+    font-size: 11px; font-weight: 700; color: #374151; background: #e5e7eb;
+    border-radius: 4px; padding: 2px 7px;
+  }
+  .repeat-row-actions { display: flex; gap: 6px; }
+  .repeat-row .field-grid label { margin: 10px 0 4px; }
+  .checkbox-line { display: flex; align-items: center; gap: 6px; margin: 12px 0 4px; }
+  .checkbox-line input { width: auto; }
+  .checkbox-line label { margin: 0; font-weight: 400; }
+
+  #profileEditor { opacity: 1; transition: opacity 0.15s; }
+  #profileEditor.disabled { opacity: 0.5; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -71,6 +130,194 @@
   </div>
 
   <div id="status"></div>
+
+  <hr class="section-divider">
+
+  <h1>Profile</h1>
+  <p class="sub">Create and edit the profile the extension fills forms from — no text editor required. Nothing below is saved until you click <strong>Save profile</strong>.</p>
+
+  <div id="legacyNotice" class="hint warn" style="display:none">
+    This install has a single profile (not yet migrated to multi-profile). You can still edit it below —
+    run <code>applypilot profile migrate</code> from the CLI if you want to add more people.
+  </div>
+
+  <div id="profileSwitcher" style="display:none">
+    <select id="profileSelect" aria-label="Active profile"></select>
+    <button type="button" class="secondary small" id="newProfileBtn">New profile…</button>
+    <button type="button" class="secondary small" id="reloadProfileBtn">Reload</button>
+  </div>
+  <div id="newProfileRow">
+    <input type="text" id="newProfileId" placeholder="profile id, e.g. adwait (lowercase, digits, - or _)" autocomplete="off" spellcheck="false">
+    <button type="button" class="small" id="createProfileBtn">Create</button>
+    <button type="button" class="secondary small" id="cancelNewProfileBtn">Cancel</button>
+  </div>
+
+  <div id="profileEditor">
+    <fieldset>
+      <legend>Personal</legend>
+      <div class="field-grid">
+        <div><label for="p_full_name">Full legal name</label>
+          <input type="text" id="p_full_name" data-path="personal.full_name"></div>
+        <div><label for="p_preferred_name">Preferred name</label>
+          <input type="text" id="p_preferred_name" data-path="personal.preferred_name"></div>
+        <div><label for="p_email">Email</label>
+          <input type="email" id="p_email" data-path="personal.email"></div>
+        <div><label for="p_phone">Phone</label>
+          <input type="tel" id="p_phone" data-path="personal.phone"></div>
+        <div><label for="p_linkedin">LinkedIn URL</label>
+          <input type="url" id="p_linkedin" data-path="personal.linkedin_url"></div>
+        <div><label for="p_github">GitHub URL</label>
+          <input type="url" id="p_github" data-path="personal.github_url"></div>
+        <div><label for="p_portfolio">Portfolio URL</label>
+          <input type="url" id="p_portfolio" data-path="personal.portfolio_url"></div>
+        <div><label for="p_website">Website URL</label>
+          <input type="url" id="p_website" data-path="personal.website_url"></div>
+        <div><label for="p_address">Street address</label>
+          <input type="text" id="p_address" data-path="personal.address"></div>
+        <div><label for="p_city">City</label>
+          <input type="text" id="p_city" data-path="personal.city"></div>
+        <div><label for="p_state">State / Province</label>
+          <input type="text" id="p_state" data-path="personal.province_state"></div>
+        <div><label for="p_postal">Postal code</label>
+          <input type="text" id="p_postal" data-path="personal.postal_code"></div>
+        <div><label for="p_country">Country</label>
+          <input type="text" id="p_country" data-path="personal.country"></div>
+      </div>
+      <div class="hint">Your password is never shown or edited here — it is managed only by the CLI wizard.</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Work authorization</legend>
+      <div class="hint" style="margin-top:4px;">
+        These answer legally-sensitive application questions (sponsorship, work authorization).
+        Leave a question as <strong>Not set</strong> rather than guessing — an unset answer is
+        left for you to fill in on each form instead of being auto-submitted.
+      </div>
+
+      <div class="bool-field">
+        <div class="bool-label">Are you legally authorized to work in your target country?</div>
+        <div class="bool-options">
+          <label><input type="radio" name="wa_authorized" value="yes" data-path="work_authorization.legally_authorized_to_work"> Yes</label>
+          <label><input type="radio" name="wa_authorized" value="no" data-path="work_authorization.legally_authorized_to_work"> No</label>
+          <label><input type="radio" name="wa_authorized" value="unset" data-path="work_authorization.legally_authorized_to_work" checked> Not set</label>
+        </div>
+      </div>
+
+      <div class="bool-field">
+        <div class="bool-label">Will you now or in the future require visa sponsorship?</div>
+        <div class="bool-options">
+          <label><input type="radio" name="wa_sponsorship" value="yes" data-path="work_authorization.require_sponsorship"> Yes</label>
+          <label><input type="radio" name="wa_sponsorship" value="no" data-path="work_authorization.require_sponsorship"> No</label>
+          <label><input type="radio" name="wa_sponsorship" value="unset" data-path="work_authorization.require_sponsorship" checked> Not set</label>
+        </div>
+      </div>
+
+      <label for="wa_permit">Work permit / visa type (if applicable)</label>
+      <input type="text" id="wa_permit" data-path="work_authorization.work_permit_type" placeholder="e.g. H-1B, F-1 OPT — leave blank if none">
+    </fieldset>
+
+    <fieldset>
+      <legend>Compensation</legend>
+      <div class="field-grid">
+        <div><label for="c_salary">Desired salary</label>
+          <input type="text" id="c_salary" data-path="compensation.salary_expectation"></div>
+        <div><label for="c_currency">Currency</label>
+          <input type="text" id="c_currency" data-path="compensation.salary_currency" placeholder="USD"></div>
+        <div><label for="c_min">Salary range — min</label>
+          <input type="text" id="c_min" data-path="compensation.salary_range_min"></div>
+        <div><label for="c_max">Salary range — max</label>
+          <input type="text" id="c_max" data-path="compensation.salary_range_max"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Experience</legend>
+      <div class="field-grid">
+        <div><label for="e_years">Years of experience (total)</label>
+          <input type="text" id="e_years" data-path="experience.years_of_experience_total"></div>
+        <div><label for="e_level">Highest education level</label>
+          <input type="text" id="e_level" data-path="experience.education_level"></div>
+        <div><label for="e_title">Current job title</label>
+          <input type="text" id="e_title" data-path="experience.current_job_title"></div>
+        <div><label for="e_company">Current company</label>
+          <input type="text" id="e_company" data-path="experience.current_company"></div>
+        <div><label for="e_target">Target role</label>
+          <input type="text" id="e_target" data-path="experience.target_role"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Work history</legend>
+      <div class="repeat-note">
+        <strong>Row 1 must be your most recent position.</strong> Workday and similar systems render
+        repeating steps as "Work Experience 1", "Work Experience 2", … and the extension fills them
+        in this same order — keep your current/most recent job at the top.
+      </div>
+      <div id="workHistoryList"></div>
+      <button type="button" class="secondary small" id="addWorkHistoryBtn">+ Add position</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Education</legend>
+      <div class="repeat-note">
+        <strong>Row 1 must be your most recent / highest level of education</strong> — same reasoning
+        as work history above.
+      </div>
+      <div id="educationList"></div>
+      <button type="button" class="secondary small" id="addEducationBtn">+ Add education</button>
+    </fieldset>
+
+    <div>
+      <button type="button" id="saveProfile">Save profile</button>
+    </div>
+  </div>
+
+  <div id="profileStatus"></div>
+
+  <template id="workHistoryRowTemplate">
+    <div class="repeat-row" data-kind="work">
+      <div class="repeat-row-head">
+        <span class="badge"></span>
+        <span class="repeat-row-actions">
+          <button type="button" class="secondary small" data-action="up">↑</button>
+          <button type="button" class="secondary small" data-action="down">↓</button>
+          <button type="button" class="danger small" data-action="remove">Remove</button>
+        </span>
+      </div>
+      <div class="field-grid">
+        <div><label>Job title</label><input type="text" data-field="title"></div>
+        <div><label>Company</label><input type="text" data-field="company"></div>
+        <div><label>Location</label><input type="text" data-field="location"></div>
+        <div><label>Start (MM/YYYY)</label><input type="text" data-field="start" placeholder="MM/YYYY"></div>
+        <div><label>End (MM/YYYY)</label><input type="text" data-field="end" placeholder="MM/YYYY"></div>
+      </div>
+      <div class="checkbox-line">
+        <label><input type="checkbox" data-field="current"> I currently work here</label>
+      </div>
+      <label>Description</label>
+      <textarea data-field="description"></textarea>
+    </div>
+  </template>
+
+  <template id="educationRowTemplate">
+    <div class="repeat-row" data-kind="education">
+      <div class="repeat-row-head">
+        <span class="badge"></span>
+        <span class="repeat-row-actions">
+          <button type="button" class="secondary small" data-action="up">↑</button>
+          <button type="button" class="secondary small" data-action="down">↓</button>
+          <button type="button" class="danger small" data-action="remove">Remove</button>
+        </span>
+      </div>
+      <div class="field-grid">
+        <div><label>School</label><input type="text" data-field="school"></div>
+        <div><label>Degree</label><input type="text" data-field="degree"></div>
+        <div><label>Field of study</label><input type="text" data-field="field"></div>
+        <div><label>Start (MM/YYYY)</label><input type="text" data-field="start" placeholder="MM/YYYY"></div>
+        <div><label>End (MM/YYYY)</label><input type="text" data-field="end" placeholder="MM/YYYY"></div>
+      </div>
+    </div>
+  </template>
 
   <script src="options.js"></script>
 </body>

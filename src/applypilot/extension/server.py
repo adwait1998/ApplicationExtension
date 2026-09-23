@@ -9,12 +9,24 @@ Safety contract (deliberate, mirrors webui/server.py's header comment):
 - POST /resolve returns values only for the fields the caller actually
   submitted — never the whole profile. GET /profile (if used) returns key
   names only, never values, and never the secret-denylisted keys.
+- GET /profile/full is a considered relaxation of that last point — it
+  returns real profile values, for the extension's own profile editor.
+  Still 127.0.0.1-only and token-gated, and the secret denylist still
+  applies: personal.password never leaves this service via any route.
+  POST /profile merges rather than overwrites on the secret paths, so a
+  client that only ever saw the stripped /profile/full response can never
+  wipe a secret it was never shown.
 - This service never submits, navigates, or writes to the pipeline's DB.
   It answers "what goes in this field" and nothing else.
 """
 from __future__ import annotations
 
+import copy
+import json
+import os
 import secrets
+import shutil
+import tempfile
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +35,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from applypilot import profiles as profiles_mod
 from applypilot.extension import resolve, schema
 
 TOKEN_FILENAME = "extension_token.txt"
@@ -79,6 +92,10 @@ class ResolveRequest(BaseModel):
     fields: list[FieldIn] = Field(default_factory=list)
 
 
+class ProfileCreateIn(BaseModel):
+    id: str
+
+
 def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
     keys: list[str] = []
     for k, v in (d or {}).items():
@@ -91,6 +108,152 @@ def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Profile management helpers (GET /profile/full, POST /profile, /profiles*)
+#
+# These are pure/module-level: they take a root or a profile dict as an
+# argument rather than closing over app state, so they are trivially unit-
+# testable and reusable across the several profile endpoints below.
+# ---------------------------------------------------------------------------
+
+_MISSING = object()  # sentinel: "this dotted path is absent", distinct from None/""
+
+
+def _dotted_get(d: dict, path: str):
+    cur = d
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return _MISSING
+        cur = cur[part]
+    return cur
+
+
+def _dotted_set(d: dict, path: str, value) -> None:
+    parts = path.split(".")
+    cur = d
+    for part in parts[:-1]:
+        nxt = cur.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[part] = nxt
+        cur = nxt
+    cur[parts[-1]] = value
+
+
+def _strip_secret_values(profile: dict, prefix: str = "") -> dict:
+    """Deep-copy `profile` omitting any key whose dotted path is on the
+    secret denylist (resolve.SECRET_PROFILE_PATHS) — e.g. personal.password.
+    Unlike GET /profile (key names only), /profile/full returns real values,
+    so this is the one thing standing between that relaxation and a leaked
+    credential. The key is omitted entirely, not blanked, so a client can
+    never mistake an empty string for "no secret set"."""
+    out: dict = {}
+    for k, v in (profile or {}).items():
+        path = f"{prefix}.{k}" if prefix else k
+        if resolve.is_secret_path(path):
+            continue
+        if isinstance(v, dict):
+            out[k] = _strip_secret_values(v, path)
+        else:
+            out[k] = v
+    return out
+
+
+def _merge_preserving_secrets(new_profile: dict, existing_profile: dict) -> dict:
+    """POST /profile's client only ever saw a secret-stripped profile (from
+    GET /profile/full), so an absent secret path in its payload means "I
+    never had this", not "delete it". For every secret path missing from
+    new_profile, carry the value forward from what is already on disk. A
+    path the client DID send (even "") is left alone — this only stops the
+    silent-wipe-on-round-trip bug, it doesn't block an intentional change."""
+    merged = copy.deepcopy(new_profile) if isinstance(new_profile, dict) else {}
+    for path in resolve.SECRET_PROFILE_PATHS:
+        if _dotted_get(merged, path) is _MISSING:
+            existing_val = _dotted_get(existing_profile or {}, path)
+            if existing_val is not _MISSING:
+                _dotted_set(merged, path, existing_val)
+    return merged
+
+
+def _current_profile_path(root: Path) -> Path:
+    """Where the currently-active profile's profile.json lives, handling
+    both the legacy flat layout and profiles/<id>/. Raises 409 only in the
+    genuinely ambiguous multi-profile/no-active case — which the running
+    service normally never reaches (bind_profile refuses to start it), but
+    can reach once profiles are created/switched live via this API."""
+    root = Path(root)
+    if profiles_mod.is_legacy_layout(root):
+        return root / "profile.json"
+    pid = profiles_mod.get_active(root)
+    if not pid:
+        available = profiles_mod.list_profiles(root)
+        if len(available) == 1:
+            pid = available[0]
+    if not pid:
+        raise HTTPException(status_code=409, detail="no active profile selected — activate one first")
+    return profiles_mod.profile_dir(root, pid) / "profile.json"
+
+
+def _read_profile_or_empty(path: Path) -> dict:
+    """Fail-safe read for the profile-management endpoints: a missing or
+    corrupt profile.json reads as {} rather than raising, so the operator's
+    very first profile can be created through the extension with nothing on
+    disk yet. (GET /profile and POST /resolve keep their stricter, existing
+    behaviour via _load_profile below.)"""
+    try:
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:      # noqa: BLE001 — fail-safe, mirrors webui/settings.py
+        return {}
+
+
+def _validate_profile_body(body) -> None:
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="profile must be a JSON object")
+    for key in ("work_history", "education"):
+        val = body.get(key)
+        if val is None:
+            continue
+        if not isinstance(val, list) or not all(isinstance(x, dict) for x in val):
+            raise HTTPException(status_code=422, detail=f"{key} must be a list of objects")
+    for key in ("personal", "work_authorization", "compensation", "experience", "eeo_voluntary"):
+        val = body.get(key)
+        if val is not None and not isinstance(val, dict):
+            raise HTTPException(status_code=422, detail=f"{key} must be an object")
+
+
+def _backup_and_write_profile(path: Path, data: dict) -> None:
+    """Atomic write (tempfile + os.replace), backing up any existing file
+    first. Mirrors webui/settings.py's save_settings pattern plus the backup
+    this task additionally requires."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        shutil.copyfile(path, path.with_suffix(path.suffix + ".bak"))
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def _display_name(pdir: Path) -> str:
+    """Best-effort label for the profile switcher; an unreadable profile.json
+    must never raise — GET /profiles has to keep working even for a profile
+    someone else broke by hand."""
+    try:
+        data = json.loads((Path(pdir) / "profile.json").read_text(encoding="utf-8"))
+        name = (data.get("personal") or {}).get("full_name")
+        return name or data.get("profile_id") or ""
+    except Exception:      # noqa: BLE001
+        return ""
+
+
+# ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
 
@@ -99,14 +262,24 @@ def create_app(
     app_dir: Path | None = None,
     profile: dict | None = None,
     host: str = "127.0.0.1",
+    root: Path | None = None,
 ) -> FastAPI:
     """Build the extension service app.
 
     ``app_dir`` is where the token is persisted (config.APP_DIR by
     default). ``profile`` lets tests (and, if ever needed, callers) inject
-    a profile dict directly instead of reading profile.json from disk; when
-    omitted the profile is loaded fresh via config.load_profile() on every
-    /resolve call, so edits to profile.json take effect without a restart.
+    a profile dict directly instead of reading profile.json from disk, and
+    when set it is what /resolve, /profile and /profile/full serve — POST
+    /profile and the /profiles* management endpoints still read/write real
+    files under ``root`` regardless, so tests exercising those must not rely
+    on ``profile`` injection.
+
+    ``root`` is the data ROOT holding profiles/ and active_profile
+    (profiles.data_root() by default — the same root config.ROOT resolves,
+    independent of whichever single profile this process happens to be
+    bound to). Resolving it fresh on every request, rather than once at
+    startup like config.APP_DIR, is what lets POST /profiles/{id}/activate
+    take effect immediately without restarting the service.
     """
     if host not in ("127.0.0.1", "localhost"):
         raise ValueError(f"refusing to bind the extension service to non-local host: {host!r}")
@@ -117,6 +290,10 @@ def create_app(
         app_dir = _config.APP_DIR
     app_dir = Path(app_dir)
 
+    if root is None:
+        root = profiles_mod.data_root()
+    root = Path(root)
+
     token = get_or_create_token(app_dir)
 
     if profile is not None:
@@ -124,9 +301,21 @@ def create_app(
             return profile
     else:
         def _load_profile() -> dict:
-            from applypilot import config as _config
+            path = _current_profile_path(root)
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Profile not found at {path}. Run `applypilot init` first."
+                )
+            return json.loads(path.read_text(encoding="utf-8"))
 
-            return _config.load_profile()
+    def _load_full_profile() -> dict:
+        """Values (not just keys), for /profile/full — same source as
+        _load_profile but fails safe to {} instead of raising, so a
+        brand-new install with no profile.json yet can still open the
+        extension's profile editor and create one."""
+        if profile is not None:
+            return profile
+        return _read_profile_or_empty(_current_profile_path(root))
 
     def _warm_laya() -> None:
         """Build the Laya checkpoint in the background at startup.
@@ -204,5 +393,85 @@ def create_app(
         prof = _load_profile()
         keys = sorted(k for k in _dotted_keys(prof) if not resolve.is_secret_path(k))
         return {"keys": keys}
+
+    @app.get("/profile/full")
+    def profile_full(_: None = Depends(_require_token)) -> dict:
+        """Current profile VALUES, secret paths stripped. A considered
+        relaxation of /profile (key names only): this service is
+        127.0.0.1-only, token-gated, and the data is the operator's own —
+        but personal.password (and anything else on the denylist) must
+        still never leave the service, so _strip_secret_values is the one
+        thing standing between this endpoint and a leaked credential."""
+        return _strip_secret_values(_load_full_profile())
+
+    @app.post("/profile")
+    def write_profile(body: dict, _: None = Depends(_require_token)) -> dict:
+        """Write the profile: validated, merged so an unseen secret can
+        never be wiped by a round-trip, backed up, and written atomically."""
+        _validate_profile_body(body)
+        path = _current_profile_path(root)
+        existing = _read_profile_or_empty(path)
+        merged = _merge_preserving_secrets(body, existing)
+        _backup_and_write_profile(path, merged)
+        return {"ok": True}
+
+    @app.get("/profiles")
+    def list_profiles_endpoint(_: None = Depends(_require_token)) -> dict:
+        """{profiles: [{id, name, active}], legacy: bool}. An un-migrated
+        install (flat profile.json, no profiles/ dir) reports legacy=True
+        and an empty list — the options page hides the switcher in that
+        case rather than pretending multi-profile support exists."""
+        if profiles_mod.is_legacy_layout(root):
+            return {"profiles": [], "legacy": True}
+        ids = profiles_mod.list_profiles(root)
+        active = profiles_mod.get_active(root)
+        if not active and len(ids) == 1:
+            active = ids[0]
+        return {
+            "profiles": [
+                {"id": pid, "name": _display_name(profiles_mod.profile_dir(root, pid)), "active": pid == active}
+                for pid in ids
+            ],
+            "legacy": False,
+        }
+
+    @app.post("/profiles/{pid}/activate")
+    def activate_profile(pid: str, _: None = Depends(_require_token)) -> dict:
+        if not profiles_mod.is_valid_id(pid):
+            raise HTTPException(status_code=422, detail="invalid profile id")
+        if profiles_mod.is_legacy_layout(root):
+            raise HTTPException(status_code=409, detail="legacy single-profile install — nothing to activate")
+        if pid not in profiles_mod.list_profiles(root):
+            raise HTTPException(status_code=404, detail=f"unknown profile: {pid}")
+        profiles_mod.set_active(root, pid)
+        return {"active": pid}
+
+    @app.post("/profiles")
+    def create_profile(body: ProfileCreateIn, _: None = Depends(_require_token)) -> dict:
+        """Create a new empty profile `{id}`. Refused in legacy layout —
+        the options page hides this affordance there too, since a legacy
+        install's flat profile.json always wins profile resolution
+        regardless of any profiles/ dir created underneath it."""
+        pid = body.id
+        if not profiles_mod.is_valid_id(pid):
+            raise HTTPException(
+                status_code=422,
+                detail="invalid profile id (lowercase letters, digits, dash, underscore; max 64)",
+            )
+        if profiles_mod.is_legacy_layout(root):
+            raise HTTPException(
+                status_code=409,
+                detail="legacy single-profile install — run `applypilot profile migrate` first",
+            )
+        pdir = profiles_mod.profile_dir(root, pid)
+        if pdir.exists():
+            raise HTTPException(status_code=409, detail=f"profile already exists: {pid}")
+        pdir.mkdir(parents=True)
+        (pdir / "profile.json").write_text(
+            json.dumps({"profile_id": pid}, indent=2), encoding="utf-8"
+        )
+        if len(profiles_mod.list_profiles(root)) == 1:
+            profiles_mod.set_active(root, pid)
+        return {"id": pid, "created": True}
 
     return app

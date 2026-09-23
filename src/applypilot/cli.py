@@ -1137,7 +1137,7 @@ def serve_extension(
     from applypilot import config
 
     try:
-        extension_app = create_app(app_dir=config.APP_DIR, host=host)
+        extension_app = create_app(app_dir=config.APP_DIR, host=host, root=config.ROOT)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
