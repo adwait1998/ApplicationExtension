@@ -18,8 +18,44 @@ sites only; ``applypilot.apply.launcher`` and everything else that calls
 from __future__ import annotations
 
 import os
+import threading
+import time
+import urllib.error
+import urllib.request
 
 _CLAUDE_FALLBACK_MODEL = "sonnet"
+
+# A local endpoint (Ollama etc.) being CONFIGURED is not the same as it being
+# UP. Reporting "available" from config alone made /health tell the Settings
+# page drafts would work while every draft silently failed soft to an empty
+# box — the one thing this function exists to prevent. The probe is localhost
+# only, short, and cached so /health polling stays cheap.
+_LOCAL_PROBE_TIMEOUT_S = 1.5
+_LOCAL_PROBE_TTL_S = 30.0
+_probe_lock = threading.Lock()
+_probe_cache: dict[str, tuple[float, bool]] = {}
+
+
+def _local_endpoint_up(base_url: str) -> bool:
+    now = time.monotonic()
+    with _probe_lock:
+        hit = _probe_cache.get(base_url)
+        if hit and now - hit[0] < _LOCAL_PROBE_TTL_S:
+            return hit[1]
+    ok = False
+    try:
+        # OpenAI-compatible servers (Ollama, llama.cpp, LM Studio) expose
+        # /models; any HTTP answer at all means something is listening.
+        with urllib.request.urlopen(base_url.rstrip("/") + "/models",
+                                    timeout=_LOCAL_PROBE_TIMEOUT_S):
+            ok = True
+    except urllib.error.HTTPError:
+        ok = True
+    except Exception:            # noqa: BLE001 — refused / timeout / DNS
+        ok = False
+    with _probe_lock:
+        _probe_cache[base_url] = (now, ok)
+    return ok
 
 
 def get_llm_client():
@@ -51,12 +87,14 @@ def get_llm_client():
 def llm_available() -> tuple[bool, str]:
     """``(available, provider_label)`` for GET /health.
 
-    Read-only: never raises, never spawns a subprocess or opens a network
-    connection (``find_claude_binary()`` only does a PATH lookup plus a
-    filesystem glob). Mirrors ``applypilot.llm._detect_provider()``'s own
-    precedence order, then adds the same Claude-CLI fallback
-    ``get_llm_client()`` applies, so /health never claims a draft will
-    work when it would actually fail soft to an empty box.
+    Never raises and never spawns a subprocess. For a LOCAL endpoint
+    (``LLM_URL``) it makes one short, cached HTTP probe to localhost, because
+    a configured-but-stopped local model would otherwise be reported as
+    available while every draft failed soft to an empty box. Remote API-key
+    providers are judged on configuration alone (probing them would cost
+    latency and quota on every /health poll). Mirrors
+    ``applypilot.llm._detect_provider()``'s precedence, then adds the same
+    Claude-CLI fallback ``get_llm_client()`` applies.
     """
     from applypilot import config
 
@@ -71,7 +109,11 @@ def llm_available() -> tuple[bool, str]:
     if os.environ.get("OPENAI_API_KEY") and not os.environ.get("LLM_URL"):
         return True, "openai"
     if os.environ.get("LLM_URL"):
-        return True, "local"
+        # Configured is not the same as running — see _local_endpoint_up.
+        # Deliberately NOT falling back to the Claude CLI here: silently
+        # switching a user from their free local model to a metered one is
+        # a surprise they didn't opt into. Report it honestly instead.
+        return _local_endpoint_up(os.environ["LLM_URL"]), "local"
 
     if config.find_claude_binary() is not None:
         return True, "claude-cli"
