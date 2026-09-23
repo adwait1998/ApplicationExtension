@@ -1618,3 +1618,64 @@ when a large block of browser tests fails at once.
 **Not yet done:** the migration has NOT been run against the real
 `E:\applypilot-data` (reserved for a supervised run), and the second profile has
 not been created (needs the operator's resume).
+
+## Copilot Chrome extension (2026-09-23) — human-in-the-loop autofill
+
+A detour from the pipeline, and a deliberate inversion of it. The pipeline drives a headless
+browser and submits autonomously; the Copilot extension fills a form the operator has already
+opened in their own Chrome and **never submits**. The human reviews and clicks.
+
+Spec: `docs/superpowers/specs/2026-09-23-copilot-extension-design.md`.
+
+**Shape.** Chrome MV3 extension (`extension/`, vanilla JS, no build step, no npm deps) talking
+to a local FastAPI service (`src/applypilot/extension/`, `applypilot serve-extension`, bound to
+127.0.0.1 with a token). Fields resolve through a ladder, first match wins:
+secret guard → canary → deterministic → Laya → unresolved.
+
+The canary tier calls `apply/canary.py` **verbatim**, so work auth, sponsorship, salary, EEO
+and address get the same deterministic treatment as the autonomous path — never a model. Free
+text is never answered at all.
+
+**Laya** (`NandhaKishorM/laya`, Apache-2.0) is a non-autoregressive typed-decision engine, not
+a generator: it answers a `choice` question with a calibrated confidence in one forward pass.
+It is used only to classify "which profile key does this field want", gated at 0.75, and is
+optional — off unless `APPLYPILOT_LAYA=1`, with the service degrading to canary+deterministic.
+
+Four things the probe found that the README would not have told us:
+- Laya batches *questions about one state*, not *one question across many states*. N fields
+  = N sequential calls at ~370ms on CPU, so it runs ONLY on fields tiers 0–2 could not resolve.
+- Confidence is uncalibrated past ~10 options (the library says so itself). The ladder was
+  handing it all 14 candidate keys; candidates are now pre-ranked and capped at 9.
+- `Router(preload=True)` pulls all three checkpoints (2.26 GB). We pass `model="english"` to
+  `predict()`, which short-circuits language detection so a non-English label can never drag
+  in a second checkpoint. ~2.07 GB RSS resident.
+- The checkpoint takes ~28s to build even warm, so the service warms it in a daemon thread at
+  startup rather than dropping that cliff on the first form opened.
+
+**Two real bugs, both caught by running it rather than reading it:**
+1. **`"Email Address"` was being filled with the street address.** `canary._MARKERS["address"]`
+   matched the bare word "address". This is shared code, so the autonomous pipeline had the
+   identical bug. Fixed with fixed-width negative lookbehinds (email/e-mail/web/url/ip), both
+   polarities tested.
+2. The Laya candidate over-supply above — the confidence gate is the only thing between that
+   tier and a wrong value, and it was silently meaningless.
+
+**Safety.** "Never submits" is structural, not incidental: filling a radio/checkbox needs a
+native `.click()`, and `scanner.isClickSafe()` re-checks the target at the point of action, so
+a scanner bug or a future refactor cannot turn a fill into a submitted application. The secret
+denylist is enforced server-side (`personal.password` exists in the profile), so a compromised
+content script still cannot extract it.
+
+**Verification.** `scripts/e2e_extension.py` — real uvicorn socket, the extension's actual
+scanner output, synthetic profile, 14 assertions incl. the secret guard and canary tiers.
+`scripts/chrome_load_test.py` — launches real Chromium with the unpacked extension: Chrome
+accepts the manifest and registers the MV3 service worker, the scanner runs against a real
+layout engine (jsdom has none, so visibility checks had never truly been exercised), selectors
+are unique, and the native-setter fill survives a React-style revert loop while a naive
+`.value =` does not. `extension/selftest.js` — 25 offline jsdom checks.
+
+**Known limits** (in `extension/README.md`): cross-origin iframes, shadow DOM, multi-step forms
+needing a re-click, and custom widgets whose native input is truly 0×0.
+
+**Not verified:** a real click-through on a live Greenhouse/Lever/Ashby/Workday posting. The
+scanner is validated against a mock page and a real layout engine, not a real ATS.

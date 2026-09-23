@@ -6,8 +6,10 @@ realistic ATS-shaped form.
 """
 import json, os, pathlib, subprocess, sys, tempfile, time, urllib.request, urllib.error
 
-SCRATCH = pathlib.Path(__file__).parent
-REPO = pathlib.Path(r"E:\auto-apply-pipeline")
+REPO = pathlib.Path(__file__).resolve().parent.parent
+# Real output of the extension's scanner over extension/test-page.html,
+# regenerate with:  node extension/selftest.js | grep '^{"id"'
+FIELDS_FIXTURE = REPO / "extension" / "fixtures_scanned_fields.jsonl"
 PY = r"C:\Users\adwai\AppData\Local\Programs\Python\Python312\python.exe"
 PORT = 8799
 
@@ -85,7 +87,7 @@ try:
 
     # --- resolve the REAL scanner output ----------------------------------
     fields = [json.loads(l) for l in
-              (SCRATCH / "scanned_fields.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+              FIELDS_FIXTURE.read_text(encoding="utf-8").splitlines() if l.strip()]
     # add the fields a real ATS form has that our mock page lacks
     fields += [
         {"id": "x1", "selector": "#sponsorship", "tag": "input", "type": "text",
