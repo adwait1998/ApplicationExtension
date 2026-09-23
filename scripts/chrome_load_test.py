@@ -152,6 +152,49 @@ with sync_playwright() as p:
               guard["radio"] and guard["checkbox"] and not guard["submit"] and not guard["button"],
               json.dumps(guard))
 
+        # 5b. Résumé attachment. jsdom has no DataTransfer/DragEvent at all, so
+        #     this mechanism is entirely unverified until it runs here. The
+        #     failure mode that matters is a SILENT one: reporting success
+        #     while no file is attached would mean submitting an application
+        #     without a résumé.
+        target = page.evaluate("""() => {
+            const t = ApplyPilotScanner.findResumeFileTarget(document);
+            return t ? { id: t.el.id, name: t.el.name, dropzone: !!t.isDropzone } : null;
+        }""")
+        check("a résumé target is found among the file inputs", target is not None, str(target))
+        check("the COVER-LETTER input is never chosen as the résumé target",
+              (target or {}).get("id") != "cover_letter_upload", str(target))
+
+        attach = page.evaluate("""() => {
+            const file = new File([new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52])],
+                                  'resume.pdf', { type: 'application/pdf' });
+            const res = ApplyPilotScanner.attachResumeFile(document, file);
+            const t = ApplyPilotScanner.findResumeFileTarget(document);
+            return { res, readBack: t && t.el.files && t.el.files[0]
+                        ? { name: t.el.files[0].name, size: t.el.files[0].size,
+                            type: t.el.files[0].type }
+                        : null };
+        }""")
+        check("attachResumeFile reports success in real Chrome",
+              (attach.get("res") or {}).get("attached") is True, json.dumps(attach.get("res"))[:120])
+        check("the file is GENUINELY on the input afterwards",
+              (attach.get("readBack") or {}).get("name") == "resume.pdf",
+              json.dumps(attach.get("readBack")))
+        check("the attached file has real bytes (not a zero-length placeholder)",
+              (attach.get("readBack") or {}).get("size", 0) > 0,
+              str((attach.get("readBack") or {}).get("size")))
+
+        # The cover-letter input must still be empty — attaching to the wrong
+        # field would send the résumé as a cover letter.
+        cover = page.evaluate(
+            """() => { const el = document.getElementById('cover_letter_upload');
+                       return el ? (el.files ? el.files.length : -1) : -2; }""")
+        check("the cover-letter input received nothing", cover == 0, str(cover))
+
+        # And the guard must hold: no click path was introduced by attachment.
+        check("attachment introduced no submit click (page still on the form)",
+              page.url.startswith("file:"), page.url)
+
         # 6. nothing navigated
         check("page never navigated away", page.url.startswith("file:"), page.url)
     finally:
