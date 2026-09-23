@@ -31,12 +31,12 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
-from applypilot.extension import resolve, schema
+from applypilot.extension import resolve, resume_import, schema
 
 TOKEN_FILENAME = "extension_token.txt"
 
@@ -473,5 +473,104 @@ def create_app(
         if len(profiles_mod.list_profiles(root)) == 1:
             profiles_mod.set_active(root, pid)
         return {"id": pid, "created": True}
+
+    # -----------------------------------------------------------------
+    # Résumé import (Copilot v3, section A): upload -> draft profile.
+    # Never writes profile.json -- POST /profile above is the only route
+    # that persists one. See applypilot.extension.resume_import for the
+    # extraction/parsing/canary-stripping pipeline.
+    # -----------------------------------------------------------------
+
+    @app.post("/profile/import-resume")
+    async def import_resume_endpoint(
+        file: UploadFile = File(...), _: None = Depends(_require_token)
+    ) -> dict:
+        """Multipart upload (field name "file"), .pdf/.docx/.txt. Extracts
+        text, runs the deterministic + LLM passes, saves the résumé (and a
+        resume.txt rendering) into the active profile's directory, and
+        returns a DRAFT profile merged over the current one for the
+        operator to review -- this endpoint itself never saves it."""
+        try:
+            # Read one byte past the cap so an oversized upload is caught
+            # without ever buffering the whole (potentially huge) file.
+            data = await file.read(resume_import.MAX_UPLOAD_BYTES + 1)
+        except Exception as exc:  # noqa: BLE001 -- never a stack trace to the extension
+            raise HTTPException(status_code=400, detail=f"could not read upload: {exc}") from exc
+
+        if len(data) > resume_import.MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"resume file is too large -- max "
+                    f"{resume_import.MAX_UPLOAD_BYTES // (1024 * 1024)} MB"
+                ),
+            )
+
+        path = _current_profile_path(root)
+        existing = _read_profile_or_empty(path)
+
+        try:
+            result = resume_import.import_resume(
+                filename=file.filename or "",
+                data=data,
+                existing_profile=existing,
+                profile_dir=path.parent,
+            )
+        except resume_import.ResumeImportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 -- fail soft, never leak a stack trace
+            raise HTTPException(status_code=400, detail=f"could not process resume: {exc}") from exc
+
+        return {
+            "profile": result.draft_profile,
+            "provenance": result.provenance,
+            "warnings": result.warnings,
+            "resume": {
+                "filename": result.saved_filename,
+                "content_type": result.content_type,
+                "size": len(data),
+            },
+        }
+
+    @app.get("/resume/info")
+    def resume_info(_: None = Depends(_require_token)) -> dict:
+        """Metadata only (filename/content_type/size/mtime) -- lets the
+        extension check whether a résumé is on file without downloading it.
+        GET /resume itself already answers HEAD requests the same way
+        (Starlette adds HEAD automatically for a GET route), so this is a
+        JSON-friendly alternative rather than the only option."""
+        path = _current_profile_path(root)
+        stored = resume_import.find_stored_resume(path.parent)
+        if stored is None:
+            raise HTTPException(
+                status_code=404,
+                detail="no resume on file -- upload one via POST /profile/import-resume",
+            )
+        stat = stored.stat()
+        return {
+            "filename": stored.name,
+            "content_type": resume_import.content_type_for(stored),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+        }
+
+    @app.get("/resume")
+    def get_resume(_: None = Depends(_require_token)) -> Response:
+        """Serve the stored résumé's raw bytes with the right content-type,
+        so the extension's content script can attach it to a file input via
+        DataTransfer (see the v3 design doc, section B)."""
+        path = _current_profile_path(root)
+        stored = resume_import.find_stored_resume(path.parent)
+        if stored is None:
+            raise HTTPException(
+                status_code=404,
+                detail="no resume on file -- upload one via POST /profile/import-resume",
+            )
+        data = stored.read_bytes()
+        return Response(
+            content=data,
+            media_type=resume_import.content_type_for(stored),
+            headers={"Content-Disposition": f'attachment; filename="{stored.name}"'},
+        )
 
     return app
