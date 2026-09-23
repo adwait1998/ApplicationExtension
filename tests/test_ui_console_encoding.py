@@ -21,3 +21,17 @@ def test_rich_render_of_banner_encodes_cp1252():
     c = Console(file=buf, force_terminal=False)
     c.print("[bold]ApplyPilot dashboard[/bold] -> http://127.0.0.1:8765  (Ctrl+C to stop)")
     buf.getvalue().encode("cp1252")  # must not raise
+
+
+def test_serve_extension_banner_is_ascii_only():
+    """Same trap as the `ui` banner: the Copilot service banner is read in a
+    cp1252 Windows console, where a literal em-dash renders as mojibake. Assert
+    every banner line in the command is plain ASCII."""
+    src = CLI.read_text(encoding="utf-8")
+    lines = src.splitlines()
+    start = next(i for i, ln in enumerate(lines) if "ApplyPilot Copilot service" in ln)
+    banner = lines[start:start + 6]
+    for ln in banner:
+        if "console.print" not in ln:
+            continue
+        ln.encode("ascii")           # raises on em-dash / arrow / smart quotes

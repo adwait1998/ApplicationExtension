@@ -1146,7 +1146,10 @@ def serve_extension(
     url = f"http://{host}:{port}"
     console.print(f"[bold]ApplyPilot Copilot service[/bold] -> {url}  (Ctrl+C to stop)")
     console.print(f"[bold]Token[/bold] (paste into the extension's options page): [yellow]{token}[/yellow]")
-    console.print("[dim]This service only fills forms — it never clicks submit or navigates.[/dim]")
+    # ASCII only: this banner is read in a cp1252 Windows console, where a
+    # literal em-dash renders as mojibake (and, piped, has raised
+    # UnicodeEncodeError here before).
+    console.print("[dim]This service only fills forms - it never clicks submit or navigates.[/dim]")
 
     uvicorn.run(extension_app, host=host, port=port, log_level="warning")
 
