@@ -168,7 +168,18 @@
   // Only these words make a nearby number look like a section index. Deliberately narrow:
   // a phone number, a year, a zip code, a "2 years experience" select option etc. must NOT
   // be mistaken for a section index just because a digit sits near it.
-  var SECTION_KEYWORD_SRC = '(work\\s*experience|employment|education|position|school|job)';
+  // Every alternative here is either multi-word or a noun that does not show up next to a
+  // stray number in normal form copy. Deliberately NOT included: bare "experience" and bare
+  // "years" — "5+ years of experience" would otherwise read as section index 5, which is
+  // exactly the class of false positive that puts your current job in the wrong block.
+  // `s?` on the pluralisable ones: real headings say "Prior Roles", not "Prior Role".
+  var SECTION_KEYWORD_SRC = '(' + [
+    'work\\s*experience', 'work\\s*history', 'employment\\s*history',
+    'career\\s*history', 'employment', 'employers?',
+    'prior\\s*roles?', 'previous\\s*roles?', 'roles?',
+    'education', 'positions?', 'schools?', 'universit(?:y|ies)',
+    'colleges?', 'degrees?', 'jobs?',
+  ].join('|') + ')';
 
   function extractSectionIndex(text) {
     if (!text) return null;
