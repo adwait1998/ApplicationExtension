@@ -15,6 +15,8 @@ Safety contract (deliberate, mirrors webui/server.py's header comment):
 from __future__ import annotations
 
 import secrets
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -122,7 +124,37 @@ def create_app(
 
             return _config.load_profile()
 
-    app = FastAPI(title="ApplyPilot Copilot", docs_url=None, redoc_url=None)
+    def _warm_laya() -> None:
+        """Build the Laya checkpoint in the background at startup.
+
+        Loading it costs ~28s. Deferring that to the first ambiguous field
+        would dump the whole cliff onto whichever form the operator happens to
+        open first, which reads as "the extension hung". Warming here means it
+        is usually ready before the first click, and the ladder degrades to the
+        deterministic tier in the meantime rather than waiting on it.
+
+        Daemon thread, fully swallowed: a warmup failure must never stop the
+        service from serving the tiers that do work.
+        """
+        backend = resolve.get_backend()
+        if backend is None or not hasattr(backend, "warmup"):
+            return
+
+        def _run() -> None:
+            try:
+                backend.warmup()
+            except Exception:       # noqa: BLE001 — optional tier, never fatal
+                pass
+
+        threading.Thread(target=_run, name="laya-warmup", daemon=True).start()
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        _warm_laya()
+        yield
+
+    app = FastAPI(title="ApplyPilot Copilot", docs_url=None, redoc_url=None,
+                  lifespan=_lifespan)
     app.state.token = token
 
     app.add_middleware(

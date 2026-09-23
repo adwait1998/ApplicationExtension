@@ -71,9 +71,21 @@ Three findings shape the design, and none of them was obvious from the README:
    range.
 
 3. **`Router(preload=True)` silently downloads all three checkpoints (2.26 GB)** when a
-   US-English job-application use case needs only the English one (807 MB), and peaks at
-   4.4 GB RSS with all three resident.
+   US-English job-application use case needs only the English one (807 MB on disk), and
+   peaks at 4.4 GB RSS with all three resident.
    **Consequence:** load the English checkpoint explicitly. Never call bare `preload=True`.
+   The implementation passes `model="english"` to `predict()`, which short-circuits Laya's
+   language-detection pass entirely — strictly safer than relying on detection to choose
+   English, since a non-English field label can then never pull in a second checkpoint.
+   **Measured RSS with English only: ~2.07 GB** (807 MB is the checkpoint file on disk; the
+   rest is torch/transformers runtime). Still roughly half the all-three figure, but budget
+   ~2 GB, not 807 MB.
+
+4. **Loading the checkpoint costs ~28s**, even with the HuggingFace cache warm. Left lazy,
+   that entire cliff lands on whichever form the operator opens first and reads as the
+   extension hanging. **Consequence:** the service warms Laya in a daemon thread at startup
+   (behind the same env gate); until it is ready the ladder simply runs the deterministic
+   tier rather than blocking on it.
 
 Quality spot-check: 5/6 realistic field labels classified correctly. The one miss
 ("First Name" → `none`) carried the lowest confidence of the set (0.461 vs 0.83–1.00 for

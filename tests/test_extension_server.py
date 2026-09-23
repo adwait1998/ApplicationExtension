@@ -5,6 +5,7 @@ inline dict via create_app(profile=...) — this test suite must never touch
 E:\\applypilot-data or read a real profile.json.
 """
 from __future__ import annotations
+import threading
 
 import pytest
 
@@ -263,3 +264,63 @@ def test_realistic_greenhouse_application_form(client, auth_headers):
     assert skipped_by_id["f9"]["source"] == "unresolved"
 
     assert plan["tiers_available"] == ["canary", "deterministic"]
+
+
+# ---------------------------------------------------------------------------
+# Laya warmup at startup: loading the checkpoint costs ~28s, and doing it
+# lazily would dump that entire cliff on whichever form the operator opened
+# first. Warming in a daemon thread must never delay or break startup.
+# ---------------------------------------------------------------------------
+
+def test_startup_warms_laya_in_the_background_when_available(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from applypilot.extension import resolve, server as srv
+
+    called = threading.Event()
+
+    class SlowBackend:
+        def classify(self, field, candidate_keys):
+            return None
+
+        def warmup(self):
+            called.set()
+            return True
+
+    monkeypatch.setattr(resolve, "get_backend", lambda: SlowBackend())
+    app = srv.create_app(app_dir=tmp_path)
+    with TestClient(app):
+        assert called.wait(timeout=5), "warmup() was never invoked at startup"
+
+
+def test_startup_survives_a_backend_that_cannot_warm(tmp_path, monkeypatch):
+    """A broken optional tier must not stop the service serving the tiers that
+    do work."""
+    from fastapi.testclient import TestClient
+    from applypilot.extension import resolve, server as srv
+
+    class Exploding:
+        def classify(self, field, candidate_keys):
+            return None
+
+        def warmup(self):
+            raise RuntimeError("no model for you")
+
+    monkeypatch.setattr(resolve, "get_backend", lambda: Exploding())
+    app = srv.create_app(app_dir=tmp_path)
+    with TestClient(app) as client:
+        token = (tmp_path / "extension_token.txt").read_text(encoding="utf-8").strip()
+        r = client.get("/health", headers={"X-ApplyPilot-Token": token})
+        assert r.status_code == 200
+
+
+def test_startup_is_a_noop_without_laya(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from applypilot.extension import resolve, server as srv
+
+    monkeypatch.setattr(resolve, "get_backend", lambda: None)
+    app = srv.create_app(app_dir=tmp_path)
+    with TestClient(app) as client:
+        token = (tmp_path / "extension_token.txt").read_text(encoding="utf-8").strip()
+        r = client.get("/health", headers={"X-ApplyPilot-Token": token})
+        assert r.status_code == 200
+        assert "laya" not in r.json()["tiers_available"]
