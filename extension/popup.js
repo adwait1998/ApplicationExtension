@@ -6,7 +6,13 @@
  *   2. asks the content script to scan -> FieldDescriptor[]
  *   3. asks the background worker to resolve them against the local service
  *   4. asks the content script to apply only the auto_fill:true results, and highlight the rest
- *   5. renders the review list and offers Undo
+ *      — this also drives résumé attachment: content.js's APPLY_FILLS response includes a
+ *      `resume` key ({attempted:false} | {attempted:true, attached, filename} |
+ *      {attempted:true, attached:false, reason}), which renderResumeLine() below surfaces as
+ *      its own line. If `resume` is absent entirely, the line stays hidden rather than
+ *      guessing — no news is not "attached".
+ *   5. renders the review list (facts / drafts / needs-you, never merged into one flat list)
+ *      and offers Undo
  *
  * This file never injects into every tab automatically and never triggers a submit/navigate.
  */
@@ -16,6 +22,8 @@
   var scanBtn = document.getElementById('scanBtn');
   var undoBtn = document.getElementById('undoBtn');
   var statusBox = document.getElementById('statusBox');
+  var fillSummaryEl = document.getElementById('fillSummary');
+  var resumeLineEl = document.getElementById('resumeLine');
   var resultsBox = document.getElementById('results');
   var tiersLine = document.getElementById('tiersLine');
   var serviceDot = document.getElementById('serviceDot');
@@ -41,6 +49,15 @@
 
   function canScript(url) {
     return typeof url === 'string' && /^https?:\/\//.test(url);
+  }
+
+  function hideFillOutputs() {
+    fillSummaryEl.hidden = true;
+    fillSummaryEl.textContent = '';
+    resumeLineEl.hidden = true;
+    resumeLineEl.textContent = '';
+    resumeLineEl.className = 'resume-line';
+    resultsBox.innerHTML = '';
   }
 
   async function ensureInjected(tabId) {
@@ -99,14 +116,41 @@
     }
   }
 
+  // Counts that mean something, shown as one headline line directly under
+  // the primary button: "Filled 12 · 2 drafts to review · 3 need you".
+  function buildSummaryLine(appliedList, skippedCount, failedCount) {
+    var filled = appliedList.filter(function (a) { return !a.draft; }).length;
+    var drafts = appliedList.filter(function (a) { return a.draft; }).length;
+    var parts = ['Filled ' + filled];
+    if (drafts) parts.push(drafts + ' draft' + (drafts === 1 ? '' : 's') + ' to review');
+    if (skippedCount) parts.push(skippedCount + (skippedCount === 1 ? ' needs' : ' need') + ' you');
+    var line = parts.join(' · ');
+    if (failedCount) line += ' · ' + failedCount + ' failed';
+    return line;
+  }
+
+  // Résumé attachment gets its own clear line, independent of the field
+  // results — content.js reports it as part of APPLY_FILLS (see file header).
+  function renderResumeLine(applyResp) {
+    var r = applyResp && applyResp.resume;
+    if (!r || !r.attempted) {
+      resumeLineEl.hidden = true;
+      return;
+    }
+    resumeLineEl.hidden = false;
+    if (r.attached) {
+      resumeLineEl.className = 'resume-line ok';
+      resumeLineEl.textContent = '✓ Résumé attached: ' + (r.filename || 'resume file');
+    } else {
+      resumeLineEl.className = 'resume-line err';
+      resumeLineEl.textContent = '✗ Résumé not attached' + (r.reason ? ' — ' + r.reason : '') + '. Attach it yourself before submitting.';
+    }
+  }
+
   function renderResults(applyResp, resolveData) {
     resultsBox.innerHTML = '';
     var fills = (resolveData && resolveData.fills) || [];
     var skipped = (resolveData && resolveData.skipped) || [];
-    var appliedIds = {};
-    (applyResp.applied || []).forEach(function (a) { appliedIds[a.id] = a; });
-    var failedIds = {};
-    (applyResp.failed || []).forEach(function (f) { failedIds[f.id] = f; });
 
     var factApplied = (applyResp.applied || []).filter(function (a) { return !a.draft; });
     var draftApplied = (applyResp.applied || []).filter(function (a) { return a.draft; });
@@ -150,7 +194,7 @@
     if (skipRows.length) {
       var skipTitle = document.createElement('div');
       skipTitle.className = 'section-title';
-      skipTitle.textContent = 'Skipped — answer these yourself (' + skipRows.length + ')';
+      skipTitle.textContent = 'Need you (' + skipRows.length + ')';
       resultsBox.appendChild(skipTitle);
       skipRows.forEach(function (s) {
         var row = document.createElement('div');
@@ -182,7 +226,7 @@
     if (!activeTabId) return;
     scanBtn.disabled = true;
     undoBtn.disabled = true;
-    resultsBox.innerHTML = '';
+    hideFillOutputs();
     try {
       setStatus('Scanning page for fillable fields...');
       var scanResp = await chrome.tabs.sendMessage(activeTabId, { type: 'SCAN' });
@@ -206,6 +250,7 @@
       setDot('ok');
       var data = resolveResp.data || {};
 
+      setStatus('Filling…');
       var applyResp = await chrome.tabs.sendMessage(activeTabId, {
         type: 'APPLY_FILLS',
         fills: data.fills || [],
@@ -213,12 +258,15 @@
       });
 
       var appliedList = applyResp.applied || [];
-      var filledCount = appliedList.length;
-      var draftCount = appliedList.filter(function (a) { return a.draft; }).length;
-      var summary = 'Filled ' + filledCount + (draftCount ? ' (' + draftCount + ' draft' + (draftCount === 1 ? '' : 's') + ' to review)' : '') + '.';
-      setStatus(summary + ' Review below, then submit yourself when ready.');
+      var skippedCount = ((data.skipped || []).length) + ((data.fills || []).filter(function (f) { return !f.auto_fill; }).length);
+      var failedCount = (applyResp.failed || []).length;
+
+      setStatus('Done. Review below, then submit yourself when ready.');
+      fillSummaryEl.hidden = false;
+      fillSummaryEl.textContent = buildSummaryLine(appliedList, skippedCount, failedCount);
+      renderResumeLine(applyResp);
       renderResults(applyResp, data);
-      undoBtn.disabled = filledCount === 0;
+      undoBtn.disabled = appliedList.length === 0;
     } catch (e) {
       setStatus('Something went wrong: ' + (e && e.message ? e.message : e), true);
     } finally {
@@ -231,7 +279,7 @@
     try {
       var resp = await chrome.tabs.sendMessage(activeTabId, { type: 'UNDO' });
       setStatus('Restored ' + ((resp && resp.restored) || 0) + ' field(s) to their previous values.');
-      resultsBox.innerHTML = '';
+      hideFillOutputs();
       undoBtn.disabled = true;
     } catch (e) {
       setStatus('Could not undo: ' + (e && e.message ? e.message : e), true);

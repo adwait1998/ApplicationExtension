@@ -4,99 +4,308 @@
 <meta charset="utf-8">
 <title>ApplyPilot Copilot — Settings</title>
 <style>
-  :root { color-scheme: light dark; }
-  body {
-    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    max-width: 720px;
-    margin: 32px auto;
-    padding: 0 20px 60px;
-    color: #1f2937;
+  :root {
+    color-scheme: dark light;
+    --bg: #0d1117;
+    --card: #161b22;
+    --card-2: #1c2330;
+    --border: #30363d;
+    --border-soft: #21262d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --text-faint: #6e7681;
+    --accent: #58a6ff;
+    --accent-strong: #388bfd;
+    --ok: #3fb950;
+    --ok-bg: rgba(63, 185, 80, 0.12);
+    --ok-border: rgba(63, 185, 80, 0.4);
+    --err: #f85149;
+    --err-bg: rgba(248, 81, 73, 0.12);
+    --err-border: rgba(248, 81, 73, 0.4);
+    --warn: #d29922;
+    --warn-bg: rgba(210, 153, 34, 0.12);
+    --warn-border: rgba(210, 153, 34, 0.4);
+    --info: #58a6ff;
+    --info-bg: rgba(88, 166, 255, 0.1);
+    --info-border: rgba(88, 166, 255, 0.35);
+    --prov: #e3b341;
+    --prov-bg: rgba(227, 179, 65, 0.08);
+    --prov-border: #e3b341;
   }
-  h1 { font-size: 18px; margin-bottom: 4px; }
-  h2 { font-size: 15px; margin: 0 0 4px; }
-  p.sub { color: #6b7280; margin-top: 0; font-size: 13px; }
-  label { display: block; font-weight: 600; font-size: 13px; margin: 18px 0 6px; }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f8fa;
+      --card: #ffffff;
+      --card-2: #f6f8fa;
+      --border: #d0d7de;
+      --border-soft: #e5e9ee;
+      --text: #1f2328;
+      --text-dim: #59636e;
+      --text-faint: #6e7781;
+      --accent: #0969da;
+      --accent-strong: #0550ae;
+      --ok: #1a7f37;
+      --ok-bg: #dafbe1;
+      --ok-border: #a7f3d0;
+      --err: #cf222e;
+      --err-bg: #fff1f0;
+      --err-border: #ffc1bc;
+      --warn: #9a6700;
+      --warn-bg: #fff8c5;
+      --warn-border: #fde68a;
+      --info: #0969da;
+      --info-bg: #eff6ff;
+      --info-border: #bfdbfe;
+      --prov: #9a6700;
+      --prov-bg: #fffbea;
+      --prov-border: #e3b341;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 28px 20px 80px;
+    color: var(--text);
+    background: var(--bg);
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; font-weight: 700; }
+  h2 { font-size: 14px; margin: 0 0 4px; font-weight: 700; }
+  p.sub { color: var(--text-dim); margin-top: 0; font-size: 13px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 6px; color: var(--text); }
   label.inline { display: inline-block; font-weight: 600; font-size: 13px; margin: 0 0 0 6px; }
+
   input[type="text"], input[type="password"], input[type="email"], input[type="tel"],
   input[type="url"], input[type="number"], select, textarea {
     width: 100%;
     box-sizing: border-box;
     padding: 8px 10px;
     font-size: 13px;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border);
     border-radius: 6px;
     font-family: inherit;
-    background: #fff;
-    color: inherit;
+    background: var(--card-2);
+    color: var(--text);
+  }
+  input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focus,
+  input[type="tel"]:focus, input[type="url"]:focus, textarea:focus, select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
   }
   input[type="text"], input[type="password"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   textarea { min-height: 56px; resize: vertical; }
   .row { display: flex; gap: 8px; align-items: center; }
   .row input { flex: 1; }
+
   button {
-    margin-top: 16px;
     padding: 8px 14px;
     font-size: 13px;
+    font-weight: 600;
     border-radius: 6px;
-    border: 1px solid #2563eb;
-    background: #2563eb;
+    border: 1px solid var(--accent-strong);
+    background: var(--accent-strong);
     color: #fff;
     cursor: pointer;
+    font-family: inherit;
   }
-  button.secondary {
-    background: #fff;
-    color: #2563eb;
-  }
-  button.small { margin-top: 0; padding: 4px 9px; font-size: 12px; }
-  button.danger { border-color: #dc2626; color: #dc2626; background: #fff; }
-  button:hover { opacity: 0.9; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  #toggleToken { margin-top: 0; padding: 8px 10px; }
-  #status, #profileStatus { margin-top: 14px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; }
-  #status.ok, #profileStatus.ok { display: block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
-  #status.err, #profileStatus.err { display: block; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-  #status.info, #profileStatus.info { display: block; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
-  .hint { font-size: 12px; color: #6b7280; margin-top: 6px; }
-  .hint.warn { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; padding: 8px 10px; border-radius: 6px; }
-  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
-  hr.section-divider { border: none; border-top: 1px solid #e5e7eb; margin: 32px 0 8px; }
+  button.secondary { background: transparent; color: var(--accent); border-color: var(--border); }
+  button.small { padding: 4px 9px; font-size: 12px; }
+  button.danger { border-color: var(--err-border); color: var(--err); background: transparent; }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
-  fieldset {
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    margin: 16px 0;
-    padding: 4px 14px 14px;
+  #toggleToken { padding: 8px 10px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 18px;
   }
-  fieldset legend { font-weight: 700; font-size: 13px; padding: 0 6px; }
+
+  #status, #profileStatus, #importStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
+  #status.ok, #profileStatus.ok, #importStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+  #status.err, #profileStatus.err, #importStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
+  #status.info, #profileStatus.info, #importStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
+  #status.warn, #profileStatus.warn, #importStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+
+  .hint { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+  .hint.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 8px 10px; border-radius: 6px; }
+  code { background: var(--card-2); border: 1px solid var(--border-soft); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  hr.section-divider { border: none; border-top: 1px solid var(--border-soft); margin: 30px 0 18px; }
+
+  /* -- onboarding / résumé upload card -------------------------------- */
+  .onboard-card {
+    text-align: center;
+    padding: 26px 20px;
+    border: 1px dashed var(--border);
+    background: var(--card);
+  }
+  .onboard-card h2 { font-size: 16px; margin-bottom: 6px; }
+  .onboard-sub { color: var(--text-dim); font-size: 13px; margin: 0 0 16px; }
+  .file-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 18px;
+    background: var(--accent-strong);
+    color: #fff;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--accent-strong);
+  }
+  .file-btn:hover { filter: brightness(1.1); }
+  .file-btn.busy { opacity: 0.6; cursor: progress; pointer-events: none; }
+  .onboard-foot { margin-top: 12px; font-size: 12px; color: var(--text-faint); }
+  #importStatus { text-align: left; }
+  .warn-list { margin: 6px 0 0; padding-left: 18px; }
+  .warn-list li { margin: 2px 0; }
+
+  /* -- completeness meter ---------------------------------------------- */
+  .meter-card { padding: 14px 18px; }
+  .meter-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  #meterText { font-size: 13px; font-weight: 700; }
+  #meterSub { font-size: 12px; color: var(--text-dim); }
+  .meter-track {
+    height: 6px; border-radius: 3px; background: var(--border-soft);
+    margin: 10px 0 10px; overflow: hidden;
+  }
+  .meter-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.2s ease; }
+  .meter-fill.complete { background: var(--ok); }
+  .meter-missing { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border);
+    cursor: pointer; font-family: inherit; font-weight: 600;
+  }
+  .chip:hover { filter: brightness(1.08); }
+  .meter-complete-msg { font-size: 12px; color: var(--ok); font-weight: 600; }
+
+  /* -- collapsible sections --------------------------------------------- */
+  details.section {
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    margin: 14px 0;
+    background: var(--card);
+    overflow: hidden;
+  }
+  details.section > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 700;
+    font-size: 13px;
+    user-select: none;
+  }
+  details.section > summary::-webkit-details-marker { display: none; }
+  details.section > summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 8px;
+    color: var(--text-faint);
+    transition: transform 0.15s ease;
+    font-size: 11px;
+  }
+  details.section[open] > summary::before { transform: rotate(90deg); }
+  .section-title { flex: 1; }
+  .section-meta {
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    color: var(--text-faint); background: var(--card-2); border: 1px solid var(--border-soft);
+  }
+  .section-meta.ok { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-border); }
+  .section-meta.required { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-border); }
+  .section-body { padding: 2px 16px 16px; border-top: 1px solid var(--border-soft); }
+
   .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
   .field-grid label { margin: 14px 0 6px; }
 
+  /* Résumé-provenance marking: a field the parser filled, not yet reviewed.
+     Amber/gold is deliberately distinct from the blue "draft" colour used in
+     the popup — this means "check this", not "AI-written text going out". */
+  .field-grid > div.from-resume,
+  .from-resume {
+    background: var(--prov-bg);
+    border: 1px solid var(--prov-border);
+    border-radius: 8px;
+    padding: 6px 8px 10px;
+    margin: 6px 0;
+  }
+  .field-grid > div.from-resume label,
+  .from-resume label { margin-top: 6px; }
+  .field-grid > div.from-resume label::after,
+  .from-resume > label::after {
+    content: " · from résumé";
+    font-weight: 600;
+    color: var(--prov);
+  }
+  .field-grid > div.from-resume.from-resume-llm label::after,
+  .from-resume.from-resume-llm > label::after {
+    content: " · from résumé — AI-parsed, verify";
+  }
+  .repeat-row.from-resume { border-color: var(--prov-border); background: var(--prov-bg); }
+  .repeat-row.from-resume::before {
+    content: "From your résumé — check this entry before saving";
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--prov);
+    margin-bottom: 8px;
+  }
+
   /* Boolean work-auth controls: explicit Yes/No/Not-set, never a free-text
      box and never pre-selected — see options.js renderEditor(). */
-  .bool-field { margin: 14px 0 6px; }
-  .bool-field .bool-label { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
-  .bool-options { display: flex; gap: 16px; }
-  .bool-options label { display: inline-flex; align-items: center; gap: 5px; font-weight: 400; margin: 0; font-size: 13px; }
+  .bool-field {
+    margin: 14px 0 6px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+  }
+  .bool-field.unset { border-color: var(--warn-border); background: var(--warn-bg); }
+  .bool-field .bool-label { font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .bool-field .req-badge {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border);
+    padding: 1px 6px; border-radius: 4px;
+  }
+  .bool-options { display: flex; gap: 8px; }
+  .bool-options label {
+    display: inline-flex; align-items: center; gap: 5px; font-weight: 600; margin: 0;
+    font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--card-2); cursor: pointer;
+  }
+  .bool-options input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .bool-options label:has(input:checked) { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
+  .bool-options label:has(input:focus-visible) { outline: 2px solid var(--accent); }
 
-  #profileSwitcher { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  #profileSwitcher { display: flex; align-items: center; gap: 8px; margin: 10px 0 18px; }
   #profileSwitcher select { width: auto; flex: 1; }
 
-  #newProfileRow { display: none; gap: 8px; margin-top: 10px; align-items: center; }
+  #newProfileRow { display: none; gap: 8px; margin: 10px 0 18px; align-items: center; }
   #newProfileRow input { flex: 1; }
 
-  .repeat-note { font-size: 12px; color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe;
-                 border-radius: 6px; padding: 8px 10px; margin: 10px 0; }
+  .repeat-note {
+    font-size: 12px; color: var(--info); background: var(--info-bg); border: 1px solid var(--info-border);
+    border-radius: 6px; padding: 8px 10px; margin: 10px 0;
+  }
 
   .repeat-row {
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--border-soft);
     border-radius: 8px;
     padding: 10px 12px 12px;
     margin-bottom: 10px;
-    background: #fafafa;
+    background: var(--card-2);
   }
   .repeat-row-head { display: flex; justify-content: space-between; align-items: center; }
   .repeat-row-head .badge {
-    font-size: 11px; font-weight: 700; color: #374151; background: #e5e7eb;
+    font-size: 11px; font-weight: 700; color: var(--text-dim); background: var(--border-soft);
     border-radius: 4px; padding: 2px 7px;
   }
   .repeat-row-actions { display: flex; gap: 6px; }
@@ -107,34 +316,37 @@
 
   #profileEditor { opacity: 1; transition: opacity 0.15s; }
   #profileEditor.disabled { opacity: 0.5; pointer-events: none; }
+
+  .save-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 </style>
 </head>
 <body>
   <h1>ApplyPilot Copilot</h1>
   <p class="sub">Connect the extension to your local ApplyPilot service. Nothing here ever leaves your machine.</p>
 
-  <label for="serviceUrl">Service URL</label>
-  <input type="text" id="serviceUrl" placeholder="http://127.0.0.1:8787" autocomplete="off" spellcheck="false">
-  <div class="hint">Printed when you run <code>applypilot serve-extension</code>. Must be on <code>127.0.0.1</code>.</div>
+  <div class="card">
+    <label for="serviceUrl">Service URL</label>
+    <input type="text" id="serviceUrl" placeholder="http://127.0.0.1:8787" autocomplete="off" spellcheck="false">
+    <div class="hint">Printed when you run <code>applypilot serve-extension</code>. Must be on <code>127.0.0.1</code>.</div>
 
-  <label for="token">Service token</label>
-  <div class="row">
-    <input type="password" id="token" placeholder="paste the token from the CLI output" autocomplete="off" spellcheck="false">
-    <button type="button" class="secondary" id="toggleToken">Show</button>
+    <label for="token">Service token</label>
+    <div class="row">
+      <input type="password" id="token" placeholder="paste the token from the CLI output" autocomplete="off" spellcheck="false">
+      <button type="button" class="secondary" id="toggleToken">Show</button>
+    </div>
+    <div class="hint">Also printed by <code>applypilot serve-extension</code> on first run. Stored only in this browser's local extension storage.</div>
+
+    <div class="save-row">
+      <button type="button" id="save">Save</button>
+      <button type="button" class="secondary" id="test">Test connection</button>
+    </div>
+    <div id="status"></div>
   </div>
-  <div class="hint">Also printed by <code>applypilot serve-extension</code> on first run. Stored only in this browser's local extension storage.</div>
-
-  <div>
-    <button type="button" id="save">Save</button>
-    <button type="button" class="secondary" id="test">Test connection</button>
-  </div>
-
-  <div id="status"></div>
 
   <hr class="section-divider">
 
   <h1>Profile</h1>
-  <p class="sub">Create and edit the profile the extension fills forms from — no text editor required. Nothing below is saved until you click <strong>Save profile</strong>.</p>
+  <p class="sub">Nothing below is saved until you click <strong>Save profile</strong>.</p>
 
   <div id="legacyNotice" class="hint warn" style="display:none">
     This install has a single profile (not yet migrated to multi-profile). You can still edit it below —
@@ -152,122 +364,160 @@
     <button type="button" class="secondary small" id="cancelNewProfileBtn">Cancel</button>
   </div>
 
+  <!-- Onboarding: the ONE obvious first action, not six blank fieldsets.
+       Always available (not just first-run) so an operator can re-import
+       after updating their résumé. Upload never auto-saves — see the big
+       comment at the top of options.js. -->
+  <div class="card onboard-card" id="onboardCard">
+    <h2 id="onboardTitle">Get started</h2>
+    <p class="onboard-sub" id="onboardSub">Upload your résumé and we'll fill this in.</p>
+    <label class="file-btn" id="fileBtnLabel" for="resumeFile">
+      <span id="resumeFileLabelText">Choose file</span>
+    </label>
+    <input type="file" id="resumeFile" accept=".pdf,.docx,.txt" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
+    <div class="onboard-foot">Nothing leaves your machine. PDF, DOCX or TXT, up to 8&nbsp;MB.</div>
+    <div id="importStatus"></div>
+  </div>
+
+  <!-- Completeness meter: what actually determines how much of a form the
+       extension can fill, so it's the single most useful number here. -->
+  <div class="card meter-card" id="completenessCard">
+    <div class="meter-head">
+      <span id="meterText">Loading…</span>
+    </div>
+    <div class="meter-track"><div class="meter-fill" id="meterFill" style="width:0%"></div></div>
+    <div class="meter-missing" id="meterMissing"></div>
+  </div>
+
   <div id="profileEditor">
-    <fieldset>
-      <legend>Personal</legend>
-      <div class="field-grid">
-        <div><label for="p_full_name">Full legal name</label>
-          <input type="text" id="p_full_name" data-path="personal.full_name"></div>
-        <div><label for="p_preferred_name">Preferred name</label>
-          <input type="text" id="p_preferred_name" data-path="personal.preferred_name"></div>
-        <div><label for="p_email">Email</label>
-          <input type="email" id="p_email" data-path="personal.email"></div>
-        <div><label for="p_phone">Phone</label>
-          <input type="tel" id="p_phone" data-path="personal.phone"></div>
-        <div><label for="p_linkedin">LinkedIn URL</label>
-          <input type="url" id="p_linkedin" data-path="personal.linkedin_url"></div>
-        <div><label for="p_github">GitHub URL</label>
-          <input type="url" id="p_github" data-path="personal.github_url"></div>
-        <div><label for="p_portfolio">Portfolio URL</label>
-          <input type="url" id="p_portfolio" data-path="personal.portfolio_url"></div>
-        <div><label for="p_website">Website URL</label>
-          <input type="url" id="p_website" data-path="personal.website_url"></div>
-        <div><label for="p_address">Street address</label>
-          <input type="text" id="p_address" data-path="personal.address"></div>
-        <div><label for="p_city">City</label>
-          <input type="text" id="p_city" data-path="personal.city"></div>
-        <div><label for="p_state">State / Province</label>
-          <input type="text" id="p_state" data-path="personal.province_state"></div>
-        <div><label for="p_postal">Postal code</label>
-          <input type="text" id="p_postal" data-path="personal.postal_code"></div>
-        <div><label for="p_country">Country</label>
-          <input type="text" id="p_country" data-path="personal.country"></div>
+    <details class="section" id="sectionPersonal" open>
+      <summary><span class="section-title">Personal</span><span class="section-meta" id="personalMeta"></span></summary>
+      <div class="section-body">
+        <div class="field-grid">
+          <div><label for="p_full_name">Full legal name</label>
+            <input type="text" id="p_full_name" data-path="personal.full_name"></div>
+          <div><label for="p_preferred_name">Preferred name</label>
+            <input type="text" id="p_preferred_name" data-path="personal.preferred_name"></div>
+          <div><label for="p_email">Email</label>
+            <input type="email" id="p_email" data-path="personal.email"></div>
+          <div><label for="p_phone">Phone</label>
+            <input type="tel" id="p_phone" data-path="personal.phone"></div>
+          <div><label for="p_linkedin">LinkedIn URL</label>
+            <input type="url" id="p_linkedin" data-path="personal.linkedin_url"></div>
+          <div><label for="p_github">GitHub URL</label>
+            <input type="url" id="p_github" data-path="personal.github_url"></div>
+          <div><label for="p_portfolio">Portfolio URL</label>
+            <input type="url" id="p_portfolio" data-path="personal.portfolio_url"></div>
+          <div><label for="p_website">Website URL</label>
+            <input type="url" id="p_website" data-path="personal.website_url"></div>
+          <div><label for="p_address">Street address</label>
+            <input type="text" id="p_address" data-path="personal.address"></div>
+          <div><label for="p_city">City</label>
+            <input type="text" id="p_city" data-path="personal.city"></div>
+          <div><label for="p_state">State / Province</label>
+            <input type="text" id="p_state" data-path="personal.province_state"></div>
+          <div><label for="p_postal">Postal code</label>
+            <input type="text" id="p_postal" data-path="personal.postal_code"></div>
+          <div><label for="p_country">Country</label>
+            <input type="text" id="p_country" data-path="personal.country"></div>
+        </div>
+        <div class="hint">Your password is never shown or edited here — it is managed only by the CLI wizard.</div>
       </div>
-      <div class="hint">Your password is never shown or edited here — it is managed only by the CLI wizard.</div>
-    </fieldset>
+    </details>
 
-    <fieldset>
-      <legend>Work authorization</legend>
-      <div class="hint" style="margin-top:4px;">
-        These answer legally-sensitive application questions (sponsorship, work authorization).
-        Leave a question as <strong>Not set</strong> rather than guessing — an unset answer is
-        left for you to fill in on each form instead of being auto-submitted.
+    <details class="section" id="sectionWorkAuth" open>
+      <summary><span class="section-title">Work authorization</span><span class="section-meta" id="workAuthMeta"></span></summary>
+      <div class="section-body">
+        <div class="hint" style="margin-top:4px;">
+          These answer legally-sensitive application questions. A résumé upload
+          <strong>never</strong> fills these in — leave a question as <strong>Not set</strong> rather
+          than guessing; an unset answer is left for you to fill in on each form instead of being
+          auto-submitted.
+        </div>
+
+        <div class="bool-field" id="waAuthorizedField">
+          <div class="bool-label">Are you legally authorized to work in your target country? <span class="req-badge">Required</span></div>
+          <div class="bool-options">
+            <label><input type="radio" name="wa_authorized" value="yes" data-path="work_authorization.legally_authorized_to_work"> Yes</label>
+            <label><input type="radio" name="wa_authorized" value="no" data-path="work_authorization.legally_authorized_to_work"> No</label>
+            <label><input type="radio" name="wa_authorized" value="unset" data-path="work_authorization.legally_authorized_to_work" checked> Not set</label>
+          </div>
+        </div>
+
+        <div class="bool-field" id="waSponsorshipField">
+          <div class="bool-label">Will you now or in the future require visa sponsorship? <span class="req-badge">Required</span></div>
+          <div class="bool-options">
+            <label><input type="radio" name="wa_sponsorship" value="yes" data-path="work_authorization.require_sponsorship"> Yes</label>
+            <label><input type="radio" name="wa_sponsorship" value="no" data-path="work_authorization.require_sponsorship"> No</label>
+            <label><input type="radio" name="wa_sponsorship" value="unset" data-path="work_authorization.require_sponsorship" checked> Not set</label>
+          </div>
+        </div>
+
+        <label for="wa_permit">Work permit / visa type (if applicable)</label>
+        <input type="text" id="wa_permit" data-path="work_authorization.work_permit_type" placeholder="e.g. H-1B, F-1 OPT — leave blank if none">
       </div>
+    </details>
 
-      <div class="bool-field">
-        <div class="bool-label">Are you legally authorized to work in your target country?</div>
-        <div class="bool-options">
-          <label><input type="radio" name="wa_authorized" value="yes" data-path="work_authorization.legally_authorized_to_work"> Yes</label>
-          <label><input type="radio" name="wa_authorized" value="no" data-path="work_authorization.legally_authorized_to_work"> No</label>
-          <label><input type="radio" name="wa_authorized" value="unset" data-path="work_authorization.legally_authorized_to_work" checked> Not set</label>
+    <details class="section" id="sectionCompensation">
+      <summary><span class="section-title">Compensation</span><span class="section-meta" id="compMeta"></span></summary>
+      <div class="section-body">
+        <div class="field-grid">
+          <div><label for="c_salary">Desired salary</label>
+            <input type="text" id="c_salary" data-path="compensation.salary_expectation"></div>
+          <div><label for="c_currency">Currency</label>
+            <input type="text" id="c_currency" data-path="compensation.salary_currency" placeholder="USD"></div>
+          <div><label for="c_min">Salary range — min</label>
+            <input type="text" id="c_min" data-path="compensation.salary_range_min"></div>
+          <div><label for="c_max">Salary range — max</label>
+            <input type="text" id="c_max" data-path="compensation.salary_range_max"></div>
         </div>
       </div>
+    </details>
 
-      <div class="bool-field">
-        <div class="bool-label">Will you now or in the future require visa sponsorship?</div>
-        <div class="bool-options">
-          <label><input type="radio" name="wa_sponsorship" value="yes" data-path="work_authorization.require_sponsorship"> Yes</label>
-          <label><input type="radio" name="wa_sponsorship" value="no" data-path="work_authorization.require_sponsorship"> No</label>
-          <label><input type="radio" name="wa_sponsorship" value="unset" data-path="work_authorization.require_sponsorship" checked> Not set</label>
+    <details class="section" id="sectionExperience">
+      <summary><span class="section-title">Experience</span><span class="section-meta" id="expMeta"></span></summary>
+      <div class="section-body">
+        <div class="field-grid">
+          <div><label for="e_years">Years of experience (total)</label>
+            <input type="text" id="e_years" data-path="experience.years_of_experience_total"></div>
+          <div><label for="e_level">Highest education level</label>
+            <input type="text" id="e_level" data-path="experience.education_level"></div>
+          <div><label for="e_title">Current job title</label>
+            <input type="text" id="e_title" data-path="experience.current_job_title"></div>
+          <div><label for="e_company">Current company</label>
+            <input type="text" id="e_company" data-path="experience.current_company"></div>
+          <div><label for="e_target">Target role</label>
+            <input type="text" id="e_target" data-path="experience.target_role"></div>
         </div>
       </div>
+    </details>
 
-      <label for="wa_permit">Work permit / visa type (if applicable)</label>
-      <input type="text" id="wa_permit" data-path="work_authorization.work_permit_type" placeholder="e.g. H-1B, F-1 OPT — leave blank if none">
-    </fieldset>
-
-    <fieldset>
-      <legend>Compensation</legend>
-      <div class="field-grid">
-        <div><label for="c_salary">Desired salary</label>
-          <input type="text" id="c_salary" data-path="compensation.salary_expectation"></div>
-        <div><label for="c_currency">Currency</label>
-          <input type="text" id="c_currency" data-path="compensation.salary_currency" placeholder="USD"></div>
-        <div><label for="c_min">Salary range — min</label>
-          <input type="text" id="c_min" data-path="compensation.salary_range_min"></div>
-        <div><label for="c_max">Salary range — max</label>
-          <input type="text" id="c_max" data-path="compensation.salary_range_max"></div>
+    <details class="section" id="sectionWorkHistory">
+      <summary><span class="section-title">Work history</span><span class="section-meta" id="workHistoryMeta"></span></summary>
+      <div class="section-body">
+        <div class="repeat-note">
+          <strong>Row 1 must be your most recent position.</strong> Workday and similar systems render
+          repeating steps as "Work Experience 1", "Work Experience 2", … and the extension fills them
+          in this same order — keep your current/most recent job at the top.
+        </div>
+        <div id="workHistoryList"></div>
+        <button type="button" class="secondary small" id="addWorkHistoryBtn">+ Add position</button>
       </div>
-    </fieldset>
+    </details>
 
-    <fieldset>
-      <legend>Experience</legend>
-      <div class="field-grid">
-        <div><label for="e_years">Years of experience (total)</label>
-          <input type="text" id="e_years" data-path="experience.years_of_experience_total"></div>
-        <div><label for="e_level">Highest education level</label>
-          <input type="text" id="e_level" data-path="experience.education_level"></div>
-        <div><label for="e_title">Current job title</label>
-          <input type="text" id="e_title" data-path="experience.current_job_title"></div>
-        <div><label for="e_company">Current company</label>
-          <input type="text" id="e_company" data-path="experience.current_company"></div>
-        <div><label for="e_target">Target role</label>
-          <input type="text" id="e_target" data-path="experience.target_role"></div>
+    <details class="section" id="sectionEducation">
+      <summary><span class="section-title">Education</span><span class="section-meta" id="educationMeta"></span></summary>
+      <div class="section-body">
+        <div class="repeat-note">
+          <strong>Row 1 must be your most recent / highest level of education</strong> — same reasoning
+          as work history above.
+        </div>
+        <div id="educationList"></div>
+        <button type="button" class="secondary small" id="addEducationBtn">+ Add education</button>
       </div>
-    </fieldset>
+    </details>
 
-    <fieldset>
-      <legend>Work history</legend>
-      <div class="repeat-note">
-        <strong>Row 1 must be your most recent position.</strong> Workday and similar systems render
-        repeating steps as "Work Experience 1", "Work Experience 2", … and the extension fills them
-        in this same order — keep your current/most recent job at the top.
-      </div>
-      <div id="workHistoryList"></div>
-      <button type="button" class="secondary small" id="addWorkHistoryBtn">+ Add position</button>
-    </fieldset>
-
-    <fieldset>
-      <legend>Education</legend>
-      <div class="repeat-note">
-        <strong>Row 1 must be your most recent / highest level of education</strong> — same reasoning
-        as work history above.
-      </div>
-      <div id="educationList"></div>
-      <button type="button" class="secondary small" id="addEducationBtn">+ Add education</button>
-    </fieldset>
-
-    <div>
+    <div class="save-row">
       <button type="button" id="saveProfile">Save profile</button>
     </div>
   </div>

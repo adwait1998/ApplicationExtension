@@ -1,12 +1,20 @@
 /**
  * ApplyPilot Copilot — options page logic.
  *
- * Two independent pieces:
+ * Three independent pieces:
  *   1. Connection settings: { serviceUrl, token } in chrome.storage.local, plus a
  *      "Test connection" button that asks the background worker to call GET /health
  *      (never fetched from this page directly — background.js is the sole fetcher for
  *      the autofill path, see its file header).
- *   2. The profile editor: talks to the local service's profile-management endpoints
+ *   2. Résumé import (v3): multipart POST /profile/import-resume on the local service.
+ *      This is the "Get started" onboarding action — the whole point of v3 is that the
+ *      operator uploads a résumé instead of retyping their career. The service returns a
+ *      DRAFT profile plus per-field provenance ("deterministic" | "llm") and never saves
+ *      anything itself. This file merges the draft into the in-memory editor state,
+ *      marks which fields came from the résumé, and requires an explicit Save — see
+ *      mergeImportedDraft() for why that matters (a silently-saved wrong employer would
+ *      propagate into real applications).
+ *   3. The profile editor: talks to the local service's profile-management endpoints
  *      directly (GET/POST /profile/full, GET /profiles, POST /profiles,
  *      POST /profiles/{id}/activate). This page already holds the token in the clear
  *      to let the operator view/paste it, so there is no extra exposure in it also
@@ -19,7 +27,13 @@
  * resume_facts, availability, ...) round-trip untouched instead of being silently
  * deleted on save. personal.password is never in that object in the first place —
  * the service strips it before this page ever sees it — and this file never adds a
- * field for it.
+ * field for it, never renders it, and strips it defensively if a future response
+ * ever includes it (see mergeImportedDraft).
+ *
+ * Canary fields (work_authorization.*) are legally sensitive and are NEVER populated
+ * from a résumé import, even defensively if the service ever sent one back — see the
+ * CANARY_PREFIXES guard in mergeImportedDraft(). They stay exactly what the operator
+ * typed into the Work authorization section themselves.
  */
 (function () {
   'use strict';
@@ -46,6 +60,8 @@
       tokenEl.value = data.token || '';
       if (tokenEl.value) {
         refreshProfileArea();
+      } else {
+        updateCompleteness();
       }
     });
   }
@@ -174,10 +190,14 @@
     cur[parts[parts.length - 1]] = value;
   }
 
+  function truthy(v) {
+    return v != null && String(v).trim() !== '';
+  }
+
   // -- loading -------------------------------------------------------------------
 
   function refreshProfileArea() {
-    if (!tokenEl.value) return;
+    if (!tokenEl.value) { updateCompleteness(); return; }
     loadProfilesList().then(loadFullProfile);
   }
 
@@ -218,12 +238,16 @@
     profileEditorEl.classList.add('disabled');
     return apiGet('/profile/full').then(function (data) {
       profileData = data || {};
+      resumeMarks = {};
       renderEditor();
+      applyDefaultCollapseState();
+      updateOnboardCopy();
       profileEditorEl.classList.remove('disabled');
       setProfileStatus('info', 'Profile loaded.');
     }, function (err) {
       profileEditorEl.classList.remove('disabled');
       setProfileStatus('err', 'Could not load profile: ' + err.message);
+      updateCompleteness();
     });
   }
 
@@ -250,10 +274,16 @@
       profileEditorEl.querySelectorAll('input[type=radio][data-path="' + path + '"]').forEach(function (el) {
         el.checked = (el.value === want);
       });
+      var wrap = document.getElementById(path === 'work_authorization.legally_authorized_to_work' ? 'waAuthorizedField' : 'waSponsorshipField');
+      if (wrap) wrap.classList.toggle('unset', want === 'unset');
     });
 
     renderRepeatable(workHistoryListEl, workHistoryTemplate, profileData.work_history || [], 'Position');
     renderRepeatable(educationListEl, educationTemplate, profileData.education || [], 'Education');
+
+    applyProvenanceMarks();
+    updateSectionMeta();
+    updateCompleteness();
   }
 
   function renderRepeatable(listEl, template, items, badgeLabel) {
@@ -298,6 +328,7 @@
     row.querySelector('[data-action=remove]').addEventListener('click', function () {
       row.remove();
       renumberRows(listEl, badgeLabel);
+      updateCompleteness();
     });
     listEl.appendChild(node);
   }
@@ -314,10 +345,12 @@
   document.getElementById('addWorkHistoryBtn').addEventListener('click', function () {
     addRepeatRow(workHistoryListEl, workHistoryTemplate, {}, 'Position');
     renumberRows(workHistoryListEl, 'Position');
+    updateCompleteness();
   });
   document.getElementById('addEducationBtn').addEventListener('click', function () {
     addRepeatRow(educationListEl, educationTemplate, {}, 'Education');
     renumberRows(educationListEl, 'Education');
+    updateCompleteness();
   });
 
   function collectRepeatable(listEl, fields) {
@@ -369,6 +402,13 @@
     apiPost('/profile', profileData).then(function () {
       setProfileStatus('ok', 'Profile saved.');
       saveProfileBtn.disabled = false;
+      // Once saved, the operator has explicitly accepted whatever came from
+      // the résumé — the "please double-check this" marking has done its
+      // job, so clear it rather than nagging forever.
+      resumeMarks = {};
+      applyProvenanceMarks();
+      applyDefaultCollapseState();
+      updateOnboardCopy();
     }, function (err) {
       setProfileStatus('err', 'Could not save profile: ' + err.message);
       saveProfileBtn.disabled = false;
@@ -427,6 +467,417 @@
       setProfileStatus('err', 'Could not create profile: ' + err.message);
     });
   });
+
+  // ===============================================================================
+  // -- Résumé import (v3 onboarding) ---------------------------------------------
+  // ===============================================================================
+
+  var resumeFileEl = document.getElementById('resumeFile');
+  var fileBtnLabel = document.getElementById('fileBtnLabel');
+  var resumeFileLabelText = document.getElementById('resumeFileLabelText');
+  var importStatusEl = document.getElementById('importStatus');
+  var onboardTitleEl = document.getElementById('onboardTitle');
+  var onboardSubEl = document.getElementById('onboardSub');
+
+  var ALLOWED_RESUME_EXT = /\.(pdf|docx|txt)$/i;
+  var MAX_RESUME_BYTES = 8 * 1024 * 1024;
+
+  // Canary fields have real legal/immigration consequences for the operator.
+  // A résumé cannot reliably state them and this project refuses to guess
+  // them anywhere else, so the import merge defensively refuses to touch
+  // any path under these prefixes even if a future response ever included
+  // one — see the file header.
+  var CANARY_PREFIXES = ['work_authorization'];
+
+  function setImportStatus(kind, html) {
+    importStatusEl.className = kind;
+    importStatusEl.innerHTML = html;
+  }
+
+  function updateOnboardCopy() {
+    var hasName = truthy(dottedGet(profileData, 'personal.full_name'));
+    var hasEmail = truthy(dottedGet(profileData, 'personal.email'));
+    if (hasName || hasEmail) {
+      onboardTitleEl.textContent = 'Update from a résumé';
+      onboardSubEl.textContent = 'Upload a newer résumé to refresh the fields below — nothing is overwritten until you review and save.';
+      resumeFileLabelText.textContent = 'Choose file';
+    } else {
+      onboardTitleEl.textContent = 'Get started';
+      onboardSubEl.textContent = "Upload your résumé and we'll fill this in.";
+      resumeFileLabelText.textContent = 'Choose file';
+    }
+  }
+
+  resumeFileEl.addEventListener('change', function () {
+    var file = resumeFileEl.files && resumeFileEl.files[0];
+    if (!file) return; // dialog cancelled — nothing to do
+
+    if (!ALLOWED_RESUME_EXT.test(file.name)) {
+      setImportStatus('err', "That file type isn't supported — upload a .pdf, .docx, or .txt résumé.");
+      resumeFileEl.value = '';
+      return;
+    }
+    if (file.size === 0) {
+      setImportStatus('err', 'That file looks empty — pick your résumé file again.');
+      resumeFileEl.value = '';
+      return;
+    }
+    if (file.size > MAX_RESUME_BYTES) {
+      setImportStatus('err', 'That résumé file is too large (max 8 MB).');
+      resumeFileEl.value = '';
+      return;
+    }
+    if (!tokenEl.value) {
+      setImportStatus('err', 'Set a service token above first, then try again.');
+      resumeFileEl.value = '';
+      return;
+    }
+
+    importResume(file);
+  });
+
+  function importResume(file) {
+    fileBtnLabel.classList.add('busy');
+    setImportStatus('info', 'Reading your résumé…');
+
+    var formData = new FormData();
+    formData.append('file', file, file.name);
+
+    fetch(apiUrl('/profile/import-resume'), {
+      method: 'POST',
+      headers: { 'X-ApplyPilot-Token': (tokenEl.value || '').trim() }, // no Content-Type: browser sets the multipart boundary
+      body: formData
+    }).then(function (resp) {
+      return apiResponse(resp);
+    }).then(function (data) {
+      handleImportSuccess(data || {});
+    }, function (err) {
+      fileBtnLabel.classList.remove('busy');
+      resumeFileEl.value = '';
+      if (err instanceof TypeError) {
+        // fetch() throws a bare TypeError on network failure (service down,
+        // wrong port, CORS) — no HTTP response to read a message from.
+        setImportStatus('err', 'Could not reach the local ApplyPilot service. Is `applypilot serve-extension` running?');
+        return;
+      }
+      if (err && err.status === 401) {
+        setImportStatus('err', 'The service rejected the token — check it in the connection settings above.');
+        return;
+      }
+      // Every other case (unsupported type, oversized file, corrupt/encrypted
+      // PDF, no extractable text, ...) is raised by the service as a safe,
+      // human-readable detail message — see resume_import.py. Surface it
+      // as-is rather than re-wording it.
+      setImportStatus('err', 'Could not import that résumé: ' + ((err && err.message) || 'unknown error') + '.');
+    });
+  }
+
+  function handleImportSuccess(data) {
+    fileBtnLabel.classList.remove('busy');
+    resumeFileEl.value = '';
+
+    var draft = data.profile || data.draft_profile || null;
+    var provenance = data.provenance || {};
+    var warnings = Array.isArray(data.warnings) ? data.warnings : [];
+
+    if (!draft || typeof draft !== 'object') {
+      setImportStatus('err', 'The service did not return a profile to review — nothing was imported.');
+      return;
+    }
+
+    var marked = mergeImportedDraft(draft, provenance);
+    renderEditor();
+    forceOpenMarkedSections();
+
+    var html = '';
+    if (marked.length) {
+      html += '<div>Imported ' + marked.length + ' field' + (marked.length === 1 ? '' : 's') +
+        ' from your résumé — <strong>highlighted below</strong>. Review them, then click <strong>Save profile</strong>. Nothing is saved yet.</div>';
+    } else {
+      html += '<div>Read your résumé, but nothing new was found to fill in. Nothing was changed.</div>';
+    }
+    var resumeMeta = data.resume || (data.saved_filename ? { filename: data.saved_filename } : null);
+    if (resumeMeta && resumeMeta.filename) {
+      var sizeStr = resumeMeta.size ? ' (' + Math.max(1, Math.round(resumeMeta.size / 1024)) + ' KB)' : '';
+      html += '<div class="hint" style="margin-top:6px;">Saved as <code>' + escapeHtml(resumeMeta.filename) + '</code>' + sizeStr +
+        ' — this is also what gets attached to application forms for you.</div>';
+    }
+    var kind = 'ok';
+    if (warnings.length) {
+      kind = 'warn';
+      html += '<ul class="warn-list">' + warnings.map(function (w) { return '<li>' + escapeHtml(w) + '</li>'; }).join('') + '</ul>';
+    }
+    setImportStatus(kind, html);
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function isCanaryPath(path) {
+    return CANARY_PREFIXES.some(function (prefix) {
+      return path === prefix || path.indexOf(prefix + '.') === 0;
+    });
+  }
+
+  // Merges a résumé-derived draft profile into the live editor state.
+  //
+  // `provenance` is a map of dotted-path (or the sentinels "work_history" /
+  // "education") -> "deterministic" | "llm", exactly as returned by
+  // resume_import.py. Only paths actually listed in `provenance` are copied
+  // — this is what lets the badge/highlight be authoritative rather than a
+  // guess, and it means a response that only ran the deterministic pass
+  // (no LLM configured) naturally only touches contact fields.
+  //
+  // Returns the list of {path, source} entries actually applied, which the
+  // caller uses both for the "imported N fields" message and for
+  // forceOpenMarkedSections().
+  function mergeImportedDraft(draft, provenance) {
+    var applied = [];
+    Object.keys(provenance || {}).forEach(function (path) {
+      var source = provenance[path];
+      if (isCanaryPath(path)) return; // defense in depth — see CANARY_PREFIXES
+      if (path === 'personal.password') return; // defense in depth — never rendered, never merged
+
+      if (path === 'work_history' || path === 'education') {
+        var arr = draft[path];
+        if (Array.isArray(arr) && arr.length) {
+          profileData[path] = arr;
+          applied.push({ path: path, source: source || 'deterministic' });
+        }
+        return;
+      }
+
+      var value = dottedGet(draft, path);
+      if (value === undefined || value === null || value === '') return;
+      dottedSet(profileData, path, value);
+      applied.push({ path: path, source: source || 'deterministic' });
+    });
+
+    resumeMarks = {};
+    applied.forEach(function (a) { resumeMarks[a.path] = a.source; });
+    return applied;
+  }
+
+  // -- provenance marking ("from your résumé — check this") ---------------------
+
+  // path -> "deterministic" | "llm", populated by mergeImportedDraft(), cleared
+  // on profile (re)load and on successful Save.
+  var resumeMarks = {};
+
+  function applyProvenanceMarks() {
+    profileEditorEl.querySelectorAll('.from-resume').forEach(function (el) {
+      el.classList.remove('from-resume', 'from-resume-llm');
+    });
+
+    Object.keys(resumeMarks).forEach(function (path) {
+      var source = resumeMarks[path];
+      if (path === 'work_history' || path === 'education') {
+        var listEl = path === 'work_history' ? workHistoryListEl : educationListEl;
+        listEl.querySelectorAll('.repeat-row').forEach(function (row) {
+          row.classList.add('from-resume');
+          if (source === 'llm') row.classList.add('from-resume-llm');
+        });
+        return;
+      }
+      profileEditorEl.querySelectorAll('[data-path]').forEach(function (el) {
+        var p = el.getAttribute('data-path');
+        if (p !== path && p.indexOf(path + '.') !== 0) return;
+        if (el.type === 'radio') return; // canary fields never reach here, but stay defensive
+        var wrap = el.parentElement;
+        if (!wrap) return;
+        wrap.classList.add('from-resume');
+        if (source === 'llm') wrap.classList.add('from-resume-llm');
+      });
+    });
+  }
+
+  // Once the operator edits a specific résumé-derived field by hand, treat
+  // it as reviewed and drop just that one mark — the rest of the import
+  // stays flagged until they've looked at it too.
+  profileEditorEl.addEventListener('input', function (evt) {
+    var path = evt.target.getAttribute && evt.target.getAttribute('data-path');
+    if (path && resumeMarks[path]) {
+      delete resumeMarks[path];
+      applyProvenanceMarks();
+    }
+    updateCompleteness();
+  });
+  profileEditorEl.addEventListener('change', function (evt) {
+    var path = evt.target.getAttribute && evt.target.getAttribute('data-path');
+    if (path && resumeMarks[path]) {
+      delete resumeMarks[path];
+      applyProvenanceMarks();
+    }
+    if (evt.target.type === 'radio') updateBoolFieldClasses();
+    updateSectionMeta();
+    updateCompleteness();
+  });
+
+  // Live-refreshes the amber "not set — required" ring on the work-auth
+  // radio groups as the operator clicks Yes/No — renderEditor() sets the
+  // initial state from profileData, this keeps it in sync afterwards.
+  function updateBoolFieldClasses() {
+    [
+      { path: 'work_authorization.legally_authorized_to_work', wrapId: 'waAuthorizedField' },
+      { path: 'work_authorization.require_sponsorship', wrapId: 'waSponsorshipField' }
+    ].forEach(function (g) {
+      var checked = profileEditorEl.querySelector('input[type=radio][data-path="' + g.path + '"]:checked');
+      var wrap = document.getElementById(g.wrapId);
+      if (wrap) wrap.classList.toggle('unset', !checked || checked.value === 'unset');
+    });
+  }
+
+  function forceOpenMarkedSections() {
+    var sectionForPath = {
+      personal: 'sectionPersonal',
+      compensation: 'sectionCompensation',
+      experience: 'sectionExperience',
+      work_history: 'sectionWorkHistory',
+      education: 'sectionEducation'
+    };
+    Object.keys(resumeMarks).forEach(function (path) {
+      var top = path.split('.')[0];
+      var sectionId = sectionForPath[top];
+      if (!sectionId) return;
+      var section = document.getElementById(sectionId);
+      if (section) section.open = true;
+    });
+  }
+
+  // -- collapsible sections: collapse once populated, expand to edit ------------
+
+  var SECTION_POPULATED = {
+    sectionPersonal: function (p) {
+      return truthy(dottedGet(p, 'personal.full_name')) && truthy(dottedGet(p, 'personal.email'));
+    },
+    sectionWorkAuth: function (p) {
+      var a = dottedGet(p, 'work_authorization.legally_authorized_to_work');
+      var s = dottedGet(p, 'work_authorization.require_sponsorship');
+      return (a === true || a === false) && (s === true || s === false);
+    },
+    sectionCompensation: function (p) {
+      return truthy(dottedGet(p, 'compensation.salary_expectation')) ||
+        (truthy(dottedGet(p, 'compensation.salary_range_min')) && truthy(dottedGet(p, 'compensation.salary_range_max')));
+    },
+    sectionExperience: function (p) {
+      return truthy(dottedGet(p, 'experience.current_job_title')) && truthy(dottedGet(p, 'experience.years_of_experience_total'));
+    },
+    sectionWorkHistory: function (p) { return (p.work_history || []).length > 0; },
+    sectionEducation: function (p) { return (p.education || []).length > 0; }
+  };
+
+  // Only called right after a fresh load / profile switch — never mid-edit,
+  // or a section would snap shut under the operator's cursor while typing.
+  function applyDefaultCollapseState() {
+    Object.keys(SECTION_POPULATED).forEach(function (id) {
+      var section = document.getElementById(id);
+      if (!section) return;
+      section.open = !SECTION_POPULATED[id](profileData);
+    });
+  }
+
+  function updateSectionMeta() {
+    Object.keys(SECTION_POPULATED).forEach(function (id) {
+      var metaId = { sectionPersonal: 'personalMeta', sectionWorkAuth: 'workAuthMeta',
+        sectionCompensation: 'compMeta', sectionExperience: 'expMeta',
+        sectionWorkHistory: 'workHistoryMeta', sectionEducation: 'educationMeta' }[id];
+      var meta = document.getElementById(metaId);
+      if (!meta) return;
+      var populated = SECTION_POPULATED[id](profileData);
+      if (id === 'sectionWorkAuth' && !populated) {
+        meta.textContent = 'Not set';
+        meta.className = 'section-meta required';
+      } else if (populated) {
+        meta.textContent = 'Complete';
+        meta.className = 'section-meta ok';
+      } else {
+        meta.textContent = 'Optional';
+        meta.className = 'section-meta';
+        if (id === 'sectionPersonal' || id === 'sectionWorkHistory' || id === 'sectionEducation' || id === 'sectionExperience') {
+          meta.textContent = 'Incomplete';
+        }
+      }
+    });
+  }
+
+  // -- completeness meter ---------------------------------------------------------
+
+  var meterTextEl = document.getElementById('meterText');
+  var meterFillEl = document.getElementById('meterFill');
+  var meterMissingEl = document.getElementById('meterMissing');
+
+  // The essentials that determine how much of a job-application form the
+  // extension can actually fill. Picked to cover: identity, location,
+  // legally-required work-authorization answers, and at least one work
+  // history / education entry (many forms require at least one row of each).
+  var ESSENTIALS = [
+    { label: 'Full legal name', section: 'sectionPersonal', el: 'p_full_name', check: function (p) { return truthy(dottedGet(p, 'personal.full_name')); } },
+    { label: 'Email', section: 'sectionPersonal', el: 'p_email', check: function (p) { return truthy(dottedGet(p, 'personal.email')); } },
+    { label: 'Phone', section: 'sectionPersonal', el: 'p_phone', check: function (p) { return truthy(dottedGet(p, 'personal.phone')); } },
+    { label: 'City', section: 'sectionPersonal', el: 'p_city', check: function (p) { return truthy(dottedGet(p, 'personal.city')); } },
+    { label: 'State / Province', section: 'sectionPersonal', el: 'p_state', check: function (p) { return truthy(dottedGet(p, 'personal.province_state')); } },
+    { label: 'Country', section: 'sectionPersonal', el: 'p_country', check: function (p) { return truthy(dottedGet(p, 'personal.country')); } },
+    { label: 'Work authorization', section: 'sectionWorkAuth', el: null, check: function (p) { var v = dottedGet(p, 'work_authorization.legally_authorized_to_work'); return v === true || v === false; } },
+    { label: 'Visa sponsorship answer', section: 'sectionWorkAuth', el: null, check: function (p) { var v = dottedGet(p, 'work_authorization.require_sponsorship'); return v === true || v === false; } },
+    { label: 'Current job title', section: 'sectionExperience', el: 'e_title', check: function (p) { return truthy(dottedGet(p, 'experience.current_job_title')); } },
+    { label: 'Years of experience', section: 'sectionExperience', el: 'e_years', check: function (p) { return truthy(dottedGet(p, 'experience.years_of_experience_total')); } },
+    { label: 'Work history', section: 'sectionWorkHistory', el: null, check: function (p) { return (p.work_history || []).length > 0; } },
+    { label: 'Education', section: 'sectionEducation', el: null, check: function (p) { return (p.education || []).length > 0; } }
+  ];
+
+  function updateCompleteness() {
+    if (!tokenEl.value) {
+      meterTextEl.textContent = 'Set a service token above to load your profile.';
+      meterFillEl.style.width = '0%';
+      meterFillEl.classList.remove('complete');
+      meterMissingEl.innerHTML = '';
+      return;
+    }
+    // Keep profileData in sync with whatever's currently typed in the form so
+    // the meter reflects live edits, not just the last save.
+    collectFormIntoProfileData();
+
+    var missing = ESSENTIALS.filter(function (e) { return !e.check(profileData); });
+    var done = ESSENTIALS.length - missing.length;
+    meterTextEl.textContent = done + ' of ' + ESSENTIALS.length + ' essentials' +
+      (missing.length ? ' · missing: ' + missing.map(function (m) { return m.label.toLowerCase(); }).join(', ') : '');
+    var pct = Math.round((done / ESSENTIALS.length) * 100);
+    meterFillEl.style.width = pct + '%';
+    meterFillEl.classList.toggle('complete', missing.length === 0);
+
+    meterMissingEl.innerHTML = '';
+    if (!missing.length) {
+      var done_ = document.createElement('div');
+      done_.className = 'meter-complete-msg';
+      done_.textContent = 'All essentials set — ready to fill forms.';
+      meterMissingEl.appendChild(done_);
+      return;
+    }
+    missing.forEach(function (m) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.textContent = m.label;
+      chip.addEventListener('click', function () { jumpToEssential(m); });
+      meterMissingEl.appendChild(chip);
+    });
+  }
+
+  function jumpToEssential(essential) {
+    var section = document.getElementById(essential.section);
+    if (section) section.open = true;
+    var target = essential.el ? document.getElementById(essential.el) : section;
+    if (target && target.scrollIntoView) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (essential.el) {
+      var input = document.getElementById(essential.el);
+      if (input) input.focus({ preventScroll: true });
+    }
+  }
 
   load();
 })();

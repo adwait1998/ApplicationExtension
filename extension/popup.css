@@ -1,4 +1,60 @@
-:root { color-scheme: light dark; }
+:root {
+  color-scheme: dark light;
+  --bg: #0d1117;
+  --card: #161b22;
+  --card-2: #1c2330;
+  --border: #30363d;
+  --border-soft: #21262d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --text-faint: #6e7681;
+  --accent: #58a6ff;
+  --accent-strong: #388bfd;
+  --ok: #3fb950;
+  --ok-bg: rgba(63, 185, 80, 0.12);
+  --ok-border: rgba(63, 185, 80, 0.35);
+  --err: #f85149;
+  --err-bg: rgba(248, 81, 73, 0.12);
+  --err-border: rgba(248, 81, 73, 0.35);
+  --warn: #d29922;
+  --warn-bg: rgba(210, 153, 34, 0.12);
+  --warn-border: rgba(210, 153, 34, 0.35);
+  --info: #58a6ff;
+  --info-bg: rgba(88, 166, 255, 0.1);
+  --info-border: rgba(88, 166, 255, 0.3);
+  --draft: #58a6ff;
+  --draft-bg: rgba(56, 139, 253, 0.14);
+  --draft-border: rgba(56, 139, 253, 0.4);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --card: #ffffff;
+    --card-2: #f6f8fa;
+    --border: #d0d7de;
+    --border-soft: #e5e9ee;
+    --text: #1f2328;
+    --text-dim: #59636e;
+    --text-faint: #6e7781;
+    --accent: #0969da;
+    --accent-strong: #0969da;
+    --ok: #1a7f37;
+    --ok-bg: #f0fdf4;
+    --ok-border: #bbf7d0;
+    --err: #cf222e;
+    --err-bg: #fef2f2;
+    --err-border: #fecaca;
+    --warn: #9a6700;
+    --warn-bg: #fffbeb;
+    --warn-border: #fde68a;
+    --info: #1e3a8a;
+    --info-bg: #eff6ff;
+    --info-border: #bfdbfe;
+    --draft: #1d4ed8;
+    --draft-bg: #eff6ff;
+    --draft-border: #bfdbfe;
+  }
+}
 
 * { box-sizing: border-box; }
 
@@ -7,8 +63,8 @@ body {
   margin: 0;
   font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   font-size: 13px;
-  color: #1f2937;
-  background: #ffffff;
+  color: var(--text);
+  background: var(--bg);
 }
 
 header {
@@ -16,7 +72,7 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .title {
@@ -33,27 +89,29 @@ header {
   border-radius: 50%;
   background: #9ca3af;
   display: inline-block;
+  flex: none;
 }
-.dot.ok { background: #22c55e; }
-.dot.err { background: #ef4444; }
+.dot.ok { background: var(--ok); }
+.dot.err { background: var(--err); }
 
 .icon-btn {
   font-size: 12px;
   background: none;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 8px;
   cursor: pointer;
-  color: #374151;
+  color: var(--text-dim);
+  font-family: inherit;
 }
-.icon-btn:hover { background: #f3f4f6; }
+.icon-btn:hover { background: var(--card-2); }
 
 .reminder {
   margin: 10px 12px 0;
   padding: 8px 10px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  color: #1e3a8a;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info);
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
@@ -62,10 +120,10 @@ header {
 .status {
   margin: 10px 12px 0;
   font-size: 12px;
-  color: #4b5563;
+  color: var(--text-dim);
   min-height: 16px;
 }
-.status.err { color: #b91c1c; }
+.status.err { color: var(--err); }
 
 .actions {
   display: flex;
@@ -75,26 +133,53 @@ header {
 
 button.primary, button.secondary {
   flex: 1;
-  padding: 8px 10px;
+  padding: 9px 10px;
   font-size: 13px;
+  font-weight: 600;
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid transparent;
+  font-family: inherit;
 }
 
 button.primary {
-  background: #2563eb;
+  background: var(--accent-strong);
   color: #fff;
-  border-color: #2563eb;
+  border-color: var(--accent-strong);
+  flex: 2;
 }
-button.primary:disabled { background: #93c5fd; border-color: #93c5fd; cursor: not-allowed; }
+button.primary:hover { filter: brightness(1.08); }
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
 
 button.secondary {
-  background: #fff;
-  color: #374151;
-  border-color: #d1d5db;
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border);
 }
-button.secondary:disabled { color: #9ca3af; cursor: not-allowed; }
+button.secondary:hover { background: var(--card-2); }
+button.secondary:disabled { color: var(--text-faint); cursor: not-allowed; }
+
+/* -- result summary: the one line that tells the operator what happened -- */
+.fill-summary {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+}
+
+/* -- résumé attachment: its own clear attached/failed line -- */
+.resume-line {
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.resume-line.ok { background: var(--ok-bg); border: 1px solid var(--ok-border); color: var(--ok); }
+.resume-line.err { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err); }
 
 .results {
   max-height: 340px;
@@ -107,7 +192,7 @@ button.secondary:disabled { color: #9ca3af; cursor: not-allowed; }
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #6b7280;
+  color: var(--text-faint);
   margin: 10px 0 6px;
 }
 
@@ -118,19 +203,21 @@ button.secondary:disabled { color: #9ca3af; cursor: not-allowed; }
   font-size: 12px;
   line-height: 1.4;
 }
-.field-row.filled { background: #f0fdf4; border: 1px solid #bbf7d0; }
-.field-row.skipped { background: #fffbeb; border: 1px solid #fde68a; }
-.field-row.failed { background: #fef2f2; border: 1px solid #fecaca; }
+.field-row.filled { background: var(--ok-bg); border: 1px solid var(--ok-border); }
+.field-row.skipped { background: var(--warn-bg); border: 1px solid var(--warn-border); }
+.field-row.failed { background: var(--err-bg); border: 1px solid var(--err-border); }
 /* Drafts are generated text, not a fact from the profile — deliberately blue, never
-   green, so a draft can never be mistaken for a fact at a glance. */
-.field-row.draft { background: #eff6ff; border: 1px solid #bfdbfe; }
+   green, so a draft can never be mistaken for a fact at a glance. This is the safety
+   story for this tier, not decoration: it is model-written text going out under a
+   real person's name. */
+.field-row.draft { background: var(--draft-bg); border: 1px solid var(--draft-border); }
 
 .field-row .label { font-weight: 600; }
-.field-row .value { color: #065f46; }
-.field-row .reason { color: #6b7280; margin-top: 2px; }
-.field-row.draft .value { color: #1e3a8a; }
+.field-row .value { color: var(--ok); }
+.field-row .reason { color: var(--text-dim); margin-top: 2px; }
+.field-row.draft .value { color: var(--draft); }
 
-.section-title.draft-title { color: #1d4ed8; }
+.section-title.draft-title { color: var(--draft); }
 
 .draft-badge {
   display: inline-block;
@@ -138,7 +225,7 @@ button.secondary:disabled { color: #9ca3af; cursor: not-allowed; }
   font-weight: 700;
   letter-spacing: 0.04em;
   color: #fff;
-  background: #2563eb;
+  background: var(--draft);
   border-radius: 4px;
   padding: 1px 6px;
   margin-bottom: 4px;
@@ -147,6 +234,6 @@ button.secondary:disabled { color: #9ca3af; cursor: not-allowed; }
 footer {
   padding: 8px 12px 12px;
   font-size: 11px;
-  color: #9ca3af;
-  border-top: 1px solid #f3f4f6;
+  color: var(--text-faint);
+  border-top: 1px solid var(--border-soft);
 }
