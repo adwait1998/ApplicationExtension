@@ -81,3 +81,42 @@ def test_unparseable_flag_stays_unresolved():
     p = {"work_authorization": {"require_sponsorship": "maybe"}}
     assert resolve_canary("Will you require sponsorship?", p) is None
     assert resolve_canary("Do you require sponsorship?", {}) is None  # missing flag -> park, never guess
+
+
+# ---------------------------------------------------------------------------
+# "address" is only a postal-address canary when it really means one. The bare
+# alternative used to match "Email Address", so an email input resolved as the
+# ADDRESS canary and was filled with a street address — caught end-to-end by
+# the Copilot extension on a realistic ATS form.
+# ---------------------------------------------------------------------------
+
+import pytest
+
+from applypilot.apply import canary as _canary
+
+
+@pytest.mark.parametrize("label", [
+    "Street Address", "Home Address", "Mailing Address",
+    "Address Line 1", "Address", "Zip", "ZIP Code", "Postal Code",
+])
+def test_real_postal_address_labels_are_still_canaries(label):
+    assert _canary.is_canary(label) is True
+
+
+@pytest.mark.parametrize("label", [
+    "Email Address", "E-mail Address", "Web address", "URL address", "IP address",
+])
+def test_address_shaped_but_non_postal_labels_are_not_canaries(label):
+    assert _canary.is_canary(label) is False
+
+
+def test_email_address_does_not_resolve_to_the_postal_address():
+    profile = {
+        "personal": {
+            "email": "a@b.test", "address": "1 Test Street",
+            "city": "Seattle", "province_state": "WA",
+            "postal_code": "98101", "country": "United States",
+        }
+    }
+    assert _canary.resolve_canary("Email Address", profile) is None
+    assert "Test Street" in (_canary.resolve_canary("Street Address", profile) or "")

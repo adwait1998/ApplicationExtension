@@ -1,0 +1,11 @@
+{"id":"f0","selector":"#full_name","tag":"input","type":"text","name":"full_name","autocomplete":"name","label":"Full Name","placeholder":"","required":false,"options":[]}
+{"id":"f1","selector":"input[name=\"email\"]","tag":"input","type":"email","name":"email","autocomplete":"email","label":"Email Address","placeholder":"","required":false,"options":[]}
+{"id":"f2","selector":"input[name=\"phone\"]","tag":"input","type":"tel","name":"phone","autocomplete":"tel","label":"Phone Number","placeholder":"","required":false,"options":[]}
+{"id":"f3","selector":"input[name=\"linkedin\"]","tag":"input","type":"text","name":"linkedin","autocomplete":"","label":"LinkedIn profile URL","placeholder":"LinkedIn profile URL","required":false,"options":[]}
+{"id":"f4","selector":"input[name=\"portfolio\"]","tag":"input","type":"text","name":"portfolio","autocomplete":"","label":"Portfolio URL","placeholder":"","required":false,"options":[]}
+{"id":"f5","selector":"input[name=\"referral\"]","tag":"input","type":"text","name":"referral","autocomplete":"","label":"How did you hear about us?","placeholder":"","required":false,"options":[]}
+{"id":"f6","selector":"#react_input","tag":"input","type":"text","name":"react_input","autocomplete":"","label":"Desired Salary (controlled input demo)","placeholder":"","required":false,"options":[]}
+{"id":"f7","selector":"#experience_level","tag":"select","type":"select-one","name":"experience_level","autocomplete":"","label":"Experience Level","placeholder":"","required":false,"options":["-- Select --","Junior (0-2 years)","Mid-level (3-5 years)","Senior (6+ years)"]}
+{"id":"f8","selector":"input[type=\"radio\"][name=\"work_auth\"]","tag":"input","type":"radio","name":"work_auth","autocomplete":"","label":"Are you legally authorized to work in the US?","placeholder":"","required":false,"options":["Yes","No"]}
+{"id":"f9","selector":"#cover_note","tag":"textarea","type":"textarea","name":"cover_note","autocomplete":"","label":"Anything else you'd like us to know?","placeholder":"","required":false,"options":[]}
+{"id":"f10","selector":"input[name=\"weird_id_field\"]","tag":"input","type":"text","name":"weird_id_field","autocomplete":"","label":"Auto-generated id field","placeholder":"","required":false,"options":[]}

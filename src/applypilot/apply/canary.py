@@ -16,7 +16,16 @@ _MARKERS = {
     "eeo_race": re.compile(r"\b(race|ethnicit\w+)\b", re.I),
     "eeo_veteran": re.compile(r"\bveteran\b", re.I),
     "eeo_disability": re.compile(r"\bdisabilit\w+\b", re.I),
-    "address": re.compile(r"\b(street address|mailing address|home address|zip|postal code|address)\b", re.I),
+    # The bare `address` alternative matched "Email Address", "E-mail Address"
+    # and "Web address", so an email input resolved as the POSTAL-address canary
+    # and got filled with a street address. The lookbehinds disqualify the words
+    # that turn "address" into something that is not a postal address; each is
+    # fixed-width, which is what Python's re requires.
+    "address": re.compile(
+        r"\b(street address|mailing address|home address|zip|postal code"
+        r"|(?<!email )(?<!e-mail )(?<!web )(?<!url )(?<!ip )address)\b",
+        re.I,
+    ),
     "dob": re.compile(r"\b(date of birth|birth ?date|dob)\b", re.I),
     "clearance": re.compile(r"\b(security clearance|clearance)\b", re.I),
     "immigration": re.compile(r"\b(immigration|immigrant status|work visa case|commence .* case)\b", re.I),
