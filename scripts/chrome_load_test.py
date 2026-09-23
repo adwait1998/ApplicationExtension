@@ -6,12 +6,15 @@ exist outside an extension context. This launches real Chromium with the
 unpacked extension, opens the mock ATS page, and exercises the scanner in the
 page's own realm.
 """
-import json, pathlib, sys, tempfile
+import json
+import pathlib
+import sys
+import tempfile
 
 EXT = pathlib.Path(r"E:\auto-apply-pipeline\extension")
 PAGE = (EXT / "test-page.html").as_uri()
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright  # noqa: E402 — after EXT/PAGE consts
 
 failures = []
 

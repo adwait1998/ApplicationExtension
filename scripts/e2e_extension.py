@@ -4,7 +4,15 @@ Uses a synthetic profile in a temp APPLYPILOT_DIR so no real personal data is
 touched or printed. Asserts the resolution ladder behaves correctly on a
 realistic ATS-shaped form.
 """
-import json, os, pathlib, subprocess, sys, tempfile, time, urllib.request, urllib.error
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # Real output of the extension's scanner over extension/test-page.html,
@@ -86,8 +94,8 @@ try:
     print(f"[ok] health: {health}")
 
     # --- resolve the REAL scanner output ----------------------------------
-    fields = [json.loads(l) for l in
-              FIELDS_FIXTURE.read_text(encoding="utf-8").splitlines() if l.strip()]
+    fields = [json.loads(line) for line in
+              FIELDS_FIXTURE.read_text(encoding="utf-8").splitlines() if line.strip()]
     # add the fields a real ATS form has that our mock page lacks
     fields += [
         {"id": "x1", "selector": "#sponsorship", "tag": "input", "type": "text",
