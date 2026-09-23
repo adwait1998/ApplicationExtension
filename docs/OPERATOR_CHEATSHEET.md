@@ -120,23 +120,48 @@ $env:APPLYPILOT_MAX_DRAFTS = "5"  # per-page cap, default 5
 
 `GET /health` reports which tiers are live.
 
-### Editing your profile from the extension
+### Setting up your profile — upload a résumé
 
-The extension's **Options** page has a full profile editor — personal details, work
-authorisation (explicit Yes/No, never guessed), compensation, experience, and repeatable
-**work history** and **education** rows. **Row 1 must be your most recent position**, because
-that is what "Work Experience 1" on a Workday form maps to.
+Open the extension's **Options**. The first thing there is **Get started → Choose file**:
+upload a `.pdf`, `.docx` or `.txt` résumé and the profile fills itself.
 
-It also has a profile switcher, so several people can share one installation. Saving takes
-effect immediately — no restart.
+- Contact details (name, email, phone, LinkedIn, GitHub) come from plain pattern matching —
+  no model involved.
+- Work history and education are extracted by one local LLM call and marked
+  **"AI-parsed, verify"**, a stronger badge than the plain "from résumé" mark, so you know
+  which fields deserve a second look.
+- **Nothing is saved until you click Save profile.** The banner says so; the draft sits in
+  the form for you to correct first.
+- **Work authorisation and sponsorship are never filled from a résumé**, even when the
+  résumé states them outright. A résumé is not evidence of visa status and those answers
+  carry real consequences, so they stay explicitly yours to set.
+- The uploaded file is stored and is what gets **attached to application forms** for you.
+
+A **completeness meter** shows "N of 12 essentials · missing: …" with clickable chips that
+jump to whatever is unfinished. Completeness is what decides how much of a form can be
+filled, so it is the number worth watching.
+
+Below that, everything is editable by hand: personal details, work authorisation (explicit
+Yes/No/Not-set), compensation, experience, and repeatable **work history** / **education**
+rows with reordering. **Row 1 must be your most recent position** — that is what
+"Work Experience 1" on a Workday form maps to. There is also a profile switcher, so several
+people can share one installation.
 
 Repeating blocks fill from the matching position, and a block beyond your history is skipped
 rather than wrapped ("no 3rd position in your work history"), so your current job can never
 land in a previous-employer box.
 
+### Résumé attachment
+
+The extension attaches your stored résumé to the form's file input, including
+Greenhouse-style drag-and-drop zones. It picks the résumé target over a cover-letter input,
+and **verifies the file is genuinely attached afterwards** rather than assuming — some ATS
+sites reject programmatic uploads, and a silent failure would mean submitting with no
+résumé. The popup shows an explicit attached/not-attached line either way.
+
 See `extension/README.md` for known limitations (cross-origin iframes, shadow DOM, multi-step
 forms). Verification harnesses: `scripts/e2e_extension.py`, `scripts/e2e_profile_editor.py`,
-`scripts/chrome_load_test.py`.
+`scripts/e2e_options_resume.py`, `scripts/chrome_load_test.py`.
 
 ---
 

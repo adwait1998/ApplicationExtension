@@ -1740,3 +1740,49 @@ false-positive guard), `extension/selftest.js` (37 jsdom checks).
 **Residual risk, stated plainly**: the grounding check is heuristic and English-only. It
 catches invented employers in first-person claims; it does not verify every factual assertion
 in a draft. The DRAFT badge and human review remain load-bearing for that tier.
+
+## Copilot extension v3 (2026-09-25) — résumé-first, attachment, product UI
+
+The operator's verdict on v2's editor: **"too manual."** Correct. A tool whose purpose is
+saving time cannot open with twenty minutes of data entry, especially when that data is
+already in the applicant's résumé. Spec:
+`docs/superpowers/specs/2026-09-25-copilot-v3-product-design.md`.
+Suite 1275 → **1329 passed, 2 skipped**.
+
+**The résumé is the input.** `POST /profile/import-resume` (pypdf / python-docx / txt) runs a
+deterministic regex pass for contact details and one LLM call for work history and education,
+and returns a DRAFT with per-field provenance. It never writes `profile.json` — parsing is
+fuzzy and a silently-saved wrong employer would propagate into real applications for months.
+
+**Canary sections are never inferred from a résumé** — `work_authorization`, `compensation`,
+`eeo_voluntary` — even when the résumé says "authorized to work in the US, no sponsorship
+required". Three layers: the LLM-JSON allow-list (unknown keys never parsed),
+`strip_canary_fields()` on the résumé's contribution, and the UI only copying paths present
+in the provenance map. Verified against a hostile LLM response volunteering all of them plus
+a password; none reaches the draft and the existing password survives.
+
+**The résumé is also an output.** v1 wrongly declared file attachment out of scope believing
+it needed the OS picker; a content script can populate a file input via `DataTransfer`.
+Implemented with résumé-vs-cover-letter disambiguation mirroring `v2/resolver.py`, a
+drag-and-drop path for Greenhouse-style zones, and — the part that matters — **read-back
+verification**: it re-reads `input.files[0]` and only reports success if the file is really
+there. A silent failure would mean submitting with no résumé, which is exactly how the
+autonomous pipeline lost a real submission in July.
+
+**Product UI**: options page opens on a single "Get started → upload your résumé" card, then
+a completeness meter ("N of 12 essentials") with clickable chips, then collapsible sections.
+Résumé-derived fields carry a provenance badge, with a stronger "AI-parsed, verify" mark for
+LLM-extracted ones. Popup: one primary action, counts that mean something
+("Filled 12 · 2 drafts to review · 3 need you"), three visually distinct result groups, and
+an explicit résumé-attachment line.
+
+**Verified in a real browser** (`scripts/e2e_options_resume.py`, `scripts/chrome_load_test.py`):
+the whole upload→parse→populate flow with a real file picker, and attachment proven with
+read-back — jsdom has no `DataTransfer`/`DragEvent` at all, so that mechanism was entirely
+unverified until it ran in Chromium.
+
+**Two bugs found in the test harness itself**, both worth remembering: a fixed sleep after
+upload read an empty form and looked exactly like a parsing failure (the first request after
+startup pays ~17s of cold imports, steady state ~2s — it warms and polls now); and a
+work-auth assertion checking "no radio is checked" would have passed VACUOUSLY if the radios
+ever stopped rendering, since the UI models unanswered as an explicitly-checked `unset` pill.
