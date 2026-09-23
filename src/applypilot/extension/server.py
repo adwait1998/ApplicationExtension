@@ -36,7 +36,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
-from applypilot.extension import resolve, resume_import, schema
+from applypilot.extension import llm_util, resolve, resume_import, schema
+from applypilot.extension import settings as ext_settings
 
 TOKEN_FILENAME = "extension_token.txt"
 
@@ -94,6 +95,14 @@ class ResolveRequest(BaseModel):
 
 class ProfileCreateIn(BaseModel):
     id: str
+
+
+class SettingsIn(BaseModel):
+    """POST /settings body -- every field optional, a partial update over
+    whatever is already persisted. Unset fields are left untouched."""
+    answers_enabled: bool | None = None
+    drafts_enabled: bool | None = None
+    max_drafts: int | None = None
 
 
 def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
@@ -364,7 +373,13 @@ def create_app(
 
     @app.get("/health")
     def health(_: None = Depends(_require_token)) -> dict:
-        return {"status": "ok", "tiers_available": resolve.tiers_available()}
+        llm_ok, llm_provider = llm_util.llm_available()
+        return {
+            "status": "ok",
+            "tiers_available": resolve.tiers_available(app_dir=app_dir),
+            "llm_available": llm_ok,
+            "llm_provider": llm_provider,
+        }
 
     @app.post("/resolve")
     def resolve_endpoint(body: ResolveRequest, _: None = Depends(_require_token)) -> dict:
@@ -385,8 +400,43 @@ def create_app(
             )
             for f in body.fields
         ]
-        plan = resolve.resolve_fields(fields, _load_profile())
+        plan = resolve.resolve_fields(fields, _load_profile(), app_dir=app_dir, url=body.url)
         return plan.to_dict()
+
+    # -----------------------------------------------------------------
+    # Tier settings: answer bank / draft / max-drafts, settable from the
+    # extension instead of environment variables. Env vars, when set, still
+    # override -- see applypilot.extension.settings.effective_settings().
+    # -----------------------------------------------------------------
+
+    def _settings_response() -> dict:
+        effective = ext_settings.effective_settings(app_dir)
+        return {
+            "answers_enabled": effective["answers_enabled"],
+            "drafts_enabled": effective["drafts_enabled"],
+            "max_drafts": effective["max_drafts"],
+            # Which (if any) of the three are currently pinned by an env
+            # var -- null means "not pinned, the persisted value above is
+            # editable from here".
+            "env_overrides": {
+                "answers_enabled": ext_settings.env_override_answers(),
+                "drafts_enabled": ext_settings.env_override_drafts(),
+                "max_drafts": ext_settings.env_override_max_drafts(),
+            },
+        }
+
+    @app.get("/settings")
+    def get_settings(_: None = Depends(_require_token)) -> dict:
+        return _settings_response()
+
+    @app.post("/settings")
+    def update_settings(body: SettingsIn, _: None = Depends(_require_token)) -> dict:
+        updates = {k: v for k, v in body.model_dump().items() if v is not None}
+        try:
+            ext_settings.save_settings(app_dir, updates)
+        except ext_settings.InvalidSettings as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _settings_response()
 
     @app.get("/profile")
     def profile_keys(_: None = Depends(_require_token)) -> dict:

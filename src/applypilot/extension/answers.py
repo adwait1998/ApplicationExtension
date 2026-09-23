@@ -14,15 +14,22 @@ on a genuine miss.
         anything else (canary short-circuit, e.g. "profile"/"unresolved")
                                      -> not ours; match() returns None
 
-Both tiers are off by default:
+Tier 5 defaults ON, tier 6 defaults OFF:
 
-* Tier 5 needs ``APPLYPILOT_ANSWERS=1``.
-* Tier 6 needs ``APPLYPILOT_DRAFTS=1`` **and** ``APPLYPILOT_ANSWERS=1``. A
-  draft is just the "the bank missed" branch of the *same*
-  ``AnswerCache.answer()`` call tier 5 makes -- there is no call to hang a
-  draft off of if tier 5 itself is off, so ``APPLYPILOT_DRAFTS=1`` alone
-  (bank flag unset) is a deliberate no-op, not a partial feature. See
+* Tier 5 (answer bank) is enabled unless explicitly turned off --
+  ``APPLYPILOT_ANSWERS=0`` (env, wins over everything), or
+  ``answers_enabled: false`` in the persisted extension settings (see
+  ``applypilot.extension.settings``). Its hits are either profile-derived
+  seeds or the operator's own past answers -- both model-free -- so there
+  is no reason to gate them behind an opt-in.
+* Tier 6 (draft) stays opt-in: ``APPLYPILOT_DRAFTS=1`` (env) or
+  ``drafts_enabled: true`` in the persisted settings, and tier 5 must also
+  be enabled (from whichever source) -- a draft is just the "the bank
+  missed" branch of the *same* ``AnswerCache.answer()`` call tier 5 makes,
+  so there is no call to hang a draft off of if tier 5 is off. See
   ``drafts_enabled()``.
+* Env vars, when set at all, always override the persisted settings file
+  -- see ``applypilot.extension.settings.effective_settings()``.
 
 Non-negotiables this module exists to uphold (see the design spec,
 ``docs/superpowers/specs/2026-09-24-copilot-full-helper-design.md``):
@@ -58,18 +65,14 @@ Non-negotiables this module exists to uphold (see the design spec,
 """
 from __future__ import annotations
 
-import os
+import re
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from applypilot.apply.answer_cache import AnswerCache
-from applypilot.extension import grounding
+from applypilot.extension import grounding, settings as ext_settings
 from applypilot.extension.schema import FieldDescriptor, FillResult, SkipResult
-
-_ANSWERS_ENV = "APPLYPILOT_ANSWERS"
-_DRAFTS_ENV = "APPLYPILOT_DRAFTS"
-_MAX_DRAFTS_ENV = "APPLYPILOT_MAX_DRAFTS"
-_DEFAULT_MAX_DRAFTS = 5
 
 # Matches AnswerCache's own default (see answer_cache.py); named here so a
 # future change to one is a deliberate decision about the other, not a
@@ -86,30 +89,21 @@ _THRESHOLD = 0.70
 _DEFAULT_BANK_PATH = Path(__file__).resolve().parents[3] / "answer_bank.json"
 
 
-def _env_truthy(name: str) -> bool:
-    """Unset/empty/"0"/"false"/"no"/"off" (case-insensitive) = disabled;
-    anything else = enabled. Mirrors laya_backend._laya_enabled() exactly."""
-    val = os.environ.get(name, "").strip().lower()
-    return val not in ("", "0", "false", "no", "off")
+def answers_enabled(app_dir: str | Path | None = None) -> bool:
+    """Tier 5 gate. See ``applypilot.extension.settings.effective_settings``
+    for the precedence (env override > persisted settings file > default
+    True). ``app_dir=None`` (every pre-existing call site) never touches
+    disk and resolves purely from the built-in default + any env var."""
+    return ext_settings.effective_settings(app_dir)["answers_enabled"]
 
 
-def answers_enabled() -> bool:
-    """Tier 5 gate."""
-    return _env_truthy(_ANSWERS_ENV)
-
-
-def drafts_enabled() -> bool:
+def drafts_enabled(app_dir: str | Path | None = None) -> bool:
     """Tier 6 gate -- see the module docstring for why this implies tier 5."""
-    return answers_enabled() and _env_truthy(_DRAFTS_ENV)
+    return ext_settings.effective_settings(app_dir)["drafts_enabled"]
 
 
-def _max_draft_calls() -> int:
-    raw = os.environ.get(_MAX_DRAFTS_ENV, "")
-    try:
-        n = int(raw)
-    except ValueError:
-        return _DEFAULT_MAX_DRAFTS
-    return n if n >= 0 else _DEFAULT_MAX_DRAFTS
+def _max_draft_calls(app_dir: str | Path | None = None) -> int:
+    return ext_settings.effective_settings(app_dir)["max_drafts"]
 
 
 class DraftBudget:
@@ -123,8 +117,8 @@ class DraftBudget:
     the cap are skipped with an explicit reason instead of queued.
     """
 
-    def __init__(self, limit: int | None = None) -> None:
-        self.limit = _max_draft_calls() if limit is None else limit
+    def __init__(self, limit: int | None = None, app_dir: str | Path | None = None) -> None:
+        self.limit = _max_draft_calls(app_dir) if limit is None else limit
         self.used = 0
 
     def take(self) -> bool:
@@ -218,15 +212,22 @@ def _context_for(profile: dict, field: FieldDescriptor | None = None) -> str:
 def _real_llm_fn(question: str, context: str) -> str:
     """The genuine tier-6 LLM call. Fails soft to "" on any error at all --
     no provider configured, network down, malformed response -- so a real
-    application never sees a 500 for this; the field just stays blank."""
+    application never sees a 500 for this; the field just stays blank.
+
+    Uses ``llm_util.get_llm_client()`` rather than ``applypilot.llm.get_client()``
+    directly: if the operator has never set an LLM provider env var but has
+    the Claude Code CLI installed, that fallback picks it up automatically
+    (see llm_util's module docstring) -- everything else about this
+    function (fail-soft, provider selection order otherwise) is unchanged.
+    """
     try:
-        from applypilot.llm import get_client
+        from applypilot.extension.llm_util import get_llm_client
 
         msgs = [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": f"{context}\n\nQUESTION: {question}".strip()},
         ]
-        return (get_client().chat(msgs, max_tokens=256, temperature=0.3) or "").strip()
+        return (get_llm_client().chat(msgs, max_tokens=256, temperature=0.3) or "").strip()
     except Exception:
         return ""
 
@@ -256,6 +257,194 @@ def _target_company(field: FieldDescriptor | None) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# "Have you previously worked here?" -- answered correctly, not just
+# fuzzy-matched. The seed's generic "No" is right only for an applicant who
+# has genuinely never worked at the company being applied to; the persisted
+# answer_bank.json cache also holds several PAST real answers to this exact
+# question phrased for a DIFFERENT employer ("...employed by Fanatics,
+# Inc...", "...employed at Affirm...") which the ordinary fuzzy bank lookup
+# could easily mis-serve onto an unrelated company's form. So this pattern
+# is intercepted here, before the fuzzy AnswerCache.answer() call, and
+# answered deterministically from work_history + the page URL instead.
+# ---------------------------------------------------------------------------
+
+_PREV_EMPLOYED_MARKERS: tuple[re.Pattern, ...] = (
+    re.compile(r"previously\s+(?:worked|been\s+employed)", re.I),
+    re.compile(r"worked\s+(?:here|for\s+(?:us|this\s+company))\s+before", re.I),
+    re.compile(r"employed\s+by\s+(?:our|this|the)\s+company", re.I),
+    re.compile(r"any\s+of\s+its\s+(?:subsidiaries|affiliates)", re.I),
+    re.compile(r"former\s+employee", re.I),
+    re.compile(r"(?:now,?\s+)?(?:or\s+)?have\s+you\s+ever\s+(?:worked|been\s+employed)", re.I),
+)
+
+# A company name volunteered directly in the question text itself --
+# "...employed by Fanatics, Inc..." / "...employed at Affirm...". Written
+# with an explicit capital first letter (like grounding.py's _ORG) because
+# case IS the signal that separates a real proper noun from a generic
+# "employed by our company" filler phrase, which is deliberately NOT matched
+# here (lowercase "our").
+_COMPANY_IN_QUESTION_RE = re.compile(
+    r"employed\s+(?:by|at)\s+(?P<name>[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})"
+)
+_WORKED_AT_QUESTION_RE = re.compile(
+    r"worked\s+(?:at|for)\s+(?P<name>[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})"
+)
+
+# Host labels that identify the ATS platform, not the employer -- stripped
+# before treating a host label as the company name.
+_GENERIC_HOST_LABELS = {
+    "www", "careers", "career", "jobs", "job", "apply", "boards", "talent",
+    "recruiting", "recruitment", "hire", "hiring", "join",
+}
+_WORKDAY_HOST_MARKER = "myworkdayjobs.com"
+_PATH_COMPANY_HOSTS = ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com")
+_SUBDOMAIN_COMPANY_HOSTS = (
+    "avature.net", "icims.com", "successfactors.com", "taleo.net",
+    "smartrecruiters.com", "jobvite.com", "bamboohr.com",
+)
+
+_LEGAL_SUFFIX_RE = re.compile(
+    r"\b(inc|llc|ltd|corp|corporation|co|company|gmbh|plc)\b\.?", re.I
+)
+
+
+def _is_previously_employed_question(question: str) -> bool:
+    q = question or ""
+    return any(p.search(q) for p in _PREV_EMPLOYED_MARKERS)
+
+
+def _company_from_question(question: str) -> str:
+    """A company name volunteered directly in the question's own text, if
+    any -- the strongest possible signal, since it needs no guessing at
+    all. Empty string when the question only uses a generic phrase like
+    "employed by our company"."""
+    for pattern in (_COMPANY_IN_QUESTION_RE, _WORKED_AT_QUESTION_RE):
+        m = pattern.search(question or "")
+        if m:
+            name = (m.group("name") or "").strip(" ,.'\"")
+            if name:
+                return name
+    return ""
+
+
+def _company_from_url(url: str) -> str:
+    """Best-effort employer name from the page URL -- handles the common ATS
+    shapes: Workday (company is the first host label), Greenhouse/Lever/
+    Ashby/Workable (company is the first path segment), company-branded
+    subdomains (Avature/iCIMS/SuccessFactors/Taleo/SmartRecruiters/Jobvite/
+    BambooHR), and a plain company site (registrable-domain label)."""
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url if "//" in url else f"//{url}")
+    except Exception:
+        return ""
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return ""
+
+    if _WORKDAY_HOST_MARKER in host:
+        labels = host.split(".")
+        if labels and labels[0] not in _GENERIC_HOST_LABELS:
+            return labels[0]
+        return ""
+
+    if any(marker in host for marker in _PATH_COMPANY_HOSTS):
+        parts = [p for p in (parsed.path or "").split("/") if p]
+        return parts[0].lower() if parts else ""
+
+    for marker in _SUBDOMAIN_COMPANY_HOSTS:
+        if host == marker or host.endswith("." + marker):
+            sub = host[: -(len(marker) + 1)] if host.endswith("." + marker) else ""
+            sub_labels = [s for s in sub.split(".") if s and s not in _GENERIC_HOST_LABELS]
+            return sub_labels[-1] if sub_labels else ""
+
+    labels = [lbl for lbl in host.split(".") if lbl]
+    while labels and labels[0] in _GENERIC_HOST_LABELS:
+        labels = labels[1:]
+    if len(labels) >= 2:
+        return labels[-2]  # e.g. "viasat" from "viasat.com" / "www.viasat.com"
+    return labels[0] if labels else ""
+
+
+def _normalize_company_name(name: str) -> str:
+    s = _LEGAL_SUFFIX_RE.sub(" ", (name or "").lower())
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+def _worked_at_company(profile: dict, employer: str) -> bool:
+    target = _normalize_company_name(employer)
+    if not target:
+        return False
+    for row in (profile or {}).get("work_history", []) or []:
+        if not isinstance(row, dict):
+            continue
+        comp = _normalize_company_name(row.get("company", ""))
+        if comp and (comp == target or comp in target or target in comp):
+            return True
+    return False
+
+
+def previously_employed_check(
+    field: FieldDescriptor, profile: dict, url: str, question: str | None = None
+) -> FillResult | None:
+    """Tier 5's deterministic handling of "have you previously worked
+    here?" in all its long-form phrasings. Returns None when the question
+    doesn't match this pattern at all.
+
+    Public (no leading underscore): resolve.py calls this directly, ahead
+    of tiers 2/3, not just from match() below. Reason: this is a screening
+    QUESTION, not a structured work-history FIELD, but its long-form
+    wording routinely contains the bare word "company"/"employer" (e.g.
+    "...employed by our company..."), which is exactly the keyword tier 3
+    (structured) uses to decide a field with no section context is a
+    work-history "company" box. Left to run in tier order, tier 3 would
+    claim the field first and fill it with the applicant's OWN current
+    employer -- the opposite of a "have you worked HERE before" answer.
+    resolve.py pre-empts that by calling this right after tier 1 (canary),
+    still gated on ``answers_enabled()`` so a disabled tier 5 leaves this
+    field to behave exactly as before this function existed.
+    """
+    question = question if question is not None else (field.label or field.name or field.placeholder or "").strip()
+    if not _is_previously_employed_question(question):
+        return None
+
+    employer = _company_from_question(question) or _company_from_url(url)
+
+    if employer:
+        matched = _worked_at_company(profile, employer)
+        value = "Yes" if matched else "No"
+        reason = (
+            f"answer bank: checked your work history against the employer "
+            f"you're applying to ({employer}) — "
+            + ("a match was found" if matched else "no match was found")
+        )
+        return FillResult(
+            id=field.id,
+            value=value,
+            source="answer_bank",
+            profile_key="answer_bank:employer_check",
+            confidence=0.95,
+            auto_fill=True,
+            reason=reason,
+        )
+
+    return FillResult(
+        id=field.id,
+        value="No",
+        source="answer_bank",
+        profile_key="answer_bank:seed",
+        confidence=0.6,
+        auto_fill=True,
+        reason=(
+            "answer bank default (No) — the employer being applied to could "
+            "not be identified from the page URL or the question text; "
+            "verify before submitting"
+        ),
+    )
+
+
 def match(
     field: FieldDescriptor,
     profile: dict,
@@ -264,6 +453,8 @@ def match(
     budget: DraftBudget | None = None,
     bank_path: str | Path | None = None,
     llm_fn: Callable[[str, str], str] | None = None,
+    app_dir: str | Path | None = None,
+    url: str = "",
 ) -> FillResult | SkipResult | None:
     """Tiers 5 (answer bank) and 6 (draft), one ``AnswerCache.answer()``
     call split on its returned ``source``.
@@ -273,22 +464,32 @@ def match(
     generic "unresolved" skip, exactly as if this tier did not exist.
     ``cache``/``budget`` let ``resolve_fields()`` share one instance across
     a whole batch (required for the draft cap to mean anything); a direct
-    call without them builds private, single-call ones.
+    call without them builds private, single-call ones. ``app_dir`` selects
+    which persisted extension settings apply (see settings.py); ``url`` is
+    the page's URL, used only by the "previously employed here?" check
+    below to identify the employer being applied to.
     """
-    if not answers_enabled():
+    if not answers_enabled(app_dir):
         return None
 
     question = (field.label or field.name or field.placeholder or "").strip()
     if not question:
         return None
 
-    drafting = drafts_enabled()
+    prev_employed = previously_employed_check(field, profile, url, question)
+    if prev_employed is not None:
+        # profile_key is always "answer_bank:*" here, never a secret path --
+        # resolve.py's own is_secret_path() guard on the returned FillResult
+        # still applies regardless, same as every other tier.
+        return prev_employed
+
+    drafting = drafts_enabled(app_dir)
     ac = cache if cache is not None else make_cache(profile, bank_path)
     ctx = _context_for(profile, field)
 
     if drafting:
         real_fn = llm_fn or _real_llm_fn
-        b = budget if budget is not None else DraftBudget()
+        b = budget if budget is not None else DraftBudget(app_dir=app_dir)
         wrapped = _budgeted(real_fn, b)
     else:
         # Drafts off: never let a bank miss reach any LLM, real or injected.

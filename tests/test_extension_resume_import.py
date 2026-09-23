@@ -282,6 +282,71 @@ def test_parse_llm_json_ignores_unknown_keys():
 
 
 # ---------------------------------------------------------------------------
+# Bug 5: work_history descriptions are normalised to bullet lines, never
+# stored as a single prose paragraph. Nothing is invented -- only
+# re-punctuated/re-segmented.
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_description_preserves_existing_bullets_verbatim():
+    raw = "- Led design for the core product.\n- Owned onboarding flows end to end."
+    assert resume_import._normalize_description(raw) == raw
+
+
+def test_normalize_description_uniforms_varied_bullet_markers():
+    raw = "* Shipped the redesign\n• Ran user research\n1. Mentored two designers"
+    assert resume_import._normalize_description(raw) == (
+        "- Shipped the redesign\n- Ran user research\n- Mentored two designers"
+    )
+
+
+def test_normalize_description_splits_a_paragraph_into_sentence_bullets():
+    raw = ("Led the redesign of onboarding. Reduced drop-off by 30%. "
+           "Partnered closely with engineering.")
+    out = resume_import._normalize_description(raw)
+    assert out == (
+        "- Led the redesign of onboarding.\n"
+        "- Reduced drop-off by 30%.\n"
+        "- Partnered closely with engineering."
+    )
+    # nothing invented -- every word of the original survives somewhere
+    for word in ("redesign", "30%", "engineering"):
+        assert word in out
+
+
+def test_normalize_description_single_sentence_becomes_one_bullet():
+    assert resume_import._normalize_description("Led design for the core product.") == \
+        "- Led design for the core product."
+
+
+def test_normalize_description_empty_stays_empty():
+    assert resume_import._normalize_description("") == ""
+    assert resume_import._normalize_description("   ") == ""
+
+
+def test_parse_llm_json_normalizes_paragraph_description_instead_of_rejecting():
+    # If the model returns a paragraph despite the prompt, the import is
+    # NOT rejected -- the paragraph is converted to sentence bullets.
+    raw = json.dumps({"work_history": [{
+        "title": "Designer", "company": "Acme",
+        "description": "Led the redesign of onboarding. Reduced drop-off by 30%.",
+    }]})
+    fields, warnings = resume_import.parse_llm_json(raw)
+    assert warnings == []
+    desc = fields["work_history"][0]["description"]
+    assert desc == "- Led the redesign of onboarding.\n- Reduced drop-off by 30%."
+
+
+def test_parse_llm_json_keeps_existing_bullets_from_the_model():
+    raw = json.dumps({"work_history": [{
+        "title": "Designer", "company": "Acme",
+        "description": "- First bullet\n- Second bullet",
+    }]})
+    fields, _warnings = resume_import.parse_llm_json(raw)
+    assert fields["work_history"][0]["description"] == "- First bullet\n- Second bullet"
+
+
+# ---------------------------------------------------------------------------
 # THE non-negotiable: canary fields are never inferred, even if a
 # misbehaving LLM volunteers them despite being told not to.
 # ---------------------------------------------------------------------------
@@ -578,6 +643,11 @@ def test_import_resume_endpoint_returns_draft_and_provenance(tmp_path, monkeypat
 
 def test_import_resume_endpoint_degrades_without_llm(tmp_path, monkeypatch):
     _patch_llm_unavailable(monkeypatch)
+    # Also forces "no Claude CLI either" so this asserts genuine
+    # no-LLM-at-all degradation regardless of whether this machine happens
+    # to have the Claude Code CLI installed (llm_util's fallback -- see the
+    # Claude-CLI tests below -- would otherwise pick it up here).
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: None)
     app, token = _disk_app(tmp_path)
     client = TestClient(app)
     resp = client.post(
@@ -590,6 +660,28 @@ def test_import_resume_endpoint_degrades_without_llm(tmp_path, monkeypatch):
     assert body["profile"]["personal"]["email"] == "jane.doe@example.com"
     assert body["warnings"], "expected a warning that the LLM-derived fields need manual entry"
     assert "work_history" not in body["profile"]
+
+
+def test_import_resume_endpoint_uses_claude_cli_when_no_provider_configured(tmp_path, monkeypatch):
+    # Bug 3, résumé-import side: no LLM_PROVIDER/API key set, but the
+    # Claude Code CLI is "installed" (monkeypatched) -- the import should
+    # use it automatically rather than degrading to a warning.
+    _patch_llm_unavailable(monkeypatch)  # applypilot.llm.get_client() raises
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: "/fake/claude.cmd")
+    monkeypatch.setattr("applypilot.llm.ClaudeCodeClient", lambda model: _FakeLLMClient(VALID_LLM_JSON))
+
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.post(
+        "/profile/import-resume",
+        headers={"X-ApplyPilot-Token": token},
+        files={"file": ("resume.pdf", RESUME_PDF_BYTES, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provenance"]["work_history"] == "llm"
+    assert body["profile"]["work_history"][0]["company"] == "Acme"
+    assert not body["warnings"]
 
 
 def test_import_resume_endpoint_rejects_oversized(tmp_path):

@@ -67,9 +67,23 @@ def _enable(monkeypatch, *, answers_on=True, drafts_on=False, max_drafts=None):
 # ---------------------------------------------------------------------------
 
 
-def test_answers_disabled_by_default():
-    assert answers.answers_enabled() is False
+def test_answers_enabled_by_default():
+    # Tier 5 (answer bank) defaults ON -- its hits are model-free (a
+    # profile-derived seed or the operator's own past answer), so there is
+    # no reason to gate them behind an opt-in.
+    assert answers.answers_enabled() is True
+
+
+def test_drafts_disabled_by_default():
+    # Tier 6 (draft) stays opt-in -- it puts model-written text under a
+    # real person's name.
     assert answers.drafts_enabled() is False
+
+
+def test_answers_can_be_explicitly_disabled_via_env(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "0")
+    assert answers.answers_enabled() is False
+    assert answers.drafts_enabled() is False  # drafts still requires answers
 
 
 @pytest.mark.parametrize("val", ["", "0", "false", "False", "no", "off"])
@@ -84,13 +98,13 @@ def test_answers_enabled_for_truthy_values(monkeypatch, val):
     assert answers.answers_enabled() is True
 
 
-def test_drafts_alone_without_answers_flag_is_a_noop(monkeypatch):
-    # The interaction this module documents: APPLYPILOT_DRAFTS=1 with
-    # APPLYPILOT_ANSWERS unset must NOT turn drafting on -- there is no
-    # AnswerCache call to hang a draft off of.
+def test_drafts_alone_now_works_since_answers_defaults_on(monkeypatch):
+    # Previously (when tier 5 defaulted OFF) this was a deliberate no-op:
+    # there was no AnswerCache call to hang a draft off of. Now that tier 5
+    # itself defaults ON, setting only APPLYPILOT_DRAFTS=1 is enough.
     monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
-    assert answers.answers_enabled() is False
-    assert answers.drafts_enabled() is False
+    assert answers.answers_enabled() is True
+    assert answers.drafts_enabled() is True
 
 
 def test_drafts_require_both_flags(monkeypatch):
@@ -105,7 +119,8 @@ def test_drafts_require_both_flags(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_match_returns_none_when_disabled():
+def test_match_returns_none_when_explicitly_disabled(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "0")
     assert answers.match(_field(label="Why do you want to work here?"), PROFILE) is None
 
 
@@ -272,9 +287,14 @@ def test_llm_exception_fails_soft_to_none(monkeypatch, tmp_path):
 def test_no_llm_configured_fails_soft(monkeypatch, tmp_path):
     # The real default path, with no provider env vars set at all (true in
     # this test environment) -- _real_llm_fn's own try/except must degrade
-    # to "" rather than raise, and match() must then return None.
+    # to "" rather than raise, and match() must then return None. Also
+    # forces "no Claude CLI either" so this asserts genuine no-LLM-at-all
+    # behaviour regardless of whether this machine happens to have the
+    # Claude Code CLI installed (llm_util's fallback -- see bug 3 tests
+    # below -- would otherwise pick it up here).
     for var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "LLM_PROVIDER", "APPLYPILOT_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: None)
     _enable(monkeypatch, drafts_on=True)
     bank = tmp_path / "bank.json"
     bank.write_text("[]", encoding="utf-8")
@@ -507,3 +527,189 @@ def test_grounding_never_blocks_an_answer_bank_hit(tmp_path, monkeypatch):
     assert isinstance(out, FillResult)
     assert out.source == "answer_bank"
     assert out.draft is False
+
+
+# ---------------------------------------------------------------------------
+# "Have you previously worked here?" -- the real Viasat wording, plus real
+# curated-bank phrasings (Fanatics/Affirm) the persisted answer_bank.json
+# already carries. Verifies the employer is identified correctly (question
+# text first, then URL) and that the documented fallback fires -- and is
+# labelled as a fallback -- when it can't be.
+# ---------------------------------------------------------------------------
+
+VIASAT_QUESTION = (
+    "Have you previously been employed by our company or any of "
+    "its subsidiaries or affiliates?"
+)
+FANATICS_QUESTION = (
+    "Are you now, or have you ever been employed by Fanatics, Inc. "
+    "or any of its affiliates or subsidiaries?"
+)
+AFFIRM_QUESTION = "Have you previously been employed at Affirm for any length of time?"
+
+
+@pytest.mark.parametrize("question", [VIASAT_QUESTION, FANATICS_QUESTION, AFFIRM_QUESTION,
+                                       "Have you previously worked here?", "Are you a former employee?",
+                                       "Have you worked for us before?"])
+def test_is_previously_employed_question_matches_real_wordings(question):
+    assert answers._is_previously_employed_question(question) is True
+
+
+def test_is_previously_employed_question_does_not_match_unrelated_questions():
+    assert answers._is_previously_employed_question("Why do you want to work here?") is False
+    assert answers._is_previously_employed_question("Are you 18 years of age or older?") is False
+
+
+def test_company_from_question_extracts_named_employer():
+    assert answers._company_from_question(FANATICS_QUESTION) == "Fanatics"
+    assert answers._company_from_question(AFFIRM_QUESTION) == "Affirm"
+    # The generic Viasat phrasing names no company in the question itself.
+    assert answers._company_from_question(VIASAT_QUESTION) == ""
+
+
+@pytest.mark.parametrize("url", [
+    "https://viasat.wd1.myworkdayjobs.com/en-US/Viasat_Careers/job/Remote/Product-Designer_R12345",
+    "https://www.viasat.com/careers/apply/12345",
+    "https://boards.greenhouse.io/viasat/jobs/6789",
+    "https://jobs.lever.co/viasat/abc-123",
+    "https://viasat.avature.net/careers/JobDetail/Product-Designer/12345",
+])
+def test_company_from_url_identifies_viasat_across_ats_shapes(url):
+    assert answers._company_from_url(url) == "viasat"
+
+
+def test_company_from_url_empty_for_no_url():
+    assert answers._company_from_url("") == ""
+
+
+def test_previously_employed_yes_when_company_in_work_history():
+    profile = {"work_history": [{"title": "Designer", "company": "Viasat Inc."}]}
+    out = answers.previously_employed_check(
+        _field(id="f0", label=VIASAT_QUESTION), profile,
+        "https://viasat.wd1.myworkdayjobs.com/job/1", VIASAT_QUESTION,
+    )
+    assert isinstance(out, FillResult)
+    assert out.value == "Yes"
+    assert out.source == "answer_bank"
+    assert out.profile_key == "answer_bank:employer_check"
+    assert out.auto_fill is True
+
+
+def test_previously_employed_no_when_company_not_in_work_history():
+    profile = {"work_history": [{"title": "Designer", "company": "Acme Corp"}]}
+    out = answers.previously_employed_check(
+        _field(id="f0", label=VIASAT_QUESTION), profile,
+        "https://viasat.wd1.myworkdayjobs.com/job/1", VIASAT_QUESTION,
+    )
+    assert isinstance(out, FillResult)
+    assert out.value == "No"
+    assert out.source == "answer_bank"
+
+
+def test_previously_employed_falls_back_to_seed_default_when_employer_unknown():
+    out = answers.previously_employed_check(
+        _field(id="f0", label=VIASAT_QUESTION), PROFILE, "", VIASAT_QUESTION,
+    )
+    assert isinstance(out, FillResult)
+    assert out.value == "No"
+    assert out.source == "answer_bank"
+    assert out.profile_key == "answer_bank:seed"
+    # The fallback is documented in the reason, per the task's requirement.
+    assert "could not be identified" in out.reason
+
+
+def test_previously_employed_company_named_in_question_wins_over_url():
+    # FANATICS_QUESTION names the employer directly -- that must be used
+    # even if the URL (deliberately mismatched here) suggests otherwise.
+    profile = {"work_history": [{"company": "Fanatics"}]}
+    out = answers.previously_employed_check(
+        _field(id="f0", label=FANATICS_QUESTION), profile,
+        "https://careers.someunrelatedsite.com/job/1", FANATICS_QUESTION,
+    )
+    assert out.value == "Yes"
+
+
+def test_match_routes_previously_employed_through_the_deterministic_check(monkeypatch, tmp_path):
+    # End to end through match() (not the check function directly): tier 5
+    # enabled, a bank/cache seeded with a WRONG-for-this-company answer that
+    # would otherwise be a tempting fuzzy hit -- proves the deterministic
+    # check runs before, and instead of, the fuzzy AnswerCache lookup.
+    _enable(monkeypatch)
+    bank = tmp_path / "bank.json"
+    bank.write_text(json.dumps([{"q": FANATICS_QUESTION,
+                                  "a": "No, I have not been employed by Fanatics, Inc."}]),
+                     encoding="utf-8")
+    profile = {**PROFILE, "work_history": [{"company": "Viasat"}]}
+    result = answers.match(
+        _field(label=VIASAT_QUESTION), profile, bank_path=bank,
+        url="https://viasat.wd1.myworkdayjobs.com/job/1",
+        llm_fn=lambda q, c: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+    assert isinstance(result, FillResult)
+    assert result.value == "Yes"
+    assert result.profile_key == "answer_bank:employer_check"
+
+
+def test_canary_shaped_previously_employed_style_question_is_unaffected():
+    # Sanity: the new check's markers must never overlap canary's own.
+    from applypilot.apply import canary
+    assert canary.is_canary(VIASAT_QUESTION) is False
+
+
+# ---------------------------------------------------------------------------
+# Bug 3: when no LLM provider env var is set but the Claude Code CLI is
+# installed, drafts should use it automatically rather than requiring the
+# operator to export an environment variable. Both find_claude_binary()
+# and the CLI subprocess itself are monkeypatched so this is deterministic
+# and $0/offline regardless of what is actually installed on the machine
+# running the suite.
+# ---------------------------------------------------------------------------
+
+
+def test_real_llm_fn_falls_back_to_claude_cli_when_no_provider_configured(monkeypatch, tmp_path):
+    for var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "LLM_PROVIDER", "APPLYPILOT_LLM_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: "/fake/claude.cmd")
+
+    calls = []
+
+    class _FakeClaudeClient:
+        def __init__(self, model):
+            calls.append(model)
+
+        def chat(self, messages, **kwargs):
+            return "drafted via claude cli"
+
+    monkeypatch.setattr("applypilot.llm.ClaudeCodeClient", _FakeClaudeClient)
+
+    result = answers._real_llm_fn("Tell us about yourself.", "context")
+    assert result == "drafted via claude cli"
+    assert calls == ["sonnet"]
+
+
+def test_real_llm_fn_prefers_an_explicit_provider_over_claude_cli(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.delenv("LLM_URL", raising=False)
+
+    class _FakeGeminiClient:
+        def chat(self, messages, **kwargs):
+            return "drafted via gemini"
+
+    monkeypatch.setattr("applypilot.llm.get_client", lambda: _FakeGeminiClient())
+
+    def _boom():
+        raise AssertionError("must not fall back to Claude CLI when a provider is configured")
+
+    monkeypatch.setattr("applypilot.config.find_claude_binary", _boom)
+
+    result = answers._real_llm_fn("Tell us about yourself.", "context")
+    assert result == "drafted via gemini"
+
+
+def test_real_llm_fn_fails_soft_when_neither_provider_nor_cli_available(monkeypatch):
+    for var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "LLM_PROVIDER", "APPLYPILOT_LLM_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: None)
+
+    result = answers._real_llm_fn("Tell us about yourself.", "context")
+    assert result == ""

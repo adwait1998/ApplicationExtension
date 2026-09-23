@@ -13,12 +13,14 @@ from applypilot.extension.schema import FieldDescriptor, FillResult, SkipResult
 
 @pytest.fixture(autouse=True)
 def _clean_answers_env(monkeypatch):
-    # Tiers 5/6 read these live on every call (no cached singleton). A
-    # module-wide autouse reset keeps every test in this file -- old ones
-    # included -- independent of whatever the ambient shell happens to have
-    # set, the same guarantee test_extension_answers.py makes for its own
-    # tier-5/6 tests.
-    monkeypatch.delenv("APPLYPILOT_ANSWERS", raising=False)
+    # Tier 5 (answer bank) now defaults ON in production (see answers.py --
+    # it is model-free, so there's no reason to hide it behind an opt-in).
+    # Forced OFF here as this file's baseline so the tier-0..4 ladder tests
+    # (secret guard, canary, deterministic, laya, structured) stay exactly
+    # as before: independent of the real repo-root answer_bank.json's live
+    # content. Tests that exist specifically to exercise tiers 5/6 opt back
+    # in with their own monkeypatch.setenv(...), which overrides this.
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "0")
     monkeypatch.delenv("APPLYPILOT_DRAFTS", raising=False)
     monkeypatch.delenv("APPLYPILOT_MAX_DRAFTS", raising=False)
     yield
@@ -394,7 +396,11 @@ def test_workday_step_with_no_work_history_behaves_exactly_as_before():
 # ---------------------------------------------------------------------------
 
 
-def test_tiers_available_reports_nothing_extra_by_default():
+def test_tiers_available_reports_nothing_extra_when_answers_disabled():
+    # This file's fixture forces APPLYPILOT_ANSWERS=0 -- the TRUE default
+    # (answer bank on) is covered directly in test_extension_answers.py,
+    # without going through the real repo-root answer_bank.json this file
+    # deliberately never touches.
     assert resolve.tiers_available() == ["canary", "deterministic"]
 
 
@@ -533,3 +539,50 @@ def test_resolve_fields_batch_shares_one_draft_cap_across_the_request(monkeypatc
     assert len(cap_skips) == 1
     assert "cap" in cap_skips[0].reason.lower()
     assert plan.tiers_available == ["canary", "deterministic", "answer_bank", "draft"]
+
+
+# ---------------------------------------------------------------------------
+# "Have you previously worked here?" -- the real Viasat wording, resolved
+# through the whole ladder (resolve_fields -> answers.match's deterministic
+# employer check), not just the answers.py unit tests.
+# ---------------------------------------------------------------------------
+
+VIASAT_QUESTION = (
+    "Have you previously been employed by our company or any of "
+    "its subsidiaries or affiliates?"
+)
+
+
+def test_ladder_answers_previously_employed_yes_when_company_in_work_history(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    profile = {**PROFILE, "work_history": [{"title": "Designer", "company": "Viasat Inc."}]}
+    plan = resolve.resolve_fields(
+        [_field(id="f0", tag="textarea", label=VIASAT_QUESTION)],
+        profile,
+        url="https://viasat.wd1.myworkdayjobs.com/en-US/Viasat_Careers/job/123",
+    )
+    assert plan.fills[0].value == "Yes"
+    assert plan.fills[0].source == "answer_bank"
+
+
+def test_ladder_answers_previously_employed_no_when_company_absent(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    profile = {**PROFILE, "work_history": [{"title": "Designer", "company": "Acme Corp"}]}
+    plan = resolve.resolve_fields(
+        [_field(id="f0", tag="textarea", label=VIASAT_QUESTION)],
+        profile,
+        url="https://viasat.wd1.myworkdayjobs.com/en-US/Viasat_Careers/job/123",
+    )
+    assert plan.fills[0].value == "No"
+    assert plan.fills[0].source == "answer_bank"
+
+
+def test_ladder_falls_back_to_seed_default_when_employer_unidentifiable(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    plan = resolve.resolve_fields(
+        [_field(id="f0", tag="textarea", label=VIASAT_QUESTION)],
+        PROFILE,
+        url="",  # no page URL, no company named in the question itself
+    )
+    assert plan.fills[0].value == "No"
+    assert "could not be identified" in plan.fills[0].reason

@@ -117,14 +117,14 @@ def get_backend() -> LayaBackend | None:
         return None
 
 
-def tiers_available(laya: LayaBackend | None = None) -> list[str]:
+def tiers_available(laya: LayaBackend | None = None, app_dir=None) -> list[str]:
     tiers = ["canary", "deterministic"]
     backend = laya if laya is not None else get_backend()
     if backend is not None:
         tiers.append("laya")
-    if answers.answers_enabled():
+    if answers.answers_enabled(app_dir):
         tiers.append("answer_bank")
-    if answers.drafts_enabled():
+    if answers.drafts_enabled(app_dir):
         tiers.append("draft")
     return tiers
 
@@ -152,6 +152,8 @@ def resolve_field(
     *,
     answer_cache: "answers.AnswerCache | None" = None,
     draft_budget: "answers.DraftBudget | None" = None,
+    app_dir=None,
+    url: str = "",
 ) -> FillResult | SkipResult:
     # tier 0
     if is_secret_field(field):
@@ -179,6 +181,22 @@ def resolve_field(
             reason=f"canary:{category} not resolvable from profile — answer this yourself",
             auto_fill=False,
         )
+
+    # tier 5 pre-empt: "have you previously worked here?" (see answers.py's
+    # previously_employed_check docstring). This is a screening QUESTION,
+    # not a structured work-history FIELD, but its long-form wording
+    # routinely contains the bare word "company"/"employer" -- exactly what
+    # tier 3 uses to decide an unsectioned field is a work-history "company"
+    # box. Checked here, before tiers 2/3 get a chance to misfire on that
+    # incidental keyword, and still gated on answers_enabled() so a
+    # disabled tier 5 leaves this field to behave exactly as it did before
+    # this check existed.
+    if answers.answers_enabled(app_dir):
+        prev_employed = answers.previously_employed_check(field, profile, url, label)
+        if prev_employed is not None:
+            if is_secret_path(prev_employed.profile_key):
+                return _secret_skip(field)
+            return prev_employed
 
     # tier 2: deterministic
     det = matcher.match(field, profile)
@@ -226,7 +244,9 @@ def resolve_field(
     # on its returned source. Optional, off by default; answers.match()
     # itself returns None immediately when APPLYPILOT_ANSWERS is unset, so
     # this is a no-op call for everyone who hasn't opted in.
-    ans = answers.match(field, profile, cache=answer_cache, budget=draft_budget)
+    ans = answers.match(
+        field, profile, cache=answer_cache, budget=draft_budget, app_dir=app_dir, url=url
+    )
     if ans is not None:
         if isinstance(ans, FillResult) and is_secret_path(ans.profile_key):
             return _secret_skip(field)
@@ -241,22 +261,28 @@ def resolve_field(
     )
 
 
-def resolve_fields(fields: list[FieldDescriptor], profile: dict) -> FillPlan:
+def resolve_fields(
+    fields: list[FieldDescriptor], profile: dict, app_dir=None, url: str = ""
+) -> FillPlan:
     """Resolve a batch of fields into a FillPlan. Values are returned only
     for the fields actually passed in — the profile itself never leaves
-    this function."""
+    this function. ``app_dir`` selects which persisted extension settings
+    (see settings.py) apply; ``url`` is the page's URL (server.py passes
+    the incoming request's ``url``), used by tier 5's "previously employed
+    here?" check to identify the employer being applied to."""
     backend = get_backend()
     # One AnswerCache and one draft budget for the whole batch: the answer
     # bank only needs loading once per request, and the draft cap (tier 6)
     # is only meaningful shared across every field in it — see
     # answers.DraftBudget. Built only when actually enabled, so a caller
     # who never opted in never pays for loading the bank file at all.
-    answer_cache = answers.make_cache(profile) if answers.answers_enabled() else None
-    draft_budget = answers.DraftBudget() if answers.drafts_enabled() else None
-    plan = FillPlan(tiers_available=tiers_available(backend))
+    answer_cache = answers.make_cache(profile) if answers.answers_enabled(app_dir) else None
+    draft_budget = answers.DraftBudget(app_dir=app_dir) if answers.drafts_enabled(app_dir) else None
+    plan = FillPlan(tiers_available=tiers_available(backend, app_dir))
     for f in fields:
         result = resolve_field(
-            f, profile, laya=backend, answer_cache=answer_cache, draft_budget=draft_budget
+            f, profile, laya=backend, answer_cache=answer_cache, draft_budget=draft_budget,
+            app_dir=app_dir, url=url,
         )
         if isinstance(result, FillResult):
             plan.fills.append(result)

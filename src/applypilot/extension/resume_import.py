@@ -273,6 +273,14 @@ Output ONLY a single JSON object -- no prose, no markdown code fences, no commen
 Extract ONLY facts explicitly present in the text. If something is unknown, use "" \
 (or an empty list). Never invent an employer, school, date, or accomplishment.
 
+For each work_history entry's "description", preserve the résumé's own bullet points \
+VERBATIM -- do not paraphrase, summarize, or merge them into a paragraph. Format it as \
+one bullet per line, each line starting with "- ", exactly matching the accomplishments \
+and responsibilities as written in the résumé, in the same order. If the résumé \
+describes a role in plain sentences with no bullet markers, split it into one short \
+bullet per sentence instead of one long paragraph -- but never invent or add a bullet \
+whose content is not already present in the résumé text.
+
 Do NOT include anything about work authorization, visa/sponsorship status, salary or \
 compensation expectations, or EEO/demographic information (gender, race, ethnicity, \
 veteran status, disability status) -- even if the résumé happens to mention them. \
@@ -282,7 +290,7 @@ Match this exact shape:
 {
   "work_history": [
     {"title": "", "company": "", "location": "", "start": "MM/YYYY", "end": "MM/YYYY", \
-"current": false, "description": ""}
+"current": false, "description": "- first bullet\\n- second bullet"}
   ],
   "education": [
     {"school": "", "degree": "", "field": "", "start": "MM/YYYY", "end": "MM/YYYY"}
@@ -309,11 +317,18 @@ def _build_llm_messages(text: str) -> list[dict]:
 def _default_llm_fn(text: str) -> str:
     """Real (non-test) LLM call. Same established shape as
     apply/answer_cache.py's _default_llm_fn: lazy import of the shared
-    client, one call, plain text back."""
-    from applypilot.llm import get_client
+    client, one call, plain text back.
+
+    Uses ``llm_util.get_llm_client()`` rather than ``applypilot.llm.get_client()``
+    directly, so an operator with no LLM provider env var set but the
+    Claude Code CLI installed still gets a working résumé import -- see
+    llm_util's module docstring. Everything else (provider order when an
+    env var IS set, fail-soft-to-warning behaviour in llm_extract() above)
+    is unchanged."""
+    from applypilot.extension.llm_util import get_llm_client
 
     messages = _build_llm_messages(text)
-    return get_client().chat(messages, max_tokens=3000, temperature=0.0)
+    return get_llm_client().chat(messages, max_tokens=3000, temperature=0.0)
 
 
 def _extract_json_object(raw: str) -> dict | None:
@@ -363,6 +378,47 @@ def _as_bool(value) -> bool:
     return False
 
 
+# Any common bullet marker (hyphen, asterisk, the usual unicode bullet
+# glyphs, or a numbered "1." / "1)") at the start of a line, plus the
+# whitespace after it -- stripped and replaced with a uniform "- " so every
+# bullet in the stored description looks the same regardless of how the
+# résumé (or the model echoing it) originally marked it.
+_BULLET_PREFIX_RE = re.compile(r"^\s*(?:[-*•‣◦⁃∙·]|[0-9]{1,2}[.)])\s+")
+# A sentence boundary: punctuation followed by whitespace and a capital
+# letter/digit/opening paren -- used only as a last resort, to split a
+# single-paragraph description (no line breaks at all) into one bullet per
+# sentence, never to invent content.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(])")
+
+
+def _normalize_description(raw: str) -> str:
+    """Normalise a work_history description into newline-separated "- "
+    bullet lines -- résumés are written in bullets, and ATS "Role
+    Description" boxes are filled with bullets, never a single paragraph.
+
+    - Text that already has one item per line (its own bullet marker or
+      not) stays one bullet per line, verbatim apart from the marker being
+      replaced with a uniform "- " -- order and wording untouched.
+    - A single blob with no line breaks (the common shape of a raw LLM
+      response despite the prompt) is split on sentence boundaries so each
+      sentence becomes its own bullet. Nothing is invented: the words are
+      exactly what was given, just re-segmented.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) <= 1:
+        blob = _BULLET_PREFIX_RE.sub("", lines[0] if lines else text).strip()
+        lines = [s.strip() for s in _SENTENCE_SPLIT_RE.split(blob) if s.strip()] or (
+            [blob] if blob else []
+        )
+
+    bullets = [f"- {cleaned}" for ln in lines if (cleaned := _BULLET_PREFIX_RE.sub("", ln).strip())]
+    return "\n".join(bullets)
+
+
 def _validate_entry(raw_entry, allowed_keys: tuple[str, ...]) -> dict | None:
     """Keep only the allow-listed keys of one work_history/education entry,
     coercing every value to a safe plain type. Non-dict entries are dropped
@@ -374,6 +430,8 @@ def _validate_entry(raw_entry, allowed_keys: tuple[str, ...]) -> dict | None:
     for key in allowed_keys:
         if key == "current":
             out[key] = _as_bool(raw_entry.get(key))
+        elif key == "description":
+            out[key] = _normalize_description(_as_str(raw_entry.get(key)))
         else:
             out[key] = _as_str(raw_entry.get(key))
     # Drop entries that carry no identifying information at all.

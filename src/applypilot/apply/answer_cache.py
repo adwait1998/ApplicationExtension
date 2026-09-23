@@ -41,6 +41,15 @@ _CANON = [
     (r"\b(start date|when can you start|availab\w+|notice period)\b", "availability"),
     (r"\b(18 (years )?(or older|of age)|are you (over|at least) 18)\b", "age18"),
     (r"\b(previously (worked|employed)|worked (here|at|for))\b", "workedherebefore"),
+    # Long-form Workday/Avature/SuccessFactors "previously employed" phrasings
+    # -- additive only, all collapse to the same "workedherebefore" marker as
+    # the short seed phrasing above, so the seed's existing answer ("No") is
+    # unchanged; this only makes more real-world wordings reach it.
+    (r"\bworked for us before\b", "workedherebefore"),
+    (r"\bemployed by (our|this|the) company\b", "workedherebefore"),
+    (r"\bany of its (subsidiaries|affiliates)\b", "workedherebefore"),
+    (r"\bformer employee\b", "workedherebefore"),
+    (r"\b(now,? )?(or )?have you ever (worked|been employed)\b", "workedherebefore"),
     (r"\b(gender|race|ethnicit\w+|veteran|disabilit\w+)\b", "eeo"),
 ]
 

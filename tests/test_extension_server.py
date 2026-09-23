@@ -17,6 +17,20 @@ from fastapi.testclient import TestClient  # noqa: E402
 from applypilot import profiles as profiles_mod  # noqa: E402
 from applypilot.extension.server import create_app, get_or_create_token, token_path  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _clean_tier_env(monkeypatch):
+    # Tier 5 (answer bank) now defaults ON in production (see answers.py --
+    # its hits are model-free, so there's no reason to hide them behind an
+    # opt-in). Forced OFF here as this file's baseline so /resolve tests
+    # stay independent of the real repo-root answer_bank.json's live
+    # content unless a test explicitly opts back in; the true default is
+    # covered by dedicated tests below (test_health_reports_answer_bank_*).
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "0")
+    monkeypatch.delenv("APPLYPILOT_DRAFTS", raising=False)
+    monkeypatch.delenv("APPLYPILOT_MAX_DRAFTS", raising=False)
+    yield
+
 PROFILE = {
     "personal": {
         "full_name": "Nida Shah",
@@ -112,8 +126,68 @@ def test_health_reports_tiers_without_laya(client, auth_headers):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
+    # this file's autouse fixture forces APPLYPILOT_ANSWERS=0
     assert body["tiers_available"] == ["canary", "deterministic"]
     assert "laya" not in body["tiers_available"]
+
+
+def test_health_response_shape_includes_llm_fields(client, auth_headers):
+    resp = client.get("/health", headers=auth_headers)
+    body = resp.json()
+    assert set(body.keys()) == {"status", "tiers_available", "llm_available", "llm_provider"}
+    assert isinstance(body["llm_available"], bool)
+    assert isinstance(body["llm_provider"], str)
+
+
+def test_health_reports_llm_available_via_claude_cli_fallback(tmp_path, monkeypatch):
+    from applypilot.extension import server as srv
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_URL", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("APPLYPILOT_LLM_PROVIDER", raising=False)
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: "/fake/claude.cmd")
+
+    app = srv.create_app(app_dir=tmp_path, profile=PROFILE)
+    client = TestClient(app)
+    token = (tmp_path / "extension_token.txt").read_text(encoding="utf-8").strip()
+    resp = client.get("/health", headers={"X-ApplyPilot-Token": token})
+    body = resp.json()
+    assert body["llm_available"] is True
+    assert body["llm_provider"] == "claude-cli"
+
+
+def test_health_reports_llm_unavailable_when_nothing_configured(tmp_path, monkeypatch):
+    from applypilot.extension import server as srv
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_URL", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("APPLYPILOT_LLM_PROVIDER", raising=False)
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: None)
+
+    app = srv.create_app(app_dir=tmp_path, profile=PROFILE)
+    client = TestClient(app)
+    token = (tmp_path / "extension_token.txt").read_text(encoding="utf-8").strip()
+    resp = client.get("/health", headers={"X-ApplyPilot-Token": token})
+    body = resp.json()
+    assert body["llm_available"] is False
+    assert body["llm_provider"] == ""
+
+
+def test_health_reports_answer_bank_enabled_by_default(tmp_path, monkeypatch):
+    from applypilot.extension import server as srv
+
+    monkeypatch.delenv("APPLYPILOT_ANSWERS", raising=False)  # override this file's fixture
+    app = srv.create_app(app_dir=tmp_path, profile=PROFILE)  # fresh tmp_path -- no settings file
+    client = TestClient(app)
+    token = (tmp_path / "extension_token.txt").read_text(encoding="utf-8").strip()
+    resp = client.get("/health", headers={"X-ApplyPilot-Token": token})
+    body = resp.json()
+    assert body["tiers_available"] == ["canary", "deterministic", "answer_bank"]
+    assert "draft" not in body["tiers_available"]  # tier 6 still defaults off
 
 
 # ---------------------------------------------------------------------------
@@ -674,3 +748,131 @@ def test_create_profile_rejected_in_legacy_layout(tmp_path):
     client = TestClient(app)
     resp = client.post("/profiles", json={"id": "second"}, headers={"X-ApplyPilot-Token": token})
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# GET /settings, POST /settings -- tier toggles from the extension UI.
+# ---------------------------------------------------------------------------
+
+
+def test_settings_requires_token(tmp_path):
+    app, _token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/settings")
+    assert resp.status_code == 401
+
+
+def test_get_settings_default_shape(tmp_path, monkeypatch):
+    monkeypatch.delenv("APPLYPILOT_ANSWERS", raising=False)  # override this file's fixture
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/settings", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {
+        "answers_enabled": True,
+        "drafts_enabled": False,
+        "max_drafts": 5,
+        "env_overrides": {"answers_enabled": None, "drafts_enabled": None, "max_drafts": None},
+    }
+
+
+def test_post_settings_persists_and_get_reflects_it(tmp_path, monkeypatch):
+    monkeypatch.delenv("APPLYPILOT_ANSWERS", raising=False)  # override this file's fixture
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+
+    resp = client.post("/settings", json={"drafts_enabled": True, "max_drafts": 2}, headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["drafts_enabled"] is True
+    assert body["max_drafts"] == 2
+    assert body["answers_enabled"] is True  # untouched field keeps its value
+
+    # Persisted to disk, and a fresh app instance over the same app_dir sees it.
+    on_disk = json.loads((tmp_path / "extension_settings.json").read_text(encoding="utf-8"))
+    assert on_disk == {"answers_enabled": True, "drafts_enabled": True, "max_drafts": 2}
+
+    again = client.get("/settings", headers=headers).json()
+    assert again["drafts_enabled"] is True
+    assert again["max_drafts"] == 2
+
+
+def test_post_settings_partial_update_leaves_other_fields_alone(tmp_path):
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+    client.post("/settings", json={"answers_enabled": False}, headers=headers)
+    body = client.post("/settings", json={"max_drafts": 9}, headers=headers).json()
+    assert body["answers_enabled"] is False
+    assert body["max_drafts"] == 9
+
+
+def test_post_settings_rejects_wrong_types(tmp_path):
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+    resp = client.post("/settings", json={"max_drafts": -1}, headers=headers)
+    assert resp.status_code == 422
+
+
+def test_settings_reports_env_override_and_does_not_let_it_be_edited_away(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "0")
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+
+    resp = client.get("/settings", headers=headers).json()
+    assert resp["answers_enabled"] is False
+    assert resp["env_overrides"]["answers_enabled"] is False
+
+    # POSTing a change is still persisted (for when the env var is later
+    # unset), but the env var keeps winning on the effective value.
+    resp2 = client.post("/settings", json={"answers_enabled": True}, headers=headers).json()
+    assert resp2["answers_enabled"] is False
+    assert resp2["env_overrides"]["answers_enabled"] is False
+    on_disk = json.loads((tmp_path / "extension_settings.json").read_text(encoding="utf-8"))
+    assert on_disk["answers_enabled"] is True
+
+
+def test_settings_control_tiers_available(tmp_path, monkeypatch):
+    monkeypatch.delenv("APPLYPILOT_ANSWERS", raising=False)  # override this file's fixture
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+    client.post("/settings", json={"answers_enabled": True, "drafts_enabled": True}, headers=headers)
+    body = client.get("/health", headers=headers).json()
+    assert body["tiers_available"] == ["canary", "deterministic", "answer_bank", "draft"]
+
+
+# ---------------------------------------------------------------------------
+# "Have you previously worked here?" end to end through POST /resolve,
+# proving body.url actually flows through to the employer check.
+# ---------------------------------------------------------------------------
+
+VIASAT_QUESTION = (
+    "Have you previously been employed by our company or any of "
+    "its subsidiaries or affiliates?"
+)
+
+
+def test_resolve_previously_employed_uses_request_url(tmp_path, monkeypatch):
+    monkeypatch.delenv("APPLYPILOT_ANSWERS", raising=False)  # let the default (on) apply
+    profile = {**PROFILE, "work_history": [{"title": "Designer", "company": "Viasat"}]}
+    app = create_app(app_dir=tmp_path, profile=profile)
+    client = TestClient(app)
+    token = (tmp_path / "extension_token.txt").read_text(encoding="utf-8").strip()
+
+    resp = client.post(
+        "/resolve",
+        json={
+            "url": "https://viasat.wd1.myworkdayjobs.com/en-US/Viasat_Careers/job/123",
+            "fields": [{"id": "f0", "tag": "textarea", "label": VIASAT_QUESTION}],
+        },
+        headers={"X-ApplyPilot-Token": token},
+    )
+    assert resp.status_code == 200
+    plan = resp.json()
+    assert plan["fills"][0]["value"] == "Yes"
+    assert plan["fills"][0]["source"] == "answer_bank"
