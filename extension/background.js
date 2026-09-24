@@ -131,6 +131,32 @@ function callResume() {
   });
 }
 
+/**
+ * GET /profile/counts -> { work_history: <int>, education: <int> }, used ONLY to decide how
+ * many times to click a Workday-style "Add Another" button before scanning (see content.js's
+ * expandSections(), driven exclusively from an explicit "Fill this page" click, never on
+ * load). This endpoint is new; a 404 here means the local service hasn't been upgraded yet —
+ * content.js treats ANY non-ok response (404, unreachable, no token, ...) the same way: skip
+ * expansion entirely and fill the page exactly as it did before this feature existed.
+ */
+function callProfileCounts() {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) {
+      return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
+    }
+    return fetch(cfg.serviceUrl + '/profile/counts', {
+      headers: { 'X-ApplyPilot-Token': cfg.token }
+    }).then(function (resp) {
+      if (resp.status === 404) {
+        return { ok: false, error: 'not-found', message: 'The local service does not support /profile/counts yet.' };
+      }
+      return handleResponse(resp, cfg.serviceUrl);
+    }, function () {
+      return { ok: false, error: 'unreachable', message: friendlyFetchError(cfg.serviceUrl) };
+    });
+  });
+}
+
 function callHealth() {
   return getConfig().then(function (cfg) {
     var headers = cfg.token ? { 'X-ApplyPilot-Token': cfg.token } : {};
@@ -172,6 +198,10 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'GET_RESUME') {
     callResume().then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'PROFILE_COUNTS') {
+    callProfileCounts().then(sendResponse);
     return true;
   }
   return false;

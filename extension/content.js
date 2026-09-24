@@ -42,12 +42,129 @@
     };
   }
 
+  // ---------------------------------------------------------------------
+  // repeating-section expansion — "Add Another" (Workday "My Experience" step)
+  // ---------------------------------------------------------------------
+  //
+  // Runs ONLY as the first step of an explicit, user-initiated "Fill this page" (see scan()
+  // below) — never on page load, never on DETECT. Asks the local service how many
+  // work_history/education entries the profile actually has, then clicks "Add Another" just
+  // enough times to make room for them before scanning, so the structured tier's existing
+  // section_index -> work_history[index-1]/education[index-1] mapping has somewhere to write
+  // block 2, 3, ... into. All the actual DOM/safety work (the guard, the click, counting
+  // blocks, finding the right button) lives in scanner.js so it can be exercised offline in
+  // jsdom (see selftest.js) exactly like every other scanning concern in this extension.
+
+  var MAX_EXPANSION_CLICKS_TOTAL = 10; // hard cap across BOTH kinds combined, per fill
+  var EXPANSION_WAIT_TIMEOUT_MS = 3000;
+
+  /** Resolves true once `kind`'s block count exceeds `priorCount`, or false after the timeout. */
+  function waitForBlockCountIncrease(kind, priorCount) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      var timer = null;
+      var observer = null;
+      function check() {
+        return ApplyPilotScanner.countSectionBlocks(document, kind) > priorCount;
+      }
+      function finish(grew) {
+        if (settled) return;
+        settled = true;
+        if (observer) observer.disconnect();
+        if (timer) clearTimeout(timer);
+        resolve(grew);
+      }
+      if (check()) { finish(true); return; }
+      if (typeof MutationObserver !== 'undefined') {
+        observer = new MutationObserver(function () { if (check()) finish(true); });
+        observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+      }
+      timer = setTimeout(function () { finish(check()); }, EXPANSION_WAIT_TIMEOUT_MS);
+    });
+  }
+
+  /**
+   * Clicks `kind`'s "Add Another" button, one block at a time, until `target` blocks exist,
+   * the click budget runs out, or a click fails to add a block — in which case it stops
+   * immediately rather than retrying blindly (see the spec's safety requirement).
+   */
+  function expandKindTo(kind, target, budget, startHref, log) {
+    var current = ApplyPilotScanner.countSectionBlocks(document, kind);
+    if (current >= target) return Promise.resolve();
+    if (budget.remaining <= 0) {
+      log.push(kind + ': stopped — reached the max expansion clicks for this fill');
+      return Promise.resolve();
+    }
+    var btn = ApplyPilotScanner.findAddButtonForKind(document, kind);
+    if (!btn) {
+      log.push(kind + ': no safe "Add Another" button found (have ' + current + ', need ' + target + ')');
+      return Promise.resolve();
+    }
+    budget.remaining--;
+    budget.totalClicks++;
+    var clicked = ApplyPilotScanner.safeClickAddButton(btn);
+    if (!clicked) {
+      log.push(kind + ': the safety guard refused the add button at the point of click');
+      return Promise.resolve();
+    }
+    if (location.href !== startHref) {
+      log.push(kind + ': stopped — navigation detected right after clicking the add button');
+      return Promise.resolve();
+    }
+    return waitForBlockCountIncrease(kind, current).then(function (grew) {
+      if (!grew) {
+        log.push(kind + ': stopped — the click did not add a new block (never retried blindly)');
+        return;
+      }
+      log.push(kind + ': expanded to ' + ApplyPilotScanner.countSectionBlocks(document, kind) + ' block(s)');
+      return expandKindTo(kind, target, budget, startHref, log);
+    });
+  }
+
+  function expandSections() {
+    return chrome.runtime.sendMessage({ type: 'PROFILE_COUNTS' }).then(function (resp) {
+      if (!resp || !resp.ok) {
+        // Includes a 404 (service hasn't been upgraded yet), no token, or unreachable —
+        // every case is treated the same: skip expansion entirely, fill as today.
+        return { attempted: false, reason: (resp && resp.message) || 'profile counts unavailable' };
+      }
+      var counts = resp.data || {};
+      var budget = { remaining: MAX_EXPANSION_CLICKS_TOTAL, totalClicks: 0 };
+      var shieldFired = false;
+      var log = [];
+      var startHref = location.href;
+      // Belt and braces for the whole expansion pass: even if the guard somehow let
+      // something through, this stops the submit before it can do anything, and flags it.
+      var removeShield = ApplyPilotScanner.installSubmitShield(document, function () { shieldFired = true; });
+
+      function runKind(kinds, i) {
+        if (i >= kinds.length) return Promise.resolve();
+        var kind = kinds[i];
+        var target = counts[kind];
+        if (typeof target !== 'number' || target <= 0) return runKind(kinds, i + 1);
+        return expandKindTo(kind, target, budget, startHref, log).then(function () { return runKind(kinds, i + 1); });
+      }
+
+      return runKind(['work_history', 'education'], 0).then(function () {
+        removeShield();
+        return { attempted: true, clicks: budget.totalClicks, shieldFired: shieldFired, log: log };
+      }, function (e) {
+        removeShield();
+        return { attempted: true, clicks: budget.totalClicks, shieldFired: shieldFired, log: log, error: String(e && e.message ? e.message : e) };
+      });
+    }, function (e) {
+      return { attempted: false, reason: 'Could not reach the background worker for profile counts: ' + (e && e.message ? e.message : e) };
+    });
+  }
+
   function scan() {
-    var result = ApplyPilotScanner.scanAll(document);
-    registry = result.registry;
-    // Strip the live-element registry out of what we send back to the popup — only the
-    // plain-JSON FieldDescriptors leave this context.
-    return { fields: result.fields, skippedFrames: result.skippedFrames };
+    return expandSections().then(function (expansion) {
+      var result = ApplyPilotScanner.scanAll(document);
+      registry = result.registry;
+      // Strip the live-element registry out of what we send back to the popup — only the
+      // plain-JSON FieldDescriptors (plus the expansion report) leave this context.
+      return { fields: result.fields, skippedFrames: result.skippedFrames, expansion: expansion };
+    });
   }
 
   // 'filled' (green, solid) = a fact from the profile. 'draft' (blue, solid) = generated
@@ -235,13 +352,19 @@
       return true;
     }
 
+    if (msg.type === 'SCAN') {
+      // Async: scan() first runs expandSections() (a round-trip to the background worker
+      // for /profile/counts, plus however many click-and-wait cycles it takes), THEN scans.
+      // Returning true below keeps the message channel open for this promise chain.
+      scan().then(sendResponse, function (e) {
+        sendResponse({ error: String(e && e.message ? e.message : e) });
+      });
+      return true;
+    }
+
     try {
       if (msg.type === 'DETECT') {
         sendResponse(detect());
-        return false;
-      }
-      if (msg.type === 'SCAN') {
-        sendResponse(scan());
         return false;
       }
       if (msg.type === 'UNDO') {

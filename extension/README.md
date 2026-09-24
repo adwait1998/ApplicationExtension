@@ -12,6 +12,20 @@ highlight around each one. You review the highlighted page and click Submit your
 is no code path anywhere in this extension that programmatically submits a form, clicks a
 submit-typed button, or calls any navigation API. If you ever see that behavior, it's a bug.
 
+There are exactly two places `scanner.js` ever calls `.click()`, each gated by its own
+independently-auditable guard, re-checked at the point of click rather than trusted from
+scanning time:
+
+- `isClickSafe()` / `safeClick()` — radio and checkbox inputs only, needed to fill them.
+- `isAddAnotherButtonSafe()` / `safeClickAddButton()` — a Workday-style "Add Another" /
+  "+ Add Position" button that expands a repeating section, so profile entries beyond the
+  first have somewhere to go. Refuses anything whose effective type is `submit`/`image` with
+  a form owner (the classic "a `<button>` with no `type=""` attribute submits its form"
+  trap), and refuses `input[type=submit|image]` outright. Only ever runs as part of an
+  explicit "Scan & fill this page" click, and only while a capturing, document-level `submit`
+  listener (`installSubmitShield()`) is installed to stop and report anything that slips
+  through anyway — belt and braces on top of the guard, not instead of it.
+
 ## Loading it unpacked
 
 1. Open `chrome://extensions`.
@@ -45,7 +59,15 @@ fetch failure → "is the service running?", any other non-2xx → the status co
    (`content.js#detect`: 3+ fields, or 1+ field inside a `<form>`), not a real scan, and it
    never fills anything by itself.
 3. Click **Scan & fill this page**. This is the only user action that writes to the DOM. It:
-   - scans the page for fields,
+   - asks the local service how many `work_history`/`education` entries your profile has,
+     and — only if that succeeds — clicks each repeating section's "Add Another" button
+     (guarded, see above) just enough times to make room for them before scanning, capped at
+     10 clicks total per fill and stopping immediately the moment a click fails to add a new
+     block (never retried blindly). If the service doesn't support this yet (404) or isn't
+     reachable, this step is skipped entirely and the page is scanned exactly as before.
+   - scans the page for fields — including a Workday-style date rendered as separate month
+     and year inputs/selects behind one visual "From"/"To" label, which is scanned as a
+     single merged field and split back into both underlying controls on fill,
    - sends only the field metadata (labels, names, autocomplete, options — never page
      content, never your profile) to the local service,
    - fills every field the service marked `auto_fill: true`, with a green outline and a
@@ -143,7 +165,14 @@ every highlight it added.
   "Next" without a full page navigation (common in Workday and some Greenhouse flows), you
   need to re-open the popup and click "Scan & fill" again for the newly-visible step — the
   extension only scans what's in the DOM at the moment you click, on purpose (no
-  MutationObserver auto-fill, per the "nothing runs automatically" rule).
+  MutationObserver auto-fill, per the "nothing runs automatically" rule). It DOES now handle
+  the narrower "Add Another" case within a single step (Workday's "My Experience" repeating
+  work-history/education blocks) — see "The one rule that matters" above — but only for the
+  section kinds it recognizes (work history, education) and only up to 10 add-clicks per fill.
+- **"Add Another" expansion can't always find the right button.** `findAddButtonForKind()`
+  requires the button to sit after the section's last field with no other section's field in
+  between; a page whose markup doesn't fit that shape (or genuinely has no such button) is
+  left exactly as before — expansion is skipped for that kind, never guessed at.
 - **Custom-styled radio/checkbox widgets** that hide the native input completely (e.g.
   `width:0; height:0` rather than the more common 1px/clip-based screen-reader-only pattern)
   will be treated as invisible and skipped, even though a sighted user can interact with the
@@ -173,11 +202,20 @@ and did verify:
   never as part of this extension — see the comment at the top of that file for the exact
   command), loads `test-page.html`, evaluates the real `scanner.js` inside that page's own
   jsdom window (so it runs exactly the way the real content script would — same globals, same
-  prototype chain), and asserts all 17 checks pass: every label-resolution pattern, the select,
-  the radio group (collapsed to one descriptor with 2 options, legend-derived label), the
-  textarea, the three deliberately-excluded fields (hidden input, `aria-hidden` wrapper,
-  `display:none` wrapper), the auto-generated-id heuristic, and that every emitted selector is
-  non-empty.
+  prototype chain), and as of this writing asserts 126 checks pass, covering (among others):
+  every label-resolution pattern, the select, the radio group (collapsed to one descriptor with
+  2 options, legend-derived label), the textarea, the three deliberately-excluded fields
+  (hidden input, `aria-hidden` wrapper, `display:none` wrapper), the auto-generated-id
+  heuristic, every emitted selector being non-empty, select2/Chosen custom-widget pairing,
+  résumé-vs-cover-letter file target selection, the `isAddAnotherButtonSafe()` guard (allows
+  `type=button` buttons and `role=button` divs/anchors; refuses a no-type in-form trap button,
+  `input[type=submit|image]`, and submit/save/continue-labelled buttons), the "Add Another"
+  click driving a real DOM-block increase for the right section only, the submit shield
+  blocking and reporting a bypassed click, and the split month/year date pair (both an
+  input+input Workday-style pair and a select+input pair) being scanned as one field and
+  filled back into both underlying controls. What jsdom cannot verify at all — no real
+  rendering/layout, no `DataTransfer`/`DragEvent`, no real network — is called out inline in
+  that file's comments and confirmed separately via `scripts/chrome_load_test.py` instead.
 - A separate ad hoc script (not committed — it lived in the scratch directory) exercised the
   **filling** path against the same jsdom page: confirmed `applyFill()` on the simulated
   React-controlled input survives the page's own revert-on-re-render loop (while a raw

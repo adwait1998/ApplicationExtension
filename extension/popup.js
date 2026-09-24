@@ -265,6 +265,7 @@
     try {
       setStatus('Scanning page for fillable fields...');
       var scanResp = await chrome.tabs.sendMessage(activeTabId, { type: 'SCAN' });
+      var expansion = (scanResp && scanResp.expansion) || null;
       var fields = (scanResp && scanResp.fields) || [];
       if (!fields.length) {
         setStatus('No fillable fields found on this page.');
@@ -302,9 +303,18 @@
       var draftsPref = await chrome.storage.local.get(['smartFillDraftsEnabled']);
       var draftsEnabledLocally = draftsPref.smartFillDraftsEnabled === true;
 
-      setStatus('Done. Review below, then submit yourself when ready.');
       fillSummaryEl.hidden = false;
       fillSummaryEl.textContent = buildSummaryLine(appliedList, skippedCount, failedCount);
+      // The "Add Another" submit shield firing means the click guard let something through it
+      // should not have — that is never a quiet fact, it must be visible right where the
+      // operator is about to decide whether to trust this page's fill. Overrides the normal
+      // "Done" status and is never cleared by later status text (fillSummaryEl persists).
+      if (expansion && expansion.shieldFired) {
+        setStatus('SAFETY: blocked an attempted form submit while expanding repeating sections. Review this page very carefully before doing anything else.', true);
+        fillSummaryEl.textContent += ' — ⚠ submit shield fired during section expansion, see above';
+      } else {
+        setStatus('Done. Review below, then submit yourself when ready.');
+      }
       renderResumeLine(applyResp);
       renderResults(applyResp, data, fields, draftsEnabledLocally);
       undoBtn.disabled = appliedList.length === 0;

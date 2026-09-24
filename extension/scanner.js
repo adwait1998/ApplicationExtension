@@ -508,6 +508,196 @@
   }
 
   // ---------------------------------------------------------------------
+  // split month/year date inputs (Workday "From"/"To" MM/YYYY pickers)
+  // ---------------------------------------------------------------------
+  //
+  // Workday commonly renders a date as two separate controls — a month
+  // input/select and a year input — behind a visual "MM/YYYY" label, using
+  // data-automation-id values like "dateSectionMonth-input" /
+  // "dateSectionYear-input" (often role="spinbutton"), or a month <select>
+  // paired with a year <input>. Scanned individually those look like two
+  // unrelated, mislabeled number fields; paired, they are exactly the same
+  // shape the structured tier already expects from a single MM/YYYY field.
+  //
+  // Detection is purely structural, same discipline as findPairedWidget()
+  // above: an element only becomes a "month" or "year" candidate when its
+  // own data-automation-id/name/id/aria-label literally says so, and two
+  // candidates are only paired when they share a small common ancestor
+  // (bounded, so a huge form page doesn't get false-paired across sections).
+
+  var MONTH_HINT_RE = /month/i;
+  var YEAR_HINT_RE = /year/i;
+  var MAX_DATE_WRAPPER_CHILDREN = 8;
+  var MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+    'August', 'September', 'October', 'November', 'December'];
+
+  function elementDateHint(el) {
+    var dataAuto = (el.getAttribute && el.getAttribute('data-automation-id')) || '';
+    var hay = [dataAuto, el.name || '', el.id || '', (el.getAttribute && el.getAttribute('aria-label')) || ''].join(' ');
+    if (MONTH_HINT_RE.test(hay)) return 'month';
+    if (YEAR_HINT_RE.test(hay)) return 'year';
+    return null;
+  }
+
+  function isDatePartCandidate(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.disabled) return false;
+    var tag = el.tagName;
+    if (tag !== 'INPUT' && tag !== 'SELECT') return false;
+    if (tag === 'INPUT') {
+      var type = (el.type || 'text').toLowerCase();
+      if (EXCLUDED_INPUT_TYPES.indexOf(type) !== -1) return false;
+    }
+    return !!elementDateHint(el);
+  }
+
+  // Looks for a partner with the given hint ("month" or "year") sharing a
+  // small enough common container with `el`, walking up to 3 ancestor
+  // levels — mirrors findPairedWidget()'s bounded-wrapper reasoning so one
+  // "From" pair on a big page never gets matched against another section's
+  // month/year inputs elsewhere on the same page.
+  function findDatePartner(el, hint, candidates, used) {
+    var node = el;
+    for (var depth = 0; depth < 3 && node; depth++) {
+      var container = node.parentElement;
+      if (!container) break;
+      if (container.children.length <= MAX_DATE_WRAPPER_CHILDREN) {
+        for (var i = 0; i < candidates.length; i++) {
+          var cand = candidates[i];
+          if (cand === el || used.indexOf(cand) !== -1) continue;
+          if (elementDateHint(cand) !== hint) continue;
+          if (container.contains(cand)) return cand;
+        }
+      }
+      node = container;
+    }
+    return null;
+  }
+
+  function commonAncestor(a, b) {
+    var ancestors = [];
+    var node = a;
+    while (node) { ancestors.push(node); node = node.parentElement; }
+    node = b;
+    while (node) {
+      if (ancestors.indexOf(node) !== -1) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  // The visible label for a merged pair — e.g. "From" / "To" / "Start date".
+  // Reuses getLabel()'s existing resolution (id/for, wrapping <label>,
+  // aria-label, aria-labelledby, nearby text) pointed at the pair's shared
+  // container, since that is exactly where Workday puts the group's
+  // aria-labelledby/aria-label in practice.
+  function findDatePairLabel(monthEl, yearEl) {
+    var container = commonAncestor(monthEl, yearEl) || monthEl.parentElement;
+    if (!container) return '';
+    var lbl = getLabel(container);
+    if (lbl) return lbl;
+    return getPrecedingText(container);
+  }
+
+  /**
+   * Finds every month+year pair in `root`. Returns an array of
+   * { monthEl, yearEl, label }. An unpaired month or year candidate (no
+   * partner found) is left alone entirely — scanFields() then scans it as
+   * its own ordinary field rather than silently dropping it.
+   */
+  function findDatePartPairs(root) {
+    var all = Array.prototype.slice.call(root.querySelectorAll('input, select')).filter(isDatePartCandidate);
+    var used = [];
+    var pairs = [];
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (used.indexOf(el) !== -1) continue;
+      if (elementDateHint(el) !== 'month') continue; // anchor on the month half, look for its year partner
+      var yearEl = findDatePartner(el, 'year', all, used);
+      if (!yearEl) continue;
+      if (!isVisible(el) || !isVisible(yearEl)) continue;
+      used.push(el, yearEl);
+      pairs.push({ monthEl: el, yearEl: yearEl, label: findDatePairLabel(el, yearEl) });
+    }
+    return pairs;
+  }
+
+  var MM_YYYY_RE = /^\s*(\d{1,2})\s*\/\s*(\d{4})\s*$/;
+
+  function setDatePartMonth(el, monthNum) {
+    var mm2 = monthNum < 10 ? '0' + monthNum : String(monthNum);
+    if (el.tagName === 'SELECT') {
+      var idx = findOptionMatch(el, mm2);
+      if (idx === -1) idx = findOptionMatch(el, String(monthNum));
+      if (idx === -1) idx = findOptionMatch(el, MONTH_NAMES[monthNum - 1]);
+      if (idx === -1) return false;
+      var setter = nativeSetterFor(el, 'selectedIndex');
+      if (setter) setter.call(el, idx); else el.selectedIndex = idx;
+      fireEvents(el, ['input', 'change']);
+      return el.selectedIndex === idx;
+    }
+    setNativeValue(el, mm2);
+    return String(el.value) === mm2 || String(el.value) === String(monthNum);
+  }
+
+  function setDatePartYear(el, yearStr) {
+    if (el.tagName === 'SELECT') {
+      var idx = findOptionMatch(el, yearStr);
+      if (idx === -1) return false;
+      var setter = nativeSetterFor(el, 'selectedIndex');
+      if (setter) setter.call(el, idx); else el.selectedIndex = idx;
+      fireEvents(el, ['input', 'change']);
+      return el.selectedIndex === idx;
+    }
+    setNativeValue(el, yearStr);
+    return String(el.value) === yearStr;
+  }
+
+  function clearDatePart(el) {
+    if (el.tagName === 'SELECT') setSelectValue(el, '');
+    else setNativeValue(el, '');
+  }
+
+  /** Splits a service-provided "MM/YYYY" value across the pair. Never guesses at a format it wasn't given. */
+  function setDatePartsValue(entry, value) {
+    var str = String(value == null ? '' : value).trim();
+    if (!str) {
+      clearDatePart(entry.monthEl);
+      clearDatePart(entry.yearEl);
+      return true;
+    }
+    var m = MM_YYYY_RE.exec(str);
+    if (!m) return false; // not MM/YYYY -- report failure honestly rather than guessing at a split
+    var monthNum = parseInt(m[1], 10);
+    if (monthNum < 1 || monthNum > 12) return false;
+    var okMonth = setDatePartMonth(entry.monthEl, monthNum);
+    var okYear = setDatePartYear(entry.yearEl, m[2]);
+    return okMonth && okYear;
+  }
+
+  function readDatePartMonth(el) {
+    if (el.tagName === 'SELECT') {
+      var opt = el.options[el.selectedIndex];
+      if (!opt) return '';
+      var optText = cleanText(opt.textContent);
+      var num = parseInt(opt.value, 10);
+      if (!num) num = MONTH_NAMES.indexOf(optText) + 1;
+      if (!num) num = parseInt(optText, 10);
+      if (!num || num < 1 || num > 12) return '';
+      return num < 10 ? '0' + num : String(num);
+    }
+    return String(el.value || '').trim();
+  }
+
+  /** Reads the pair back as "MM/YYYY" — used for undo and honest read-back verification. */
+  function getDatePartsValue(entry) {
+    var monthVal = readDatePartMonth(entry.monthEl);
+    var yearVal = String(entry.yearEl.value || '').trim();
+    if (!monthVal && !yearVal) return '';
+    return monthVal + '/' + yearVal;
+  }
+
+  // ---------------------------------------------------------------------
   // scanning
   // ---------------------------------------------------------------------
 
@@ -563,9 +753,19 @@
     var seenRadioGroups = {};
     var counter = startId;
 
+    // Split month/year date pairs (see the section above) are detected FIRST and their two
+    // elements pulled out of the ordinary per-element loop below, so each half is scanned
+    // exactly once — merged into a single field — never twice as two unrelated fields.
+    var datePairs = findDatePartPairs(root);
+    var consumedByDatePair = [];
+    for (var dpc = 0; dpc < datePairs.length; dpc++) {
+      consumedByDatePair.push(datePairs[dpc].monthEl, datePairs[dpc].yearEl);
+    }
+
     for (var i = 0; i < candidates.length; i++) {
       var el = candidates[i];
       if (el.disabled) continue;
+      if (consumedByDatePair.indexOf(el) !== -1) continue;
 
       var tagLower = el.tagName.toLowerCase();
 
@@ -648,6 +848,32 @@
         options: tagLower === 'select' ? getSelectOptions(el) : [],
         section: fieldSection.section,
         section_index: fieldSection.section_index
+      });
+    }
+
+    // Emit each detected month/year pair as ONE merged field — "type" is deliberately
+    // NOT "date" (that would tell the service's structured tier to reformat the value as
+    // ISO YYYY-MM-DD for a native date picker; this is a plain MM/YYYY value that gets
+    // split back out on fill, see setDatePartsValue()).
+    for (var dp = 0; dp < datePairs.length; dp++) {
+      var pair = datePairs[dp];
+      if (pair.monthEl.disabled || pair.yearEl.disabled) continue;
+      var did = 'f' + (counter++);
+      var dateSection = getSectionContext(pair.monthEl);
+      registry[did] = { kind: 'date-parts', monthEl: pair.monthEl, yearEl: pair.yearEl };
+      fields.push({
+        id: did,
+        selector: buildSelector(pair.monthEl),
+        tag: pair.monthEl.tagName.toLowerCase(),
+        type: 'text',
+        name: pair.monthEl.name || '',
+        autocomplete: '',
+        label: pair.label || '',
+        placeholder: 'MM/YYYY',
+        required: !!(pair.monthEl.required || pair.yearEl.required),
+        options: [],
+        section: dateSection.section,
+        section_index: dateSection.section_index
       });
     }
 
@@ -839,6 +1065,230 @@
     return true;
   }
 
+  // ---------------------------------------------------------------------
+  // repeating-section expansion — "Add Another" (Workday "My Experience" step)
+  // ---------------------------------------------------------------------
+  //
+  // A SECOND, INDEPENDENT click path alongside isClickSafe()/safeClick() above.
+  // Deliberately not merged with it and deliberately not loosening it — a bug
+  // in one guard must never widen what the other allows, so each stays
+  // independently auditable. This one exists to click an "Add Another" /
+  // "+ Add Position" / "Add Education" control that expands a repeating
+  // section, driven ONLY from an explicit, user-initiated "Fill this page"
+  // (see content.js's expandSections()), never on page load.
+  //
+  // The HTML subtlety this guard exists to catch: a <button> with no `type`
+  // attribute reports type "submit" via the DOM, and a submit/image control
+  // that has a form owner SUBMITS THAT FORM when clicked. Workday/React "Add
+  // Another" controls are always type="button", or a non-<button> element
+  // (a styled <div>/<span role="button">) with no `.type` at all — both pass.
+  // A bare, unstyled <button>Add Another</button> sitting inside a <form>
+  // (no type="" attribute at all) is exactly the trap this refuses.
+  var ADD_BUTTON_TEXT_RE = /^\s*\+?\s*add\b.{0,30}$/i;
+  var ADD_BUTTON_DENY_RE = /\b(submit|apply|send|next|continue|save|review|finish|done|sign|confirm|proceed|upload|delete|remove)\b/i;
+
+  function accessibleControlText(el) {
+    var t = cleanText(el.textContent);
+    if (t) return t;
+    var aria = el.getAttribute && el.getAttribute('aria-label');
+    return aria ? cleanText(aria) : '';
+  }
+
+  /**
+   * EVERY condition below must hold for `el` to be a safe "Add Another" target:
+   *   1. structurally button-ish: a <button>, an <a> with no navigating href
+   *      (none, "#", or "javascript:void(0)"), or anything with role="button".
+   *   2. its accessible text (textContent, else aria-label) looks like an ADD
+   *      action ("Add Another", "+ Add Position", "Add Education", ...).
+   *   3. that same text does NOT also look like a submit/destructive action
+   *      (submit, apply, send, next, continue, save, review, finish, done,
+   *      sign, confirm, proceed, upload, delete, remove).
+   *   4. refuses any element whose EFFECTIVE type is "submit"/"image" AND has
+   *      a form owner (the trap above), and refuses input[type=submit|image]
+   *      outright, regardless of form ownership or text.
+   *   5. visible and enabled.
+   */
+  function isAddAnotherButtonSafe(el) {
+    if (!el || el.nodeType !== 1) return false;
+
+    var tag = el.tagName;
+
+    // input[type=submit|image] is refused outright, before anything else —
+    // no role or text can rescue it.
+    if (tag === 'INPUT') {
+      var inputType = String(el.type || '').toLowerCase();
+      if (inputType === 'submit' || inputType === 'image') return false;
+    }
+
+    var role = el.getAttribute && el.getAttribute('role');
+    var isButtonTag = tag === 'BUTTON';
+    var isSafeAnchor = false;
+    if (tag === 'A') {
+      var href = el.getAttribute('href');
+      var hrefTrim = (href === null || href === undefined) ? '' : String(href).trim();
+      isSafeAnchor = hrefTrim === '' || hrefTrim === '#' || /^javascript:void\(0\)\s*;?$/i.test(hrefTrim);
+    }
+    var isRoleButton = role === 'button';
+    if (!isButtonTag && !isSafeAnchor && !isRoleButton) return false;
+
+    var text = accessibleControlText(el);
+    if (!ADD_BUTTON_TEXT_RE.test(text)) return false;
+    if (ADD_BUTTON_DENY_RE.test(text)) return false;
+
+    // The critical subtlety: a <button> (or <input>, already refused above
+    // regardless of form ownership) with no explicit type="" attribute
+    // reports type "submit" via the DOM. role="button" divs/spans have no
+    // `.type` property at all, so this branch never fires for them.
+    var effectiveType = String(el.type || '').toLowerCase();
+    if ((effectiveType === 'submit' || effectiveType === 'image') && el.form) return false;
+
+    if (!isVisible(el)) return false;
+    if (el.disabled) return false;
+    if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+
+    return true;
+  }
+
+  /** Re-checks the guard at the point of click — never trust that a caller filtered correctly. */
+  function safeClickAddButton(el) {
+    if (!isAddAnotherButtonSafe(el)) return false;
+    el.click();
+    return true;
+  }
+
+  // Belt and braces: installed for the duration of expansion clicks only (see
+  // content.js's expandSections()). Even if isAddAnotherButtonSafe() somehow
+  // let through something that submits a form, this capturing document-level
+  // listener stops the submit event before it can do anything — so a
+  // mis-detected button still cannot submit an application. Returns a
+  // `remove()` function; the caller MUST call it in a `finally` block. Calls
+  // `onBlocked()` if the shield ever actually fires — that means the guard
+  // let through something it should not have, and it must be surfaced, not
+  // swallowed.
+  function installSubmitShield(doc, onBlocked) {
+    doc = doc || (typeof document !== 'undefined' ? document : null);
+    if (!doc) return function () {};
+    function blockSubmit(e) {
+      e.preventDefault();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      else e.stopPropagation();
+      if (typeof onBlocked === 'function') {
+        try { onBlocked(e); } catch (err) { /* never let a reporting bug re-throw into the shield */ }
+      }
+    }
+    doc.addEventListener('submit', blockSubmit, true);
+    return function removeSubmitShield() {
+      doc.removeEventListener('submit', blockSubmit, true);
+    };
+  }
+
+  // Which section-heading keywords belong to which repeating-section "kind" —
+  // deliberately a SUBSET of SECTION_KEYWORD_SRC's full list, split so a
+  // block can be classified as work-history vs education rather than just
+  // "some section". Bare "roles?" is treated as work-history (a "Prior
+  // Roles" heading), matching real-world Workday copy.
+  var WORK_KIND_SECTION_RE = new RegExp('(' + [
+    'work\\s*experience', 'work\\s*history', 'employment\\s*history',
+    'career\\s*history', 'employment', 'employers?',
+    'prior\\s*roles?', 'previous\\s*roles?', 'roles?', 'positions?', 'jobs?'
+  ].join('|') + ')', 'i');
+  var EDUCATION_KIND_SECTION_RE = new RegExp('(' + [
+    'education', 'schools?', 'universit(?:y|ies)', 'colleges?', 'degrees?'
+  ].join('|') + ')', 'i');
+
+  var SECTION_KIND_RE = { work_history: WORK_KIND_SECTION_RE, education: EDUCATION_KIND_SECTION_RE };
+
+  /**
+   * Counts the repeating blocks of `kind` ("work_history" | "education")
+   * currently in `root`'s DOM, using the SAME section/section_index
+   * resolution the scanner already relies on (getSectionContext) — never a
+   * new, separately-fallible way of finding blocks. A block with no visible
+   * index at all (a lone, unnumbered "Work Experience" heading) still counts
+   * as one block. Returns 0 when no field of that kind exists at all.
+   */
+  function countSectionBlocks(root, kind) {
+    var re = SECTION_KIND_RE[kind];
+    if (!re) return 0;
+    var scanned = scanFields(root);
+    var any = false;
+    var maxIndex = 0;
+    for (var i = 0; i < scanned.fields.length; i++) {
+      var f = scanned.fields[i];
+      if (!f.section || !re.test(f.section)) continue;
+      any = true;
+      if (typeof f.section_index === 'number' && f.section_index > maxIndex) maxIndex = f.section_index;
+    }
+    if (!any) return 0;
+    return Math.max(maxIndex, 1);
+  }
+
+  function elementDocPosition(a, b) {
+    if (a === b) return 0;
+    var pos = a.compareDocumentPosition(b);
+    if (pos & 4 /* DOCUMENT_POSITION_FOLLOWING */) return -1; // a comes before b
+    if (pos & 2 /* DOCUMENT_POSITION_PRECEDING */) return 1; // a comes after b
+    return 0;
+  }
+
+  /**
+   * Finds the "Add Another" button that belongs to `kind`'s LAST block:
+   * the nearest isAddAnotherButtonSafe() candidate that follows the last
+   * field of `kind` in document order, with no field belonging to the
+   * OTHER kind in between. Returns null rather than guessing when no such
+   * button exists (a page with no repeating section of this kind at all, or
+   * one where the add control cannot be told apart safely) — the caller
+   * must then skip expansion for that kind rather than click something it
+   * cannot vouch for.
+   */
+  function findAddButtonForKind(root, kind) {
+    var doc = root.nodeType === 9 ? root : ownerDoc(root);
+    var re = SECTION_KIND_RE[kind];
+    var otherKindKey = kind === 'work_history' ? 'education' : 'work_history';
+    var otherRe = SECTION_KIND_RE[otherKindKey];
+    if (!re || !doc) return null;
+
+    var scanned = scanFields(root);
+    var lastFieldEl = null;
+    for (var i = 0; i < scanned.fields.length; i++) {
+      var f = scanned.fields[i];
+      if (!f.section || !re.test(f.section)) continue;
+      var entry = scanned.registry[f.id];
+      var els = entry.kind === 'radio-group' ? entry.elements :
+        (entry.kind === 'date-parts' ? [entry.monthEl, entry.yearEl] : [entry.el]);
+      for (var e = 0; e < els.length; e++) {
+        if (!lastFieldEl || elementDocPosition(lastFieldEl, els[e]) < 0) lastFieldEl = els[e];
+      }
+    }
+    if (!lastFieldEl) return null;
+
+    // Walk forward in document order from the last matching field, bounded to the SAME
+    // `root` the caller scoped this search to (a scoped call — e.g. one narrow container —
+    // must never reach past its own boundary into unrelated parts of a bigger page). The
+    // first thing encountered that is EITHER a safe add-button candidate OR a field
+    // belonging to the other kind decides the outcome — whichever comes first wins, so a
+    // field from a different section always blocks picking a button that lives beyond it.
+    var walkRoot = root.nodeType === 9 ? (root.body || root.documentElement) : root;
+    if (!walkRoot) return null;
+    var walker = doc.createTreeWalker(walkRoot, 1 /* NodeFilter.SHOW_ELEMENT */, null, false);
+    walker.currentNode = lastFieldEl;
+    var node;
+    while ((node = walker.nextNode())) {
+      if (isAddAnotherButtonSafe(node)) {
+        // Extra safety: a button whose OWN text names the other kind
+        // ("Add Education" while looking for work_history) is never ours,
+        // even if it is the nearest candidate — keep walking past it.
+        var btnText = accessibleControlText(node);
+        if (otherRe.test(btnText) && !re.test(btnText)) continue;
+        return node;
+      }
+      if (isEligible(node) && !node.disabled) {
+        var ctx = getSectionContext(node);
+        if (ctx.section && otherRe.test(ctx.section)) return null; // boundary: a different section's field comes first
+      }
+    }
+    return null;
+  }
+
   function setRadioValue(elements, text) {
     var target = String(text == null ? '' : text).trim().toLowerCase();
     if (!target) { clearRadioGroup(elements); return true; }
@@ -869,6 +1319,7 @@
       var checked = entry.elements.filter(function (r) { return r.checked; })[0];
       return checked ? checked.value : '';
     }
+    if (entry.kind === 'date-parts') return getDatePartsValue(entry);
     var el = entry.el;
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return el.checked;
     return el.value;
@@ -879,6 +1330,7 @@
     if (entry.kind === 'radio-group') {
       return setRadioValue(entry.elements, value);
     }
+    if (entry.kind === 'date-parts') return setDatePartsValue(entry, value);
     var el = entry.el;
     if (el.tagName === 'SELECT') return setSelectValue(el, value);
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return setCheckboxValue(el, value);
@@ -889,6 +1341,7 @@
   /** The element(s) that should get the visual highlight for this field. */
   function getHighlightTargets(entry) {
     if (entry.kind === 'radio-group') return entry.elements.slice();
+    if (entry.kind === 'date-parts') return [entry.monthEl, entry.yearEl];
     // A hidden native <select> paired with a custom widget (see
     // findPairedWidget) highlights the visible widget, never the hidden
     // select the operator can't see.
@@ -1099,6 +1552,14 @@
     applyFill: applyFill,
     getHighlightTargets: getHighlightTargets,
     isClickSafe: isClickSafe,
+    isAddAnotherButtonSafe: isAddAnotherButtonSafe,
+    safeClickAddButton: safeClickAddButton,
+    installSubmitShield: installSubmitShield,
+    countSectionBlocks: countSectionBlocks,
+    findAddButtonForKind: findAddButtonForKind,
+    findDatePartPairs: findDatePartPairs,
+    setDatePartsValue: setDatePartsValue,
+    getDatePartsValue: getDatePartsValue,
     findResumeFileTarget: findResumeFileTarget,
     attachResumeFile: attachResumeFile
   };

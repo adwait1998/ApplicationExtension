@@ -13,6 +13,30 @@
 <body>
 <h1>Acme Corp — Software Engineer Application</h1>
 
+<!-- ===================================================================
+     SUBMIT TRAP (v4 spec, Part 1) — deliberately the very FIRST "add"-shaped
+     control anywhere in this document, in its OWN <form> (forms cannot
+     nest, so this must live outside #application-form to have a real submit
+     handler at all). A naive "find the first button whose text looks like
+     Add Another" search would find THIS button before any of the legitimate
+     ones further down the page. The button carries NO type="" attribute, so
+     its DOM .type is "submit" and it has a form owner — isAddAnotherButtonSafe()
+     must refuse it for exactly that reason. If it is ever clicked anyway,
+     the trap's own submit handler flips window.__FORM_SUBMITTED__ so a test
+     (or the operator's real-Chrome proof) can tell whether anything actually
+     reached the point of submitting. preventDefault() keeps that click from
+     actually navigating this test page away.
+     =================================================================== -->
+<form id="trap-form">
+  <button id="trap_add_btn">Add Another</button>
+</form>
+<script>
+  document.getElementById('trap-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+</script>
+
 <form id="application-form">
 
   <!-- Pattern 1: <label for=id> -->
@@ -247,6 +271,115 @@
 
   <button type="submit">Submit Application</button>
 </form>
+
+<!-- ===================================================================
+     Repeating-section EXPANSION fixtures ("Add Another", v4 spec Part 1) —
+     the real Workday "My Experience" step shape the operator reported: only
+     block 1 exists in the DOM until "Add Another" is clicked; block 2 does
+     not exist until then. Kept OUTSIDE <form id="application-form"> on
+     purpose (a Workday step is itself not one big native <form> either) so
+     this section's own block-counting/add-button resolution can be
+     exercised in isolation from the STATIC "Work Experience 1/2/3" fixture
+     above, which exists for a different purpose (section_index parsing) and
+     already reuses the numbers 1/2/3 — mixing the two would make "how many
+     blocks currently exist" ambiguous.
+
+     Layout, in document order: Work Experience 1 (with a split month/year
+     "From" date, v4 spec Part 2) -> its own "+ Add Another" <button
+     type="button"> -> Education 1 -> its own "Add Education" role="button"
+     <div> (proving the guard also accepts non-<button> controls). Each add
+     control sits immediately after its OWN section's fields and before the
+     other section even starts, so isAddAnotherButtonSafe()'s consumer
+     (findAddButtonForKind) must never cross into the wrong section.
+     =================================================================== -->
+<div id="my-experience-step">
+
+  <fieldset id="myexp-block-1">
+    <legend>Work Experience 1</legend>
+
+    <label for="myexp1_title">Job Title</label>
+    <input type="text" id="myexp1_title" name="myexp-1--jobTitle">
+
+    <label for="myexp1_company">Company</label>
+    <input type="text" id="myexp1_company" name="myexp-1--company">
+
+    <!-- Workday-style split month/year date pair behind a visual "From" label —
+         two spinbutton inputs, NOT one MM/YYYY text input. data-automation-id
+         values mirror the real Workday markup the operator reported. -->
+    <label id="myexp1_from_label">From</label>
+    <div class="date-parts" role="group" aria-labelledby="myexp1_from_label">
+      <input type="text" data-automation-id="dateSectionMonth-input" role="spinbutton"
+             aria-valuemin="1" aria-valuemax="12" placeholder="MM"
+             name="myexp-1--fromMonth" id="myexp1_from_month">
+      <span aria-hidden="true">/</span>
+      <input type="text" data-automation-id="dateSectionYear-input" role="spinbutton"
+             placeholder="YYYY" name="myexp-1--fromYear" id="myexp1_from_year">
+    </div>
+
+    <!-- A plain single MM/YYYY text input must keep working exactly as today,
+         even on a page that also has a split date pair elsewhere. -->
+    <label for="myexp1_to">To</label>
+    <input type="text" id="myexp1_to" name="myexp-1--endDate" placeholder="MM/YYYY">
+  </fieldset>
+
+  <button type="button" id="myexp_add_btn">+ Add Another</button>
+
+  <fieldset id="myedu-block-1">
+    <legend>Education 1</legend>
+
+    <label for="myedu1_school">School</label>
+    <input type="text" id="myedu1_school" name="myedu-1--school">
+
+    <label for="myedu1_degree">Degree</label>
+    <input type="text" id="myedu1_degree" name="myedu-1--degree">
+  </fieldset>
+
+  <!-- role="button" instead of a <button> element — proves the guard's third
+       structural path (not just <button> / safe <a>). Must NEVER be usable
+       to expand the Work Experience section above. -->
+  <div role="button" tabindex="0" id="myedu_add_btn" class="add-link">Add Education</div>
+
+</div>
+
+<script>
+  // Mimics Workday: clicking "Add Another" appends a whole new block with a
+  // heading number one higher than before. Each button only ever adds ONE
+  // block per click here (a real "Add Another" only ever adds one entry too;
+  // getting to N blocks means clicking it N-1 times).
+  (function () {
+    var workAdded = false;
+    document.getElementById('myexp_add_btn').addEventListener('click', function () {
+      if (workAdded) return;
+      workAdded = true;
+      var fs = document.createElement('fieldset');
+      fs.id = 'myexp-block-2';
+      fs.innerHTML =
+        '<legend>Work Experience 2</legend>' +
+        '<label for="myexp2_title">Job Title</label>' +
+        '<input type="text" id="myexp2_title" name="myexp-2--jobTitle">' +
+        '<label for="myexp2_company">Company</label>' +
+        '<input type="text" id="myexp2_company" name="myexp-2--company">' +
+        '<label for="myexp2_from">From</label>' +
+        '<input type="text" id="myexp2_from" name="myexp-2--startDate" placeholder="MM/YYYY">';
+      document.getElementById('myexp-block-1').insertAdjacentElement('afterend', fs);
+    });
+
+    var eduAdded = false;
+    document.getElementById('myedu_add_btn').addEventListener('click', function () {
+      if (eduAdded) return;
+      eduAdded = true;
+      var fs = document.createElement('fieldset');
+      fs.id = 'myedu-block-2';
+      fs.innerHTML =
+        '<legend>Education 2</legend>' +
+        '<label for="myedu2_school">School</label>' +
+        '<input type="text" id="myedu2_school" name="myedu-2--school">' +
+        '<label for="myedu2_degree">Degree</label>' +
+        '<input type="text" id="myedu2_degree" name="myedu-2--degree">';
+      document.getElementById('myedu-block-1').insertAdjacentElement('afterend', fs);
+    });
+  })();
+</script>
 
 <script>
   // Simulates a React-controlled input: a re-render loop enforces the value in `reactState`
