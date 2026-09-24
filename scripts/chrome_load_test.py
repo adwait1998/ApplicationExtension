@@ -273,6 +273,92 @@ with sync_playwright() as p:
               dates.get("ok") is True and dates.get("readBack") == "03/2022"
               and dates.get("year") == "2022", json.dumps(dates))
 
+        # 5e. WORKDAY WIDGETS. Built twice before from guessed markup; each time a
+        #     mock built from the same guesses passed while the real form failed.
+        #     This mock uses selectors taken from working autofillers' source, and
+        #     its spinners REVERT the previously-shipped technique — so the
+        #     negative controls below prove the mock can tell right from wrong.
+        page.evaluate("() => { window.__WD_SUBMIT_COUNT__ = 0; window.__FORM_SUBMITTED__ = false; }")
+
+        wd_dates = page.evaluate("""() => {
+            const S = ApplyPilotScanner, $ = id => document.getElementById(id);
+            // Negative control: the OLD technique (value + input/change) must be REVERTED.
+            S.setNativeValue($('wd_start_month'), '6');
+            const oldTechnique = $('wd_start_month').value;
+            const w = S.findWorkdayDateWrappers(document);
+            const my = w.find(x => x.shape === 'my' && x.monthEl && x.monthEl.id === 'wd_start_month');
+            const y = w.find(x => x.shape === 'y' && x.yearEl && x.yearEl.id === 'wd_edu_from_year');
+            const okMy = S.setWorkdayDateValue(Object.assign({kind: 'wd-date-my'}, my), '06/2023');
+            const okY = S.setWorkdayDateValue(Object.assign({kind: 'wd-date-y'}, y), '08/2021');
+            return { oldTechnique, found: w.length, okMy, okY,
+                     month: $('wd_start_month').value, year: $('wd_start_year').value,
+                     eduYear: $('wd_edu_from_year').value };
+        }""")
+        check("NEGATIVE CONTROL: the old value+input/change technique is reverted by the mock",
+              wd_dates["oldTechnique"] in ("", None), json.dumps(wd_dates))
+        check("Workday MM/YYYY spinner commits 06/2023 via the ArrowUp technique",
+              wd_dates["okMy"] is True and str(int(wd_dates["month"] or 0)) == "6"
+              and wd_dates["year"] == "2023", json.dumps(wd_dates))
+        check("Workday year-only spinner commits 2021 (variant needing TWO ArrowUps)",
+              wd_dates["okY"] is True and wd_dates["eduYear"] == "2021", json.dumps(wd_dates))
+
+        def dropdown(button_id, value):
+            return page.evaluate("""async ([bid, v]) => {
+                const S = ApplyPilotScanner, b = document.getElementById(bid);
+                const before = b.textContent.trim();
+                const r = await S.fillWorkdayDropdown({ button: b }, v);
+                return { r, before, after: b.textContent.trim() };
+            }""", [button_id, value])
+
+        deg = dropdown("wd_degree_button", "MS")
+        check("Degree 'MS' -> 'Masters Degree or Equivalent' (portalled listbox via aria-controls)",
+              deg["r"]["ok"] is True and "master" in deg["after"].lower(), json.dumps(deg))
+        ctry = dropdown("wd_country_button", "United States")
+        check("Country 'United States' -> 'United States of America'",
+              ctry["r"]["ok"] is True and ctry["after"] == "United States of America", json.dumps(ctry))
+        bogus = dropdown("wd_country_button", "Atlantis")
+        check("dropdown with NO confident match selects NOTHING (never the first option)",
+              bogus["r"]["ok"] is False and bogus["after"] == ctry["after"], json.dumps(bogus))
+
+        def prompt(input_id, value):
+            return page.evaluate("""async ([iid, v]) => {
+                const S = ApplyPilotScanner;
+                const e = S.findWorkdayPrompts(document).find(p => p.input && p.input.id === iid);
+                if (!e) return { error: 'prompt not detected' };
+                const r = await S.fillWorkdayPromptValue(e, v);
+                const sel = Array.from(e.formField.querySelectorAll(
+                    '[data-automation-id="selectedItemList"] li')).map(li => li.textContent.trim());
+                return { r, selected: sel };
+            }""", [input_id, value])
+
+        fos_bad = prompt("wd_fos_input", "Underwater Basket Weaving")
+        check("prompt with no match does NOT grab the first suggestion ('Computer Science')",
+              "Computer Science" not in (fos_bad.get("selected") or []), json.dumps(fos_bad))
+        fos = prompt("wd_fos_input", "Computer Science")
+        check("Field of Study prompt selects the exact match",
+              "Computer Science" in (fos.get("selected") or []), json.dumps(fos))
+        skills = prompt("wd_skills_input", ["SQL", "Python", "Spark"])
+        sel = " | ".join(skills.get("selected") or [])
+        check("Skills: 'SQL' matched by acronym to 'Structured Query Language (SQL)'",
+              "(SQL)" in sel, sel)
+        check("Skills: 'Python' added by exact match", "Python" in sel, sel)
+        check("Skills: unmatched 'Spark' skipped, NOT substituted with another skill",
+              "Project Management" not in sel, sel)
+
+        trap = page.evaluate("() => ({ wd: window.__WD_SUBMIT_COUNT__ || 0, "
+                             "submitted: !!window.__FORM_SUBMITTED__, url: location.href })")
+        check("NONE of the Workday interactions submitted anything or navigated",
+              trap["wd"] == 0 and trap["submitted"] is False and trap["url"].startswith("file:"),
+              json.dumps(trap))
+        guard = page.evaluate("""() => {
+            const S = ApplyPilotScanner, b = document.getElementById('wd_submit_btn');
+            return { opener: S.isWorkdayDropdownOpenerSafe(b), option: S.isWorkdayOptionSafe(b, document.body),
+                     hardDeny: S.hasWorkdayHardDenyAutomationId(b) };
+        }""")
+        check("Workday's real submit button is refused by every new guard",
+              guard["hardDeny"] is True and guard["opener"] is False and guard["option"] is False,
+              json.dumps(guard))
+
         # 5b. Résumé attachment. jsdom has no DataTransfer/DragEvent at all, so
         #     this mechanism is entirely unverified until it runs here. The
         #     failure mode that matters is a SILENT one: reporting success
@@ -286,10 +372,14 @@ with sync_playwright() as p:
         check("the COVER-LETTER input is never chosen as the résumé target",
               (target or {}).get("id") != "cover_letter_upload", str(target))
 
-        attach = page.evaluate("""() => {
+        # attachResumeFile is async: it waits for Workday's own upload card
+        # (file-upload-item-name) because Workday empties input.files after
+        # consuming the file — reading input.files alone reported a real,
+        # successful upload as a failure on the operator's form.
+        attach = page.evaluate("""async () => {
             const file = new File([new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52])],
                                   'resume.pdf', { type: 'application/pdf' });
-            const res = ApplyPilotScanner.attachResumeFile(document, file);
+            const res = await ApplyPilotScanner.attachResumeFile(document, file);
             const t = ApplyPilotScanner.findResumeFileTarget(document);
             return { res, readBack: t && t.el.files && t.el.files[0]
                         ? { name: t.el.files[0].name, size: t.el.files[0].size,
@@ -304,6 +394,35 @@ with sync_playwright() as p:
         check("the attached file has real bytes (not a zero-length placeholder)",
               (attach.get("readBack") or {}).get("size", 0) > 0,
               str((attach.get("readBack") or {}).get("size")))
+
+        # Workday upload path, exercised DIRECTLY and unconditionally. (An
+        # earlier version of this check was wrapped in `if shown:` and silently
+        # never ran, because the generic attach picked a different dropzone on
+        # this page. A check that can skip itself proves nothing.)
+        wd_up = page.evaluate("""async () => {
+            const S = ApplyPilotScanner, input = document.getElementById('wd_resume_input');
+            const before = S.findWorkdayUploadedFilename(document);
+            const dt = new DataTransfer();
+            dt.items.add(new File([new Uint8Array([37, 80, 68, 70])], 'resume.pdf',
+                                  { type: 'application/pdf' }));
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            const confirmed = await S.waitForWorkdayUploadSuccess(document, 'resume.pdf', 5000);
+            const inputFilesAfter = input.files ? input.files.length : -1;
+            const shown = S.findWorkdayUploadedFilename(document);
+            const again = await S.attachResumeFile(document,
+                new File([new Uint8Array([37, 80, 68, 70])], 'resume.pdf', { type: 'application/pdf' }));
+            const cards = document.querySelectorAll('[data-automation-id="file-upload-item"]').length;
+            return { before, confirmed, inputFilesAfter, shown, again, cards };
+        }""")
+        check("the Workday mock EMPTIES input.files after consuming the file (as real Workday does)",
+              wd_up["inputFilesAfter"] == 0, json.dumps(wd_up))
+        check("upload is CONFIRMED from Workday's own file card, not input.files",
+              bool(wd_up["confirmed"]) and "resume" in (wd_up["shown"] or ""), json.dumps(wd_up))
+        check("a SECOND attach does NOT upload a duplicate résumé",
+              wd_up["again"].get("attached") is not True
+              and "already" in json.dumps(wd_up["again"]).lower(), json.dumps(wd_up["again"]))
+        check("still exactly one uploaded-file card", wd_up["cards"] == 1, json.dumps(wd_up))
 
         # The cover-letter input must still be empty — attaching to the wrong
         # field would send the résumé as a cover letter.
