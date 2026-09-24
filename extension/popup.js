@@ -65,7 +65,7 @@
   }
 
   async function ensureInjected(tabId) {
-    await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['scanner.js', 'content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['scanner.js', 'capture.js', 'content.js'] });
   }
 
   async function init() {
@@ -255,6 +255,33 @@
     if (!resultsBox.children.length) {
       resultsBox.innerHTML = '<div class="status">Nothing to show.</div>';
     }
+  }
+
+  // "Report this page": download the form's STRUCTURE (never values) so a page
+  // that fills badly can be diagnosed from its real markup instead of a guess.
+  var reportBtn = document.getElementById('reportBtn');
+  if (reportBtn) {
+    reportBtn.addEventListener('click', async function () {
+      reportBtn.disabled = true;
+      try {
+        var tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+        await ensureInjected(tab.id);
+        var resp = await chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE' });
+        if (!resp || !resp.ok) throw new Error((resp && resp.error) || 'no response');
+        var blob = new Blob([JSON.stringify(resp.structure, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        var host = (resp.structure.host || 'page').replace(/[^a-z0-9.-]/gi, '_');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'applypilot-page-' + host + '.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+        setStatus('Saved the page structure (no field values included). Send the file to your developer.');
+      } catch (e) {
+        setStatus('Could not capture this page: ' + (e && e.message ? e.message : e));
+      } finally {
+        reportBtn.disabled = false;
+      }
+    });
   }
 
   scanBtn.addEventListener('click', async function () {

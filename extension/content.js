@@ -371,6 +371,13 @@
         sendResponse(undo());
         return false;
       }
+      if (msg.type === 'CAPTURE') {
+        // Structure only — see capture.js for the no-values invariant.
+        var cap = self.ApplyPilotCapture;
+        sendResponse(cap ? { ok: true, structure: cap.captureStructure(document) }
+                         : { ok: false, error: 'capture.js not loaded' });
+        return false;
+      }
     } catch (e) {
       sendResponse({ error: String(e && e.message ? e.message : e) });
       return false;
