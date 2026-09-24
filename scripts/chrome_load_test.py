@@ -183,6 +183,96 @@ with sync_playwright() as p:
                   ("arizona" in got["text"].lower() or got["value"].upper().endswith("AZ")),
                   json.dumps(got))
 
+        # 5c. "Add Another" expansion. This is the one place the extension clicks
+        #     a BUTTON rather than a radio/checkbox, so it is the one place a bug
+        #     could submit a real application. The test page plants a trap: a
+        #     <button> with NO type attribute, text "Add Another", inside a <form>
+        #     — which HTML treats as a SUBMIT button.
+        g = page.evaluate("""() => {
+            const S = ApplyPilotScanner, $ = id => document.getElementById(id);
+            return {
+              trap: S.isAddAnotherButtonSafe($('trap_add_btn')),
+              work: S.isAddAnotherButtonSafe($('myexp_add_btn')),
+              edu:  S.isAddAnotherButtonSafe($('myedu_add_btn')),
+              trapType: $('trap_add_btn').type, trapHasForm: !!$('trap_add_btn').form,
+            };
+        }""")
+        check("the trap really is a submit button (no type, inside a form)",
+              g["trapType"] == "submit" and g["trapHasForm"], json.dumps(g))
+        check("guard REFUSES the no-type in-form 'Add Another' (would submit)", g["trap"] is False)
+        check("guard accepts a type=button 'Add Another'", g["work"] is True)
+        check("guard accepts a role=button 'Add Education' div", g["edu"] is True)
+
+        # Clicking the trap through the guarded path must do nothing at all.
+        r = page.evaluate("""() => {
+            window.__FORM_SUBMITTED__ = false;
+            const clicked = ApplyPilotScanner.safeClickAddButton(document.getElementById('trap_add_btn'));
+            return { clicked, submitted: !!window.__FORM_SUBMITTED__ };
+        }""")
+        check("safeClickAddButton on the trap refuses and submits NOTHING",
+              r["clicked"] is False and r["submitted"] is False, json.dumps(r))
+
+        # The shield as a backstop: simulate a guard bug by clicking the trap
+        # DIRECTLY, bypassing the guard entirely. The shield must still stop it.
+        shield = page.evaluate("""() => {
+            const S = ApplyPilotScanner, trap = document.getElementById('trap_add_btn');
+            window.__FORM_SUBMITTED__ = false;
+            let fired = 0;
+            const off = S.installSubmitShield(document, () => { fired++; });
+            trap.click();                       // guard deliberately bypassed
+            const shielded = !!window.__FORM_SUBMITTED__;
+            off();
+            // Negative control: with the shield removed the trap REALLY submits,
+            // proving the check above is not passing vacuously.
+            window.__FORM_SUBMITTED__ = false;
+            trap.click();
+            const unshielded = !!window.__FORM_SUBMITTED__;
+            window.__FORM_SUBMITTED__ = false;
+            return { shielded, unshielded, fired };
+        }""")
+        check("shield blocks a submit even when the guard is BYPASSED",
+              shield["shielded"] is False and shield["fired"] >= 1, json.dumps(shield))
+        check("negative control: without the shield the trap genuinely submits",
+              shield["unshielded"] is True, json.dumps(shield))
+
+        pick = page.evaluate("""() => {
+            const S = ApplyPilotScanner;
+            const w = S.findAddButtonForKind(document, 'work_history');
+            const e = S.findAddButtonForKind(document, 'education');
+            return { work: w && w.id, edu: e && e.id };
+        }""")
+        check("work-history expansion picks ITS OWN button (not the trap, not Education's)",
+              pick["work"] == "myexp_add_btn", json.dumps(pick))
+        check("education expansion picks the Education button",
+              pick["edu"] == "myedu_add_btn", json.dumps(pick))
+
+        grew = page.evaluate("""() => {
+            const before = !!document.getElementById('myexp2_title');
+            const ok = ApplyPilotScanner.safeClickAddButton(document.getElementById('myexp_add_btn'));
+            return { before, ok, after: !!document.getElementById('myexp2_title'),
+                     url: location.href, submitted: !!window.__FORM_SUBMITTED__ };
+        }""")
+        check("clicking the real 'Add Another' creates block 2 in a real browser",
+              grew["before"] is False and grew["ok"] is True and grew["after"] is True, json.dumps(grew))
+        check("expansion submitted nothing and did not navigate",
+              grew["submitted"] is False and grew["url"].startswith("file:"), json.dumps(grew))
+
+        # 5d. Workday-style split month/year date ("From" rendered as two spinbuttons).
+        dates = page.evaluate("""() => {
+            const S = ApplyPilotScanner;
+            const pairs = S.findDatePartPairs(document);
+            if (!pairs.length) return { found: 0 };
+            const p = pairs[0];
+            const ok = S.setDatePartsValue(p, '03/2022');
+            return { found: pairs.length, label: p.label, ok,
+                     month: p.monthEl.value, year: p.yearEl.value,
+                     readBack: S.getDatePartsValue(p) };
+        }""")
+        check("split month/year date detected as ONE field", dates.get("found", 0) >= 1, json.dumps(dates))
+        check("split date filled and read back as 03/2022",
+              dates.get("ok") is True and dates.get("readBack") == "03/2022"
+              and dates.get("year") == "2022", json.dumps(dates))
+
         # 5b. Résumé attachment. jsdom has no DataTransfer/DragEvent at all, so
         #     this mechanism is entirely unverified until it runs here. The
         #     failure mode that matters is a SILENT one: reporting success
