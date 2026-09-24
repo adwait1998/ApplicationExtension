@@ -394,5 +394,287 @@
     }, 50);
   })();
 </script>
+
+<!-- ===================================================================
+     Workday widget ground-truth fixtures (v6 spec) — built ONLY from the real
+     selectors documented in the project brief (berellevy/job_app_filler,
+     ankitsharma38/Workday-Autofill-Assistant), never guessed. This extension's
+     Workday support was built twice before on guesses, and a self-authored
+     mock built from the same guesses passed both times while the operator's
+     real Workday form failed — so every selector below is exactly the
+     structure those two projects match against a live Workday DOM. Kept in
+     its own <form>, separate from #application-form, with its own decoy
+     submit button so a click-path bug here can never be confused with (or
+     masked by) the trap fixtures above.
+     =================================================================== -->
+<form id="wd-form">
+
+  <!-- Month/Year spinner pair (e.g. Work Experience "From") — a real Workday
+       numeric spinbutton pair: plain `.value =` + input/change is IGNORED
+       (see the script below); only a genuine ArrowUp keydown commits it. -->
+  <div data-automation-id="formField-wd-start-date" id="wd_start_date_field">
+    <label id="wd_start_date_label">From</label>
+    <div data-automation-id="dateInputWrapper" id="wd_start_date_wrapper">
+      <input type="text" aria-label="Month" id="wd_start_month" placeholder="MM">
+      <span aria-hidden="true">/</span>
+      <input type="text" aria-label="Year" id="wd_start_year" placeholder="YYYY">
+    </div>
+  </div>
+
+  <!-- Year-only spinner (e.g. Education "From"/"To (Actual or Expected)") — same
+       structure, no Month input at all. This one's spinner deliberately needs
+       ArrowUp TWICE per unit to commit, exercising the "some variants need it
+       twice" retry-once path. -->
+  <div data-automation-id="formField-wd-edu-from-year" id="wd_edu_from_field">
+    <label id="wd_edu_from_label">From</label>
+    <div data-automation-id="dateInputWrapper" id="wd_edu_from_wrapper">
+      <input type="text" aria-label="Year" id="wd_edu_from_year" placeholder="YYYY">
+    </div>
+  </div>
+
+  <!-- Masked single-input fallback shape (ankitsharma38) — a dateInputWrapper
+       holding exactly ONE plain <input>, no aria-label Month/Year at all.
+       Plain value+input with no preceding keydown is IGNORED; only a real
+       per-character keydown/keypress/input/keyup sequence sticks. -->
+  <div data-automation-id="formField-wd-cert-expiration" id="wd_cert_field">
+    <label id="wd_cert_label">Certification Expiration</label>
+    <div data-automation-id="dateInputWrapper" id="wd_cert_wrapper">
+      <input type="text" id="wd_cert_masked" placeholder="MM/YYYY">
+    </div>
+  </div>
+
+  <!-- Degree dropdown — button[aria-haspopup=listbox] inside formField-*; its
+       listbox is portalled to the very END of <body> (see below), linked only
+       via aria-controls, exactly like a real Workday prompt. -->
+  <div data-automation-id="formField-degree" id="wd_degree_field">
+    <label id="wd_degree_label">Degree</label>
+    <button type="button" aria-haspopup="listbox" aria-controls="wd_degree_listbox" id="wd_degree_button">
+      <span id="wd_degree_button_text">Select One</span>
+    </button>
+  </div>
+
+  <!-- Country dropdown — same shape, exercises the country alias table. -->
+  <div data-automation-id="formField-country" id="wd_country_field">
+    <label id="wd_country_label">Country</label>
+    <button type="button" aria-haspopup="listbox" aria-controls="wd_country_listbox" id="wd_country_button">
+      <span id="wd_country_button_text">Select One</span>
+    </button>
+  </div>
+
+  <!-- Field of Study prompt — multiSelectContainer, a results popup, and a
+       selectedItemList. -->
+  <div data-automation-id="formField-field-of-study" id="wd_fos_field">
+    <label id="wd_fos_label">Field of Study</label>
+    <div data-automation-id="multiSelectContainer" id="wd_fos_container">
+      <input type="text" id="wd_fos_input" role="combobox">
+    </div>
+    <div id="wd_fos_results" style="display:none;"></div>
+    <ul data-automation-id="selectedItemList" id="wd_fos_selected"></ul>
+  </div>
+
+  <!-- Skills prompt — same multiSelectContainer shape, but results are
+       checkboxItem rows each containing a real checkbox (Workday's
+       "add multiple" pattern; the service sends a LIST for this one). -->
+  <div data-automation-id="formField-skills" id="wd_skills_field">
+    <label id="wd_skills_label">Skills</label>
+    <div data-automation-id="multiSelectContainer" id="wd_skills_container">
+      <input type="text" id="wd_skills_input">
+    </div>
+    <div id="wd_skills_results" style="display:none;"></div>
+    <ul data-automation-id="selectedItemList" id="wd_skills_selected"></ul>
+  </div>
+
+  <!-- Résumé upload — Workday consumes the File and empties input.files,
+       showing file-upload-item-name instead. Labelled "Attachments" (NOT
+       "Resume/CV") deliberately, so it never competes with the existing
+       Greenhouse-style résumé-target-selection fixtures/tests above, which
+       already exhaustively cover findResumeFileTarget()'s own rules against
+       their own dedicated inputs. Cannot be exercised end-to-end in jsdom —
+       jsdom has no DataTransfer at all (see selftest.js) — included here for
+       the real-Chrome proof (scripts/chrome_load_test.py, owned elsewhere). -->
+  <div data-automation-id="formField-wd-resume" id="wd_resume_field">
+    <label id="wd_resume_label">Attachments</label>
+    <div data-automation-id="file-upload-drop-zone" id="wd_resume_dropzone">
+      <input type="file" id="wd_resume_input" name="wd_resume">
+    </div>
+    <div id="wd_resume_uploaded_area"></div>
+  </div>
+
+  <!-- The real Workday submit control — proves nothing above ever reaches it,
+       exactly like the "trap-form" button at the top of this file. -->
+  <button type="submit" data-automation-id="bottom-navigation-submit-button" id="wd_submit_btn">Submit</button>
+</form>
+
+<!-- Portalled listbox popups — appended at the very END of <body>, far from
+     their opener buttons, linked only via aria-controls (see
+     resolveWorkdayListbox() in scanner.js). -->
+<ul role="listbox" id="wd_degree_listbox" style="display:none;">
+  <li role="option" data-automation-id="promptOption-bachelor">Bachelors Degree or Equivalent</li>
+  <li role="option" data-automation-id="promptOption-master">Masters Degree or Equivalent</li>
+  <li role="option" data-automation-id="promptOption-doctorate">Doctorate</li>
+  <li role="option" data-automation-id="promptOption-associate">Associates Degree</li>
+  <li role="option" data-automation-id="promptOption-hs">High School or Equivalent</li>
+</ul>
+<ul role="listbox" id="wd_country_listbox" style="display:none;">
+  <li role="option">Canada</li>
+  <li role="option">United States of America</li>
+  <li role="option">Mexico</li>
+</ul>
+
+<script>
+(function () {
+  document.getElementById('wd-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+    // A separate counter (as opposed to the shared boolean flag above, which the
+    // pre-existing trap-form fixture elsewhere on this page also sets) so a test can tell
+    // "did clicking through the Workday widgets ever submit THIS form" apart from "has
+    // ANY trap on this whole page ever been deliberately bypassed-and-clicked so far".
+    window.__WD_SUBMIT_COUNT__ = (window.__WD_SUBMIT_COUNT__ || 0) + 1;
+  });
+
+  // ---- spinner date fields ----------------------------------------------
+  // Faithfully distinguishes the two techniques the project brief describes: a
+  // plain `.value =` write that ALSO fires input/change (the WRONG, previously
+  // -shipped technique) is reverted on the spot by the listeners below; a bare
+  // `.value =` write with NO event, followed by a real ArrowUp keydown, is
+  // exactly what a spinner widget's own keydown handler would see and commit
+  // — exactly what setWorkdaySpinnerValue() in scanner.js does.
+  function makeSpinner(input, min, max, presses) {
+    presses = presses || 1;
+    var committed = '';
+    var pending = 0;
+    function revert() { input.value = committed; }
+    input.addEventListener('input', revert);
+    input.addEventListener('change', revert);
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      pending++;
+      if (pending < presses) return; // this variant needs `presses` ArrowUps per unit
+      pending = 0;
+      var n = parseInt(input.value, 10);
+      if (isNaN(n)) n = (e.key === 'ArrowUp') ? (min - 1) : (max + 1);
+      n += (e.key === 'ArrowUp' ? 1 : -1);
+      if (n > max) n = max;
+      if (n < min) n = min;
+      committed = String(n);
+      input.value = committed; // Workday's own commit -- fires no input/change event
+    });
+  }
+  makeSpinner(document.getElementById('wd_start_month'), 1, 12, 1);
+  makeSpinner(document.getElementById('wd_start_year'), 1900, 2100, 1);
+  // Deliberately needs TWO ArrowUps per unit -- exercises setWorkdaySpinnerValue()'s
+  // "some variants need it twice" retry-once path.
+  makeSpinner(document.getElementById('wd_edu_from_year'), 1900, 2100, 2);
+
+  // ---- masked single-input date field ------------------------------------
+  // Only accepts a value change immediately preceded by a real keydown on the
+  // same element -- a crude but genuine proxy for "typed", matching
+  // typeMaskedTextField()'s keydown-before-each-character sequence. A plain
+  // value+input write with no keydown first is reverted.
+  (function () {
+    var input = document.getElementById('wd_cert_masked');
+    var committed = '';
+    var sawKeydown = false;
+    input.addEventListener('keydown', function () { sawKeydown = true; });
+    input.addEventListener('input', function () {
+      if (!sawKeydown) { input.value = committed; return; }
+      committed = input.value;
+      sawKeydown = false;
+    });
+    input.addEventListener('blur', function () { sawKeydown = false; });
+  })();
+
+  // ---- dropdowns ----------------------------------------------------------
+  function makeDropdown(buttonId, listboxId, textId) {
+    var btn = document.getElementById(buttonId);
+    var listbox = document.getElementById(listboxId);
+    var textEl = document.getElementById(textId);
+    btn.addEventListener('click', function () {
+      listbox.style.display = (listbox.style.display === 'block') ? 'none' : 'block';
+    });
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') listbox.style.display = 'none';
+    });
+    Array.prototype.forEach.call(listbox.querySelectorAll('[role="option"]'), function (opt) {
+      opt.addEventListener('click', function () {
+        textEl.textContent = opt.textContent;
+        listbox.style.display = 'none';
+      });
+    });
+  }
+  makeDropdown('wd_degree_button', 'wd_degree_listbox', 'wd_degree_button_text');
+  makeDropdown('wd_country_button', 'wd_country_listbox', 'wd_country_button_text');
+
+  // ---- prompts (Field of Study / Skills) ---------------------------------
+  // Always shows ALL of its fixed options after Enter (a loose "live search")
+  // -- this is what lets the negative case happen: results are non-empty but
+  // none of them relate to a nonsense term, so the matcher must find nothing
+  // confident rather than ever picking the first one.
+  function makePrompt(inputId, resultsId, selectedId, options, useCheckboxRows) {
+    var input = document.getElementById(inputId);
+    var results = document.getElementById(resultsId);
+    var selected = document.getElementById(selectedId);
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      setTimeout(function () {
+        results.innerHTML = '';
+        options.forEach(function (o, i) {
+          var row = document.createElement('div');
+          if (useCheckboxRows) {
+            row.setAttribute('data-automation-id', 'checkboxItem-' + i);
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            var span = document.createElement('span');
+            span.textContent = o;
+            row.appendChild(cb);
+            row.appendChild(span);
+            cb.addEventListener('change', function () {
+              if (cb.checked) {
+                var li = document.createElement('li');
+                li.textContent = o;
+                selected.appendChild(li);
+              }
+            });
+          } else {
+            row.setAttribute('role', 'option');
+            row.setAttribute('data-automation-id', 'promptOption-' + i);
+            row.textContent = o;
+            row.addEventListener('click', function () {
+              var li = document.createElement('li');
+              li.textContent = o;
+              selected.appendChild(li);
+              results.style.display = 'none';
+              input.value = '';
+            });
+          }
+          results.appendChild(row);
+        });
+        results.style.display = 'block';
+      }, 15);
+    });
+  }
+  makePrompt('wd_fos_input', 'wd_fos_results', 'wd_fos_selected',
+    ['Computer Science', 'Electrical Engineering', 'Business Administration'], false);
+  makePrompt('wd_skills_input', 'wd_skills_results', 'wd_skills_selected',
+    ['Structured Query Language (SQL)', 'Python', 'Project Management'], true);
+
+  // ---- résumé upload (Workday consumes the File and empties input.files) --
+  document.getElementById('wd_resume_input').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try { e.target.value = ''; } catch (err) { /* real browsers allow clearing a file input */ }
+    setTimeout(function () {
+      var item = document.createElement('div');
+      item.setAttribute('data-automation-id', 'file-upload-item');
+      var nameEl = document.createElement('div');
+      nameEl.setAttribute('data-automation-id', 'file-upload-item-name');
+      nameEl.textContent = f.name;
+      item.appendChild(nameEl);
+      document.getElementById('wd_resume_uploaded_area').appendChild(item);
+    }, 30);
+  });
+})();
+</script>
 </body>
 </html>

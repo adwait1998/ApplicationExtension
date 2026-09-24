@@ -508,6 +508,124 @@
   }
 
   // ---------------------------------------------------------------------
+  // Workday widget ground truth — shared helpers
+  // ---------------------------------------------------------------------
+  //
+  // Every selector below comes from the source of two published, real-Workday-tested
+  // autofillers (berellevy/job_app_filler, ankitsharma38/Workday-Autofill-Assistant), not from
+  // guessing at Workday's markup — this extension's Workday support was built twice before on
+  // guesses, and both times a self-authored mock (built from the same guesses) passed while the
+  // operator's real Workday form failed. Nothing here is invented; where the two sources
+  // disagreed, berellevy's is preferred (reverse-engineered from real DOM across many field
+  // variants). See the project brief for the exact provenance of each selector.
+
+  var WD_FORM_FIELD_SELECTOR = '[data-automation-id^="formField-"]';
+  // Applied in EVERY new Workday guard below, regardless of what else that guard already
+  // checks: an element whose OWN automation id names Workday's real navigation actions is
+  // refused outright, no matter how much it otherwise looks like a safe target.
+  var WD_HARD_DENY_AUTOMATION_RE = /bottom-navigation|submit|next|save/i;
+
+  function hasWorkdayHardDenyAutomationId(el) {
+    if (!el || !el.getAttribute) return false;
+    var auto = el.getAttribute('data-automation-id') || '';
+    return WD_HARD_DENY_AUTOMATION_RE.test(auto);
+  }
+
+  function findWorkdayFormField(el) {
+    return (el && el.closest) ? el.closest(WD_FORM_FIELD_SELECTOR) : null;
+  }
+
+  /** Label for a Workday formField-* container: its own <label>, else the usual getLabel() resolution. */
+  function getWorkdayFieldLabel(container) {
+    if (!container) return '';
+    var lbl = container.querySelector ? container.querySelector('label') : null;
+    if (lbl) {
+      var clone = lbl.cloneNode(true);
+      var ctrls = clone.querySelectorAll('input, select, textarea, button, script, style');
+      for (var i = 0; i < ctrls.length; i++) ctrls[i].remove();
+      var t = cleanText(clone.textContent);
+      if (t) return t;
+    }
+    var direct = getLabel(container);
+    if (direct) return direct;
+    return getPrecedingText(container);
+  }
+
+  function dispatchKeyboardEvent(el, type, key, code) {
+    var view = realmOf(el);
+    var Ctor = (view && view.KeyboardEvent) || (typeof KeyboardEvent !== 'undefined' ? KeyboardEvent : null);
+    if (!Ctor) return;
+    el.dispatchEvent(new Ctor(type, { key: key, code: code || key, bubbles: true, cancelable: true }));
+  }
+
+  /**
+   * A real pointer/mouse event sequence (ankitsharma38) dispatched on `el`, ending in a plain
+   * `click` — the technique Workday's portalled dropdown/prompt options need instead of a bare
+   * `.click()`. Falls back gracefully across constructors so this still works in jsdom (no
+   * PointerEvent in older versions) as well as a real browser.
+   */
+  function dispatchPointerClickSequence(el) {
+    var view = realmOf(el);
+    var seq = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+    for (var i = 0; i < seq.length; i++) {
+      var type = seq[i];
+      var isPointer = type.indexOf('pointer') === 0;
+      var Ctor = null;
+      if (isPointer && view && view.PointerEvent) Ctor = view.PointerEvent;
+      else if (!isPointer && view && view.MouseEvent) Ctor = view.MouseEvent;
+      else Ctor = (view && view.Event) || (typeof Event !== 'undefined' ? Event : null);
+      if (!Ctor) continue;
+      var evt;
+      try { evt = new Ctor(type, { bubbles: true, cancelable: true, view: view || undefined }); }
+      catch (e) {
+        try { evt = new Ctor(type, { bubbles: true, cancelable: true }); }
+        catch (e2) { continue; }
+      }
+      el.dispatchEvent(evt);
+    }
+  }
+
+  /**
+   * Polls `fn()` until it returns a truthy value, or `timeoutMs` elapses (returning whatever
+   * `fn()` last produced, possibly falsy). Uses a MutationObserver so a DOM change anywhere
+   * under `doc` re-checks immediately rather than waiting for the next poll tick. Shared by
+   * every "wait for Workday's own async UI to catch up" spot below (dropdown popup, prompt
+   * results, selected-item confirmation, upload confirmation).
+   */
+  function waitFor(fn, timeoutMs, doc) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      var observer = null;
+      var timer = null;
+      function finish(v) {
+        if (settled) return;
+        settled = true;
+        if (observer) observer.disconnect();
+        if (timer) clearTimeout(timer);
+        resolve(v);
+      }
+      var first = fn();
+      if (first) { finish(first); return; }
+      if (typeof MutationObserver !== 'undefined') {
+        observer = new MutationObserver(function () {
+          var v = fn();
+          if (v) finish(v);
+        });
+        var root = (doc && (doc.body || doc.documentElement)) || (typeof document !== 'undefined' ? document.body : null);
+        if (root) observer.observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
+      }
+      timer = setTimeout(function () { finish(fn()); }, timeoutMs);
+    });
+  }
+
+  function optionAccessibleText(el) {
+    var t = cleanText(el.textContent);
+    if (t) return t;
+    var aria = el.getAttribute && el.getAttribute('aria-label');
+    return aria ? cleanText(aria) : '';
+  }
+
+  // ---------------------------------------------------------------------
   // split month/year date inputs (Workday "From"/"To" MM/YYYY pickers)
   // ---------------------------------------------------------------------
   //
@@ -548,6 +666,11 @@
       var type = (el.type || 'text').toLowerCase();
       if (EXCLUDED_INPUT_TYPES.indexOf(type) !== -1) return false;
     }
+    // A real Workday dateInputWrapper (aria-label="Month"/"Year" spinbutton pair) is handled
+    // exclusively by findWorkdayDateWrappers()/setWorkdaySpinnerValue() below — plain
+    // value-setting is silently ignored by that widget, so it must never also be picked up
+    // here and filled with the wrong (plain-value) technique.
+    if (el.closest && el.closest('[data-automation-id="dateInputWrapper"]')) return false;
     return !!elementDateHint(el);
   }
 
@@ -698,6 +821,523 @@
   }
 
   // ---------------------------------------------------------------------
+  // Workday spinner dates (dateInputWrapper) — ground truth structure:
+  //   div[data-automation-id^="formField-"] -> div[data-automation-id="dateInputWrapper"]
+  //     -> input[aria-label="Month"] + input[aria-label="Year"]      (month/year pair)
+  //     -> input[aria-label="Year"] only                              (year-only, education)
+  //     -> exactly ONE plain <input>, no aria-label Month/Year at all (masked MM/YYYY fallback)
+  //
+  // The data-automation-id "dateSectionMonth-input"/"dateSectionYear-input" this extension
+  // used to look for appears in NEITHER working source it was rebuilt from — that guess is why
+  // real Workday dates silently failed twice. Detection here keys ONLY on the structure above.
+  // ---------------------------------------------------------------------
+
+  function findWorkdayDateWrappers(root) {
+    var wrappers = Array.prototype.slice.call(root.querySelectorAll('[data-automation-id="dateInputWrapper"]'));
+    var out = [];
+    for (var i = 0; i < wrappers.length; i++) {
+      var w = wrappers[i];
+      if (!isVisible(w)) continue;
+      var monthEl = w.querySelector('input[aria-label="Month"]');
+      var yearEl = w.querySelector('input[aria-label="Year"]');
+      var container = findWorkdayFormField(w) || w;
+      var label = getWorkdayFieldLabel(container);
+      if (yearEl) {
+        out.push({ shape: monthEl ? 'my' : 'y', wrapper: w, monthEl: monthEl || null, yearEl: yearEl, maskedEl: null, container: container, label: label });
+        continue;
+      }
+      // No aria-label Month/Year input at all -- the masked single-input fallback shape
+      // (ankitsharma38), ONLY when the wrapper holds exactly one <input>.
+      var allInputs = w.querySelectorAll('input');
+      if (allInputs.length === 1) {
+        out.push({ shape: 'masked', wrapper: w, monthEl: null, yearEl: null, maskedEl: allInputs[0], container: container, label: label });
+      }
+    }
+    return out;
+  }
+
+  function isWorkdaySpinnerInputSafe(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
+    if (hasWorkdayHardDenyAutomationId(el)) return false;
+    var aria = (el.getAttribute && el.getAttribute('aria-label')) || '';
+    if (aria !== 'Month' && aria !== 'Year') return false;
+    var wrapper = el.closest ? el.closest('[data-automation-id="dateInputWrapper"]') : null;
+    if (!wrapper) return false;
+    if (hasWorkdayHardDenyAutomationId(wrapper)) return false;
+    if (el.disabled) return false;
+    if (!isVisible(el)) return false;
+    return true;
+  }
+
+  function isWorkdayMaskedDateInputSafe(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
+    if (hasWorkdayHardDenyAutomationId(el)) return false;
+    var wrapper = el.closest ? el.closest('[data-automation-id="dateInputWrapper"]') : null;
+    if (!wrapper) return false;
+    if (hasWorkdayHardDenyAutomationId(wrapper)) return false;
+    if (wrapper.querySelectorAll('input').length !== 1) return false;
+    if (el.disabled) return false;
+    if (!isVisible(el)) return false;
+    return true;
+  }
+
+  /**
+   * berellevy's technique for a Workday numeric spinbutton: setting `.value` and firing
+   * input/change is silently reverted by Workday's own controlled re-render. Setting `.value`
+   * ONE BELOW the target with no event at all, then a real ArrowUp keydown, lets Workday's own
+   * handler commit the target itself. Some variants need the ArrowUp twice; read back and
+   * retry once before giving up.
+   */
+  function setWorkdaySpinnerValue(el, targetNum) {
+    if (!isWorkdaySpinnerInputSafe(el)) return false;
+    if (typeof targetNum !== 'number' || isNaN(targetNum)) return false;
+
+    el.value = String(targetNum - 1);
+    dispatchKeyboardEvent(el, 'keydown', 'ArrowUp', 'ArrowUp');
+    if (typeof el.click === 'function') el.click();
+    if (parseInt(el.value, 10) === targetNum) return true;
+
+    // Some variants need ArrowUp twice -- read back and retry once, from wherever it landed.
+    dispatchKeyboardEvent(el, 'keydown', 'ArrowUp', 'ArrowUp');
+    if (typeof el.click === 'function') el.click();
+    return parseInt(el.value, 10) === targetNum;
+  }
+
+  /**
+   * ankitsharma38's fallback: ONLY used when a dateInputWrapper holds exactly one masked text
+   * input (no separate Month/Year spinners at all). Types `text` character by character with a
+   * genuine keydown/keypress/input/keyup sequence per character, then blurs.
+   */
+  function typeMaskedTextField(el, text) {
+    if (!isWorkdayMaskedDateInputSafe(el)) return false;
+    var setter = nativeSetterFor(el, 'value');
+    function setSilently(v) { if (setter) setter.call(el, v); else el.value = v; }
+
+    setSilently('');
+    fireEvents(el, ['input']);
+    var current = '';
+    for (var i = 0; i < text.length; i++) {
+      var ch = text.charAt(i);
+      dispatchKeyboardEvent(el, 'keydown', ch);
+      dispatchKeyboardEvent(el, 'keypress', ch);
+      current += ch;
+      setSilently(current);
+      fireEvents(el, ['input']);
+      dispatchKeyboardEvent(el, 'keyup', ch);
+    }
+    fireEvents(el, ['change']);
+    if (typeof el.blur === 'function') el.blur();
+    else fireEvents(el, ['blur']);
+    return true;
+  }
+
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+  /** Splits a service-provided "MM/YYYY" (or, for a year-only field, "MM/YYYY" or bare "YYYY") value. */
+  function setWorkdayDateValue(entry, value) {
+    var str = String(value == null ? '' : value).trim();
+    if (!str) return false; // never guess at clearing a spinner -- report failure honestly
+
+    if (entry.kind === 'wd-date-y') {
+      var ym = MM_YYYY_RE.exec(str);
+      var yr = ym ? ym[2] : (/^\d{4}$/.test(str) ? str : null);
+      if (!yr) return false;
+      return setWorkdaySpinnerValue(entry.yearEl, parseInt(yr, 10));
+    }
+
+    if (entry.kind === 'wd-date-my') {
+      var m = MM_YYYY_RE.exec(str);
+      if (!m) return false;
+      var monthNum = parseInt(m[1], 10);
+      if (monthNum < 1 || monthNum > 12) return false;
+      if (entry.maskedEl) {
+        return typeMaskedTextField(entry.maskedEl, pad2(monthNum) + '/' + m[2]);
+      }
+      var okMonth = setWorkdaySpinnerValue(entry.monthEl, monthNum);
+      var okYear = setWorkdaySpinnerValue(entry.yearEl, parseInt(m[2], 10));
+      return okMonth && okYear;
+    }
+
+    return false;
+  }
+
+  function getWorkdayDateValue(entry) {
+    if (entry.kind === 'wd-date-y') return String((entry.yearEl && entry.yearEl.value) || '').trim();
+    if (entry.kind === 'wd-date-my') {
+      if (entry.maskedEl) return String(entry.maskedEl.value || '').trim();
+      var mv = parseInt(entry.monthEl && entry.monthEl.value, 10);
+      var yv = String((entry.yearEl && entry.yearEl.value) || '').trim();
+      if (isNaN(mv) && !yv) return '';
+      return (isNaN(mv) ? '' : pad2(mv)) + '/' + yv;
+    }
+    return '';
+  }
+
+  function getWorkdayDateHighlightTargets(entry) {
+    if (entry.kind === 'wd-date-y') return [entry.yearEl];
+    if (entry.maskedEl) return [entry.maskedEl];
+    return [entry.monthEl, entry.yearEl];
+  }
+
+  // ---------------------------------------------------------------------
+  // Workday dropdown (button[aria-haspopup="listbox"], portalled listbox)
+  // ---------------------------------------------------------------------
+
+  function isWorkdayDropdownOpenerSafe(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (hasWorkdayHardDenyAutomationId(el)) return false;
+    var tag = el.tagName;
+    var role = el.getAttribute && el.getAttribute('role');
+    var isButtonLike = tag === 'BUTTON' || role === 'combobox';
+    if (!isButtonLike) return false;
+    if ((el.getAttribute && el.getAttribute('aria-haspopup')) !== 'listbox') return false;
+    if (!findWorkdayFormField(el)) return false;
+    var effectiveType = String(el.type || '').toLowerCase();
+    if ((effectiveType === 'submit' || effectiveType === 'image') && el.form) return false;
+    var text = accessibleControlText(el);
+    if (ADD_BUTTON_DENY_RE.test(text)) return false;
+    if (!isVisible(el)) return false;
+    if (el.disabled) return false;
+    if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+    return true;
+  }
+
+  var WD_OPTION_AUTOMATION_RE = /promptOption|checkboxItem/i;
+
+  /**
+   * `el` must look like a real Workday option AND live inside `scopeEl` (the listbox the
+   * opener controls, or the popup that appeared after opening) — never an arbitrary element on
+   * the page, no matter how option-shaped its own attributes look.
+   */
+  function isWorkdayOptionSafe(el, scopeEl) {
+    if (!el || el.nodeType !== 1) return false;
+    if (hasWorkdayHardDenyAutomationId(el)) return false;
+    var role = el.getAttribute && el.getAttribute('role');
+    var auto = (el.getAttribute && el.getAttribute('data-automation-id')) || '';
+    var looksLikeOption = role === 'option' || WD_OPTION_AUTOMATION_RE.test(auto);
+    if (!looksLikeOption) return false;
+    if (!scopeEl || !scopeEl.contains(el)) return false;
+    if (el.tagName === 'BUTTON' && ADD_BUTTON_DENY_RE.test(accessibleControlText(el))) return false;
+    if (!isVisible(el)) return false;
+    if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+    return true;
+  }
+
+  function resolveWorkdayListbox(doc, button) {
+    var controlsId = button.getAttribute && button.getAttribute('aria-controls');
+    if (controlsId && doc.getElementById) {
+      var byId = doc.getElementById(controlsId);
+      if (byId && isVisible(byId)) return byId;
+    }
+    // Fallback: any [role=listbox] that has become visible somewhere in the document --
+    // Workday portals the popup to <body>, far from the opener button.
+    var candidates = Array.prototype.slice.call(doc.querySelectorAll('[role="listbox"]'));
+    for (var i = 0; i < candidates.length; i++) {
+      if (isVisible(candidates[i])) return candidates[i];
+    }
+    return null;
+  }
+
+  // ---- degree / country synonyms (explicit families only -- no guessing outside them) ------
+
+  function normalizeToken(s) { return String(s == null ? '' : s).toLowerCase().replace(/[.\s]/g, ''); }
+
+  var WD_DEGREE_FAMILY_TOKENS = {
+    doctorate: ['phd', 'doctorate', 'doctoral', 'dsc', 'edd', 'dba'],
+    master: ['ms', 'msc', 'ma', 'mba', 'me', 'meng', 'mfa', 'mtech', 'master', 'masters',
+      'masterofscience', 'masterofarts', 'masterofengineering', 'masterofbusinessadministration'],
+    bachelor: ['bs', 'bsc', 'ba', 'be', 'beng', 'btech', 'bachelor', 'bachelors',
+      'bachelorofscience', 'bachelorofarts', 'bachelorofengineering'],
+    associate: ['as', 'aa', 'associate', 'associates', 'associatedegree'],
+    highschool: ['hs', 'ged', 'highschool', 'secondary', 'highschoolorequivalent']
+  };
+  var WD_DEGREE_FAMILY_OPTION_RE = {
+    doctorate: /doctor/i,
+    master: /master/i,
+    bachelor: /bachelor/i,
+    associate: /associate/i,
+    highschool: /high\s*school|secondary/i
+  };
+
+  function degreeFamilyOf(value) {
+    var tok = normalizeToken(value);
+    if (!tok) return null;
+    for (var fam in WD_DEGREE_FAMILY_TOKENS) {
+      if (WD_DEGREE_FAMILY_TOKENS[fam].indexOf(tok) !== -1) return fam;
+    }
+    return null;
+  }
+
+  var WD_COUNTRY_ALIASES = {
+    'unitedstates': 'united states of america',
+    'usa': 'united states of america',
+    'us': 'united states of america'
+  };
+
+  function countryAliasOf(value) {
+    return WD_COUNTRY_ALIASES[normalizeToken(value)] || null;
+  }
+
+  /** Match priority: exact (normalised) -> normalised synonym (degree family / country alias) -> one-way contains. */
+  function matchWorkdayDropdownOption(target, optionTexts) {
+    var norm = function (s) { return cleanText(s).toLowerCase(); };
+    var t = norm(target);
+    if (!t) return -1;
+    var i;
+
+    for (i = 0; i < optionTexts.length; i++) {
+      if (norm(optionTexts[i]) === t) return i;
+    }
+
+    var fam = degreeFamilyOf(target);
+    if (fam) {
+      var famRe = WD_DEGREE_FAMILY_OPTION_RE[fam];
+      for (i = 0; i < optionTexts.length; i++) {
+        if (famRe.test(optionTexts[i])) return i;
+      }
+    }
+
+    var alias = countryAliasOf(target);
+    if (alias) {
+      for (i = 0; i < optionTexts.length; i++) {
+        if (norm(optionTexts[i]) === alias) return i;
+      }
+    }
+
+    for (i = 0; i < optionTexts.length; i++) {
+      var ot = norm(optionTexts[i]);
+      if (ot && ot.indexOf(t) !== -1) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Opens the dropdown, matches `value` against its options, and clicks the match — or, when
+   * nothing matches confidently, presses Escape and leaves the field untouched. NEVER falls
+   * back to the first option (see the project brief: a typeahead once blindly picked
+   * "Venezuela" for "Arizona" on a real application).
+   */
+  function fillWorkdayDropdown(entry, value) {
+    var button = entry.button;
+    var doc = ownerDoc(button);
+    if (!isWorkdayDropdownOpenerSafe(button)) {
+      return Promise.resolve({ ok: false, reason: 'safety guard refused the dropdown opener' });
+    }
+    var target = String(value == null ? '' : value).trim();
+    if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
+
+    dispatchPointerClickSequence(button);
+
+    return waitFor(function () { return resolveWorkdayListbox(doc, button); }, 2000, doc).then(function (listbox) {
+      if (!listbox) return { ok: false, reason: 'dropdown popup never appeared' };
+
+      var optionEls = Array.prototype.slice.call(
+        listbox.querySelectorAll('[role="option"], [data-automation-id*="promptOption"]')
+      ).filter(isVisible);
+      var texts = optionEls.map(optionAccessibleText);
+      var idx = matchWorkdayDropdownOption(target, texts);
+
+      if (idx === -1) {
+        dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape');
+        return { ok: false, reason: 'no confident match for "' + target + '" among dropdown options' };
+      }
+
+      var matched = optionEls[idx];
+      if (!isWorkdayOptionSafe(matched, listbox)) {
+        dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape');
+        return { ok: false, reason: 'matched option failed the safety guard' };
+      }
+
+      dispatchPointerClickSequence(matched);
+      var matchedText = texts[idx];
+      return waitFor(function () {
+        var shown = cleanText(button.textContent).toLowerCase();
+        return shown && shown.indexOf(cleanText(matchedText).toLowerCase()) !== -1;
+      }, 1000, doc).then(function (verified) {
+        if (!verified) return { ok: false, reason: 'selected option did not appear on the button afterwards' };
+        return { ok: true, matchedText: matchedText };
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Workday prompt / multi-select (multiSelectContainer) — Field of Study, School,
+  // Certification, Skills, ...
+  // ---------------------------------------------------------------------
+
+  var WD_PROMPT_RESULT_SELECTOR = '[data-automation-id*="promptOption"], [data-automation-id*="checkboxItem"], [role="option"]';
+
+  function findWorkdayPrompts(root) {
+    var containers = Array.prototype.slice.call(root.querySelectorAll('[data-automation-id="multiSelectContainer"]'));
+    var out = [];
+    for (var i = 0; i < containers.length; i++) {
+      var c = containers[i];
+      if (!isVisible(c)) continue;
+      var input = c.querySelector('input');
+      if (!input) continue;
+      var formField = findWorkdayFormField(c) || c;
+      out.push({ container: c, input: input, formField: formField, label: getWorkdayFieldLabel(formField) });
+    }
+    return out;
+  }
+
+  function isWorkdayPromptInputSafe(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
+    if (hasWorkdayHardDenyAutomationId(el)) return false;
+    var container = el.closest ? el.closest('[data-automation-id="multiSelectContainer"]') : null;
+    if (!container) return false;
+    if (hasWorkdayHardDenyAutomationId(container)) return false;
+    if (!findWorkdayFormField(el)) return false;
+    if (el.disabled) return false;
+    if (!isVisible(el)) return false;
+    return true;
+  }
+
+  function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  /** Match priority: exact -> acronym form ("(SQL)") -> word-boundary startsWith -> substring. */
+  function matchWorkdayPromptOption(term, optionTexts) {
+    var norm = function (s) { return cleanText(s).toLowerCase(); };
+    var t = norm(term);
+    if (!t) return -1;
+    var i;
+
+    for (i = 0; i < optionTexts.length; i++) {
+      if (norm(optionTexts[i]) === t) return i;
+    }
+
+    var acronymRe = new RegExp('\\(' + escapeRegExp(t) + '\\)', 'i');
+    for (i = 0; i < optionTexts.length; i++) {
+      if (acronymRe.test(optionTexts[i])) return i;
+    }
+
+    var startRe = new RegExp('\\b' + escapeRegExp(t), 'i');
+    for (i = 0; i < optionTexts.length; i++) {
+      if (startRe.test(optionTexts[i])) return i;
+    }
+
+    for (i = 0; i < optionTexts.length; i++) {
+      if (norm(optionTexts[i]).indexOf(t) !== -1) return i;
+    }
+    return -1;
+  }
+
+  function clearWorkdayPromptInput(input) {
+    setNativeValue(input, '');
+  }
+
+  /**
+   * Types one term into a prompt/multi-select, waits for Workday's own results to appear,
+   * matches by strict priority, and clicks the match -- or, with no confident match, clears the
+   * typed text and reports failure. NEVER clicks the first result blindly (same rule as the
+   * dropdown above, and for the same reason: a wrong pick here is a false statement on a real
+   * application).
+   */
+  function fillWorkdayPromptTerm(entry, term) {
+    var input = entry.input;
+    var doc = ownerDoc(input);
+    if (!isWorkdayPromptInputSafe(input)) {
+      return Promise.resolve({ ok: false, reason: 'safety guard refused the prompt input' });
+    }
+    var t = String(term == null ? '' : term).trim();
+    if (!t) return Promise.resolve({ ok: false, reason: 'empty term' });
+
+    setNativeValue(input, t);
+    dispatchKeyboardEvent(input, 'keydown', 'Enter', 'Enter');
+
+    // Searched narrowest-first: the multiSelectContainer itself (some implementations render
+    // results inline inside it), then the whole formField-* wrapper (covers a results panel
+    // rendered as a sibling of the container, under the same field — the common shape).
+    // Deliberately NEVER falls back to a whole-document search the way the dropdown's listbox
+    // resolution does: unlike the dropdown (explicitly portalled per the project brief, found
+    // only via its own aria-controls id), nothing in the ground truth says a prompt's results
+    // are portalled away from their own field, and a document-wide fallback here would risk
+    // binding to a DIFFERENT field's results left open on the page (e.g. an earlier prompt
+    // whose typed term had no confident match, so its own results panel was correctly left
+    // open rather than guessed at) — exactly the kind of cross-field mix-up this extension
+    // exists to prevent.
+    return waitFor(function () {
+      var roots = [entry.container, entry.formField];
+      for (var r = 0; r < roots.length; r++) {
+        var root = roots[r];
+        if (!root || !root.querySelectorAll) continue;
+        var els = Array.prototype.slice.call(root.querySelectorAll(WD_PROMPT_RESULT_SELECTOR)).filter(isVisible);
+        if (els.length) return { root: root, els: els };
+      }
+      return null;
+    }, 3000, doc).then(function (found) {
+      if (!found) {
+        clearWorkdayPromptInput(input);
+        return { ok: false, reason: 'no results returned for "' + t + '"' };
+      }
+      var resultEls = found.els;
+      var texts = resultEls.map(optionAccessibleText);
+      var idx = matchWorkdayPromptOption(t, texts);
+      if (idx === -1) {
+        clearWorkdayPromptInput(input);
+        return { ok: false, reason: 'no confident match among results for "' + t + '"' };
+      }
+      var matched = resultEls[idx];
+      if (!isWorkdayOptionSafe(matched, found.root)) {
+        clearWorkdayPromptInput(input);
+        return { ok: false, reason: 'matched result failed the safety guard' };
+      }
+
+      var checkbox = matched.querySelector ? matched.querySelector('input[type="checkbox"]') : null;
+      if (checkbox) {
+        if (!safeClick(checkbox)) return { ok: false, reason: 'checkbox click refused by the click guard' };
+      } else {
+        dispatchPointerClickSequence(matched);
+      }
+
+      var matchedText = texts[idx];
+      return waitFor(function () {
+        var list = (entry.formField && entry.formField.querySelector && entry.formField.querySelector('ul[data-automation-id="selectedItemList"]'))
+          || doc.querySelector('ul[data-automation-id="selectedItemList"]');
+        if (!list) return false;
+        var items = Array.prototype.slice.call(list.querySelectorAll('li'));
+        return items.some(function (li) { return cleanText(li.textContent).toLowerCase().indexOf(t.toLowerCase()) !== -1; });
+      }, 2000, doc).then(function (added) {
+        if (!added) return { ok: false, reason: 'click did not add "' + t + '" to the selected item list' };
+        return { ok: true, matchedText: matchedText };
+      });
+    });
+  }
+
+  /**
+   * `value` is either a single term (Field of Study, School, Certification) or an array
+   * (Skills — the service sends a list). For a list: add each in turn, skip one with no
+   * confident match and continue with the rest, capped at the list's own length.
+   */
+  function fillWorkdayPromptValue(entry, value) {
+    if (Array.isArray(value)) {
+      var results = [];
+      function next(i) {
+        if (i >= value.length) return Promise.resolve(results);
+        return fillWorkdayPromptTerm(entry, value[i]).then(function (r) {
+          results.push({ term: value[i], result: r });
+          return next(i + 1);
+        });
+      }
+      return next(0).then(function (all) {
+        var failedTerms = all.filter(function (r) { return !r.result.ok; }).map(function (r) { return r.term; });
+        var anyOk = all.some(function (r) { return r.result.ok; });
+        return { ok: anyOk, failedTerms: failedTerms, results: all };
+      });
+    }
+    return fillWorkdayPromptTerm(entry, value);
+  }
+
+  function getWorkdayPromptCurrentValue(entry) {
+    var doc = ownerDoc(entry.input);
+    var list = (entry.formField && entry.formField.querySelector && entry.formField.querySelector('ul[data-automation-id="selectedItemList"]'))
+      || (doc && doc.querySelector('ul[data-automation-id="selectedItemList"]'));
+    if (!list) return '';
+    var items = Array.prototype.slice.call(list.querySelectorAll('li')).map(function (li) { return cleanText(li.textContent); }).filter(Boolean);
+    return items.join(', ');
+  }
+
+  // ---------------------------------------------------------------------
   // scanning
   // ---------------------------------------------------------------------
 
@@ -762,10 +1402,39 @@
       consumedByDatePair.push(datePairs[dpc].monthEl, datePairs[dpc].yearEl);
     }
 
+    // Workday widgets (see the section above) are ALSO detected first and their elements
+    // pulled out of the ordinary loop: a dateInputWrapper's Month/Year spinners and a
+    // multiSelectContainer's inner <input> would otherwise be scanned (and filled with the
+    // wrong technique) as ordinary text inputs; a dropdown's <button> was never in `candidates`
+    // to begin with (only input/select/textarea are), so it is scanned separately below.
+    var wdDateWrappers = findWorkdayDateWrappers(root);
+    var wdPrompts = findWorkdayPrompts(root);
+    var wdDropdowns = (function () {
+      var buttons = Array.prototype.slice.call(root.querySelectorAll('button[aria-haspopup="listbox"]'));
+      var out = [];
+      for (var b = 0; b < buttons.length; b++) {
+        var btn = buttons[b];
+        if (!isVisible(btn)) continue;
+        var container = findWorkdayFormField(btn);
+        if (!container) continue; // only a listbox opener inside a formField-* wrapper counts
+        out.push({ button: btn, container: container, label: getWorkdayFieldLabel(container) });
+      }
+      return out;
+    })();
+    var consumedByWorkday = [];
+    for (var wd = 0; wd < wdDateWrappers.length; wd++) {
+      var wdw = wdDateWrappers[wd];
+      if (wdw.monthEl) consumedByWorkday.push(wdw.monthEl);
+      if (wdw.yearEl) consumedByWorkday.push(wdw.yearEl);
+      if (wdw.maskedEl) consumedByWorkday.push(wdw.maskedEl);
+    }
+    for (var wp = 0; wp < wdPrompts.length; wp++) consumedByWorkday.push(wdPrompts[wp].input);
+
     for (var i = 0; i < candidates.length; i++) {
       var el = candidates[i];
       if (el.disabled) continue;
       if (consumedByDatePair.indexOf(el) !== -1) continue;
+      if (consumedByWorkday.indexOf(el) !== -1) continue;
 
       var tagLower = el.tagName.toLowerCase();
 
@@ -822,7 +1491,8 @@
           required: group.some(function (r) { return r.required; }),
           options: options,
           section: radioSection.section,
-          section_index: radioSection.section_index
+          section_index: radioSection.section_index,
+          widget: null
         });
         continue;
       }
@@ -847,7 +1517,8 @@
         required: !!el.required,
         options: tagLower === 'select' ? getSelectOptions(el) : [],
         section: fieldSection.section,
-        section_index: fieldSection.section_index
+        section_index: fieldSection.section_index,
+        widget: null
       });
     }
 
@@ -873,7 +1544,89 @@
         required: !!(pair.monthEl.required || pair.yearEl.required),
         options: [],
         section: dateSection.section,
-        section_index: dateSection.section_index
+        section_index: dateSection.section_index,
+        widget: null
+      });
+    }
+
+    // Workday spinner dates -- one field per dateInputWrapper, "wd-date-my" (month+year, or the
+    // single masked-input fallback) or "wd-date-y" (year-only, education "From"/"To"). The
+    // service may send "MM/YYYY" even for a year-only field; the resolver is told to use only
+    // the year part (see FieldDescriptor.widget on the /resolve contract).
+    for (var wd2 = 0; wd2 < wdDateWrappers.length; wd2++) {
+      var wdw2 = wdDateWrappers[wd2];
+      var wdAnchorEl = wdw2.maskedEl || wdw2.monthEl || wdw2.yearEl;
+      if (wdAnchorEl.disabled || (wdw2.yearEl && wdw2.yearEl.disabled)) continue;
+      var wdKind = wdw2.shape === 'y' ? 'wd-date-y' : 'wd-date-my';
+      var wdId = 'f' + (counter++);
+      var wdSection = getSectionContext(wdw2.wrapper);
+      registry[wdId] = wdw2.shape === 'y'
+        ? { kind: 'wd-date-y', yearEl: wdw2.yearEl, wrapper: wdw2.wrapper }
+        : { kind: 'wd-date-my', monthEl: wdw2.monthEl, yearEl: wdw2.yearEl, maskedEl: wdw2.maskedEl, wrapper: wdw2.wrapper };
+      fields.push({
+        id: wdId,
+        selector: buildSelector(wdAnchorEl),
+        tag: 'input',
+        type: 'text',
+        name: wdAnchorEl.name || '',
+        autocomplete: '',
+        label: wdw2.label || '',
+        placeholder: wdKind === 'wd-date-y' ? 'YYYY' : 'MM/YYYY',
+        required: !!wdAnchorEl.required,
+        options: [],
+        section: wdSection.section,
+        section_index: wdSection.section_index,
+        widget: wdKind
+      });
+    }
+
+    // Workday dropdown -- button[aria-haspopup=listbox] inside a formField-* container
+    // (Degree, Country, State, ...). The options live in a portalled listbox found only at
+    // fill time (see resolveWorkdayListbox), never eagerly during scanning.
+    for (var wdd = 0; wdd < wdDropdowns.length; wdd++) {
+      var dd = wdDropdowns[wdd];
+      if (dd.button.disabled) continue;
+      var ddId = 'f' + (counter++);
+      var ddSection = getSectionContext(dd.container);
+      registry[ddId] = { kind: 'wd-dropdown', button: dd.button, container: dd.container };
+      fields.push({
+        id: ddId,
+        selector: buildSelector(dd.button),
+        tag: 'button',
+        type: 'select-one',
+        name: dd.button.name || '',
+        autocomplete: '',
+        label: dd.label || '',
+        placeholder: '',
+        required: false,
+        options: [],
+        section: ddSection.section,
+        section_index: ddSection.section_index,
+        widget: 'wd-dropdown'
+      });
+    }
+
+    // Workday prompt / multi-select -- Field of Study, School, Certification, Skills, ...
+    for (var wpp = 0; wpp < wdPrompts.length; wpp++) {
+      var pr = wdPrompts[wpp];
+      if (pr.input.disabled) continue;
+      var prId = 'f' + (counter++);
+      var prSection = getSectionContext(pr.formField);
+      registry[prId] = { kind: 'wd-prompt', input: pr.input, container: pr.container, formField: pr.formField };
+      fields.push({
+        id: prId,
+        selector: buildSelector(pr.input),
+        tag: 'input',
+        type: 'text',
+        name: pr.input.name || '',
+        autocomplete: '',
+        label: pr.label || '',
+        placeholder: pr.input.placeholder || '',
+        required: !!pr.input.required,
+        options: [],
+        section: prSection.section,
+        section_index: prSection.section_index,
+        widget: 'wd-prompt'
       });
     }
 
@@ -1320,17 +2073,42 @@
       return checked ? checked.value : '';
     }
     if (entry.kind === 'date-parts') return getDatePartsValue(entry);
+    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y') return getWorkdayDateValue(entry);
+    if (entry.kind === 'wd-dropdown') return cleanText(entry.button.textContent);
+    if (entry.kind === 'wd-prompt') return getWorkdayPromptCurrentValue(entry);
     var el = entry.el;
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return el.checked;
     return el.value;
   }
 
-  /** Applies `value` to the field described by `entry` (an ApplyPilotScanner registry entry). */
+  /**
+   * Applies `value` to the field described by `entry` (an ApplyPilotScanner registry entry).
+   * Returns a plain boolean for every pre-existing entry kind (unchanged, synchronous — undo()
+   * and every existing caller/test relies on that). The two new Workday widgets that need to
+   * open a popup and wait for it (`wd-dropdown`, `wd-prompt`) return a Promise<boolean> instead
+   * — callers must `Promise.resolve()` the result rather than assume it is always synchronous.
+   * A human-readable reason for a `false`/failed result is stashed on `entry._lastReason` for
+   * these two kinds (see content.js), since a bare boolean can't carry "no confident match".
+   */
   function applyFill(entry, value) {
     if (entry.kind === 'radio-group') {
       return setRadioValue(entry.elements, value);
     }
     if (entry.kind === 'date-parts') return setDatePartsValue(entry, value);
+    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y') return setWorkdayDateValue(entry, value);
+    if (entry.kind === 'wd-dropdown') {
+      return fillWorkdayDropdown(entry, value).then(function (r) {
+        entry._lastReason = r.reason || '';
+        return !!r.ok;
+      });
+    }
+    if (entry.kind === 'wd-prompt') {
+      return fillWorkdayPromptValue(entry, value).then(function (r) {
+        entry._lastReason = r.reason ||
+          (r.failedTerms && r.failedTerms.length ? ('no confident match for: ' + r.failedTerms.join(', ')) : '');
+        return !!r.ok;
+      });
+    }
     var el = entry.el;
     if (el.tagName === 'SELECT') return setSelectValue(el, value);
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return setCheckboxValue(el, value);
@@ -1342,6 +2120,9 @@
   function getHighlightTargets(entry) {
     if (entry.kind === 'radio-group') return entry.elements.slice();
     if (entry.kind === 'date-parts') return [entry.monthEl, entry.yearEl];
+    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y') return getWorkdayDateHighlightTargets(entry);
+    if (entry.kind === 'wd-dropdown') return [entry.button];
+    if (entry.kind === 'wd-prompt') return [entry.input];
     // A hidden native <select> paired with a custom widget (see
     // findPairedWidget) highlights the visible widget, never the hidden
     // select the operator can't see.
@@ -1451,28 +2232,88 @@
   }
 
   /**
-   * Attaches `file` to the page's résumé target and VERIFIES it stuck before
-   * reporting success — a silent failure here is worse than a skip (the
-   * operator would submit with no résumé attached). Never throws: assigning
-   * to a file input's `.files` is the one DOM write in this whole module a
-   * site's own JS can reject outright, so every failure mode reports rather
-   * than propagates.
+   * The first file already shown by a Workday-style upload widget, if any (its item name
+   * lives at `[data-automation-id="file-upload-item-name"]`, independent of whatever the
+   * underlying `<input>`'s `.files` currently holds — Workday empties that after consuming
+   * it). Exported for direct testing; also used by attachResumeFile()'s duplicate check.
+   */
+  function findWorkdayUploadedFilename(doc) {
+    doc = doc || (typeof document !== 'undefined' ? document : null);
+    if (!doc || !doc.querySelectorAll) return '';
+    var nameEls = doc.querySelectorAll('[data-automation-id="file-upload-item-name"]');
+    for (var i = 0; i < nameEls.length; i++) {
+      var t = cleanText(nameEls[i].textContent);
+      if (t) return t;
+    }
+    return '';
+  }
+
+  /**
+   * Whether Workday's own UI now shows the upload as done: either its explicit
+   * `file-upload-successful` marker, or a `file-upload-item-name` whose text contains our
+   * filename (a plain `contains`, not equality — Workday may append a size/status suffix).
+   */
+  function workdayUploadIndicatesSuccess(doc, filename) {
+    if (doc.querySelector && doc.querySelector('[data-automation-id="file-upload-successful"]')) return true;
+    var name = findWorkdayUploadedFilename(doc);
+    if (!name) return false;
+    if (!filename) return true;
+    return name.toLowerCase().indexOf(String(filename).toLowerCase()) !== -1;
+  }
+
+  /** Polls up to `timeoutMs` (default ~5s) for workdayUploadIndicatesSuccess() to go true. */
+  function waitForWorkdayUploadSuccess(doc, filename, timeoutMs) {
+    return waitFor(function () { return workdayUploadIndicatesSuccess(doc, filename) ? true : false; }, timeoutMs == null ? 5000 : timeoutMs, doc);
+  }
+
+  /**
+   * Attaches `file` to the page's résumé target and VERIFIES it stuck before reporting success
+   * — a silent failure here is worse than a skip (the operator would submit with no résumé
+   * attached). Never throws: assigning to a file input's `.files` is the one DOM write in this
+   * whole module a site's own JS can reject outright, so every failure mode reports rather than
+   * propagates.
    *
-   * Never opens a native file picker and never calls .click() on anything —
-   * the file is assigned programmatically via DataTransfer, full stop. That
-   * keeps this function outside isClickSafe()'s guard entirely, on purpose:
-   * there is no click path here to protect against turning into a submit.
+   * Never opens a native file picker and never calls .click() on anything (the resume file
+   * upload success verification below only ever READS the DOM) — the file is assigned
+   * programmatically via DataTransfer, full stop. That keeps this function outside
+   * isClickSafe()'s guard entirely, on purpose: there is no click path here to protect against
+   * turning into a submit.
    *
-   * Returns:
-   *   { attempted: false }                                 — no résumé-eligible
-   *                                                            file input on the page
-   *   { attempted: true, attached: true, filename }         — verified via read-back
-   *   { attempted: true, attached: false, reason }          — tried and failed, or
-   *                                                            could not verify
+   * Duplicate prevention: if a Workday-style upload widget already shows an attached file
+   * BEFORE this call touches anything, this returns immediately without assigning the new file
+   * at all — uploading twice is worse than not uploading (see the project brief).
+   *
+   * Always returns a Promise (previously synchronous): Workday consumes the File and empties
+   * `input.files` right after accepting it, so the ONLY honest way to verify success on
+   * Workday is to wait briefly for its own success markers to appear — see
+   * waitForWorkdayUploadSuccess() above. Non-Workday sites still get the fast, synchronous-in-
+   * effect path (input.files[0] check) with no added latency; this only waits when that fast
+   * check comes back empty.
+   *
+   * Returns (all wrapped in a resolved Promise):
+   *   { attempted: false }                                          — no résumé-eligible
+   *                                                                     file input on the page
+   *   { attempted: true, attached: false, alreadyAttached: true, filename, reason }
+   *                                                                  — duplicate prevention
+   *   { attempted: true, attached: true, filename }                 — verified via read-back
+   *                                                                     OR a Workday success marker
+   *   { attempted: true, attached: false, reason }                  — tried and failed, or
+   *                                                                     could not verify
    */
   function attachResumeFile(doc, file) {
     var target = findResumeFileTarget(doc);
-    if (!target) return { attempted: false };
+    if (!target) return Promise.resolve({ attempted: false });
+
+    var already = findWorkdayUploadedFilename(doc);
+    if (already) {
+      return Promise.resolve({
+        attempted: true,
+        attached: false,
+        alreadyAttached: true,
+        filename: already,
+        reason: 'a résumé is already attached ("' + already + '")'
+      });
+    }
 
     var el = target.el;
     var view = realmOf(el);
@@ -1481,7 +2322,7 @@
       // Real Chrome always has this. Only a test/runtime environment without a
       // full DOM (e.g. jsdom, which has no DataTransfer/DragEvent) lands here —
       // fail soft, never throw. See selftest.js for what that guard exercises.
-      return { attempted: true, attached: false, reason: 'DataTransfer is not available in this browsing context.' };
+      return Promise.resolve({ attempted: true, attached: false, reason: 'DataTransfer is not available in this browsing context.' });
     }
 
     try {
@@ -1491,7 +2332,7 @@
       try {
         el.files = dt.files;
       } catch (eAssign) {
-        return { attempted: true, attached: false, reason: 'Site rejected programmatic file assignment: ' + (eAssign && eAssign.message ? eAssign.message : eAssign) };
+        return Promise.resolve({ attempted: true, attached: false, reason: 'Site rejected programmatic file assignment: ' + (eAssign && eAssign.message ? eAssign.message : eAssign) });
       }
       fireEvents(el, ['input', 'change']);
 
@@ -1515,16 +2356,44 @@
 
       var attached = el.files && el.files[0];
       if (attached && attached.name === file.name) {
-        return { attempted: true, attached: true, filename: attached.name };
+        return Promise.resolve({ attempted: true, attached: true, filename: attached.name });
       }
-      return {
-        attempted: true,
-        attached: false,
-        reason: 'Assigned the file but could not confirm it stuck (input.files[0] was ' +
-          (attached ? ('"' + attached.name + '"') : 'empty') + ').'
-      };
+
+      // input.files came back empty — a plain dropzone widget may still need the drop
+      // event too (independent of target.isDropzone above: a plain input[type=file] can sit
+      // right next to a Workday-style dropzone), and Workday itself always ends up here
+      // (it consumes the File and clears the input). Try the Workday drop zone, then fall
+      // back to waiting briefly for Workday's own success markers before giving up.
+      try {
+        var wdDropzone = doc.querySelector && doc.querySelector('[data-automation-id="file-upload-drop-zone"]');
+        if (wdDropzone) {
+          var EventCtor2 = (view && (view.DragEvent || view.Event)) || (typeof Event !== 'undefined' ? Event : null);
+          if (EventCtor2) {
+            var dropEvt2 = new EventCtor2('drop', { bubbles: true, cancelable: true });
+            try { Object.defineProperty(dropEvt2, 'dataTransfer', { value: dt }); } catch (eDef2) { /* best effort */ }
+            wdDropzone.dispatchEvent(dropEvt2);
+          }
+        }
+      } catch (eWdDrop) {
+        // best effort only
+      }
+
+      return waitForWorkdayUploadSuccess(doc, file.name, 5000).then(function (found) {
+        if (found) {
+          return { attempted: true, attached: true, filename: findWorkdayUploadedFilename(doc) || file.name };
+        }
+        var again = el.files && el.files[0];
+        if (again && again.name === file.name) {
+          return { attempted: true, attached: true, filename: again.name };
+        }
+        return {
+          attempted: true,
+          attached: false,
+          reason: 'Assigned the file but could not confirm it stuck (input.files was empty and no upload confirmation appeared).'
+        };
+      });
     } catch (e) {
-      return { attempted: true, attached: false, reason: 'Error while attaching résumé: ' + (e && e.message ? e.message : String(e)) };
+      return Promise.resolve({ attempted: true, attached: false, reason: 'Error while attaching résumé: ' + (e && e.message ? e.message : String(e)) });
     }
   }
 
@@ -1561,6 +2430,30 @@
     setDatePartsValue: setDatePartsValue,
     getDatePartsValue: getDatePartsValue,
     findResumeFileTarget: findResumeFileTarget,
-    attachResumeFile: attachResumeFile
+    attachResumeFile: attachResumeFile,
+    findWorkdayUploadedFilename: findWorkdayUploadedFilename,
+    waitForWorkdayUploadSuccess: waitForWorkdayUploadSuccess,
+    // Workday widgets — exported primarily for selftest.js; content.js only ever goes through
+    // scanFields()/applyFill()/getCurrentValue()/getHighlightTargets() above.
+    findWorkdayDateWrappers: findWorkdayDateWrappers,
+    isWorkdaySpinnerInputSafe: isWorkdaySpinnerInputSafe,
+    isWorkdayMaskedDateInputSafe: isWorkdayMaskedDateInputSafe,
+    setWorkdaySpinnerValue: setWorkdaySpinnerValue,
+    typeMaskedTextField: typeMaskedTextField,
+    setWorkdayDateValue: setWorkdayDateValue,
+    getWorkdayDateValue: getWorkdayDateValue,
+    isWorkdayDropdownOpenerSafe: isWorkdayDropdownOpenerSafe,
+    isWorkdayOptionSafe: isWorkdayOptionSafe,
+    resolveWorkdayListbox: resolveWorkdayListbox,
+    matchWorkdayDropdownOption: matchWorkdayDropdownOption,
+    fillWorkdayDropdown: fillWorkdayDropdown,
+    degreeFamilyOf: degreeFamilyOf,
+    countryAliasOf: countryAliasOf,
+    findWorkdayPrompts: findWorkdayPrompts,
+    isWorkdayPromptInputSafe: isWorkdayPromptInputSafe,
+    matchWorkdayPromptOption: matchWorkdayPromptOption,
+    fillWorkdayPromptTerm: fillWorkdayPromptTerm,
+    fillWorkdayPromptValue: fillWorkdayPromptValue,
+    hasWorkdayHardDenyAutomationId: hasWorkdayHardDenyAutomationId
   };
 });

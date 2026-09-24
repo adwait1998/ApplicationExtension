@@ -12,19 +12,35 @@ highlight around each one. You review the highlighted page and click Submit your
 is no code path anywhere in this extension that programmatically submits a form, clicks a
 submit-typed button, or calls any navigation API. If you ever see that behavior, it's a bug.
 
-There are exactly two places `scanner.js` ever calls `.click()`, each gated by its own
-independently-auditable guard, re-checked at the point of click rather than trusted from
-scanning time:
+There are a handful of places `scanner.js` ever dispatches a click-shaped interaction, each
+gated by its own independently-auditable guard, re-checked at the point of interaction rather
+than trusted from scanning time:
 
 - `isClickSafe()` / `safeClick()` — radio and checkbox inputs only, needed to fill them.
 - `isAddAnotherButtonSafe()` / `safeClickAddButton()` — a Workday-style "Add Another" /
   "+ Add Position" button that expands a repeating section, so profile entries beyond the
   first have somewhere to go. Refuses anything whose effective type is `submit`/`image` with
   a form owner (the classic "a `<button>` with no `type=""` attribute submits its form"
-  trap), and refuses `input[type=submit|image]` outright. Only ever runs as part of an
-  explicit "Scan & fill this page" click, and only while a capturing, document-level `submit`
-  listener (`installSubmitShield()`) is installed to stop and report anything that slips
-  through anyway — belt and braces on top of the guard, not instead of it.
+  trap), and refuses `input[type=submit|image]` outright.
+- `isWorkdayDropdownOpenerSafe()` — a Workday dropdown's `button[aria-haspopup="listbox"]`
+  (Degree, Country, State, ...), opened with a real pointer/mouse event sequence
+  (`dispatchPointerClickSequence()`), never a bare `.click()`.
+- `isWorkdayOptionSafe()` — an option inside the popup that opener controls (or the results
+  panel a prompt/multi-select opened for itself), never an arbitrary element elsewhere on the
+  page, even one that is shaped exactly like an option.
+- `isWorkdaySpinnerInputSafe()` / `isWorkdayMaskedDateInputSafe()` — the two Workday date-entry
+  shapes (a Month/Year spinbutton pair, or a single masked MM/YYYY field), driven by a real
+  `ArrowUp` keydown or a genuine per-character keydown/keypress/input/keyup sequence — never
+  plain `.value =` + `input`/`change`, which Workday's own controlled re-render ignores anyway.
+
+Every one of the guards above ALSO carries a hard, unconditional refusal for any element whose
+own `data-automation-id` contains `bottom-navigation`, `submit`, `next`, or `save` — Workday's
+real "Submit"/"Next"/"Save and Continue" controls — regardless of how legitimate its shape
+otherwise looks. None of this runs on page load: every interaction above happens ONLY as part
+of an explicit "Scan & fill this page" click, and only while a capturing, document-level
+`submit` listener (`installSubmitShield()`) is installed for the ENTIRE fill (not just section
+expansion) to stop and report anything that slips through anyway — belt and braces on top of
+every guard above, not instead of them.
 
 ## Loading it unpacked
 
@@ -101,7 +117,7 @@ fetch failure → "is the service running?", any other non-2xx → the status co
 | `popup.html` / `popup.js` / `popup.css` | The review panel: injects the content script, drives the scan → resolve → fill flow, renders Filled/Skipped/Failed, and the Undo button. |
 | `options.html` / `options.js` | Where you paste the service URL and token. |
 | `icons/` | `icon16.png` / `icon48.png` / `icon128.png` — generated with a tiny Node script using only the core `zlib` module (flat-color square + circle badge). No external assets. |
-| `test-page.html` | An offline mock application form exercising every label-resolution pattern, a select, a radio group with `<fieldset>/<legend>`, a textarea, deliberately-excluded fields (hidden, `aria-hidden`, `display:none`), an auto-generated-looking id, and a simulated React-controlled input. |
+| `test-page.html` | An offline mock application form exercising every label-resolution pattern, a select, a radio group with `<fieldset>/<legend>`, a textarea, deliberately-excluded fields (hidden, `aria-hidden`, `display:none`), an auto-generated-looking id, a simulated React-controlled input, and — in its own `#wd-form` — real-Workday-shaped fixtures for every widget in "Workday widget notes" below, plus a decoy `bottom-navigation-submit-button`. |
 | `selftest.js` | Runs `scanner.js`'s scanning logic against `test-page.html` under Node (via `jsdom`) and asserts the extracted FieldDescriptors are correct. See below for how to run it. |
 
 ## Field scanning notes
@@ -133,6 +149,63 @@ fetch failure → "is the service running?", any other non-2xx → the status co
   practice: some ATS integrations (e.g. a Greenhouse or Lever form embedded via `<iframe>` on
   a company's own careers page, hosted from `boards.greenhouse.io`/`jobs.lever.co`) are
   cross-origin from the parent page and will be skipped for this reason.
+
+## Workday widget notes
+
+Workday does not render a date/dropdown/multi-select as a plain `input`/`select` — its own
+markup was reverse-engineered from two published, real-Workday-tested autofillers
+(`berellevy/job_app_filler`, `ankitsharma38/Workday-Autofill-Assistant`), not guessed, after
+two earlier attempts guessed wrong and both passed a self-authored mock while failing on the
+operator's real form. Each becomes exactly one `FieldDescriptor` with a `widget` property:
+
+- **`wd-date-my` / `wd-date-y`** — `div[data-automation-id^="formField-"] >
+  div[data-automation-id="dateInputWrapper"]`, holding either `input[aria-label="Month"]` +
+  `input[aria-label="Year"]` (`wd-date-my`), just `input[aria-label="Year"]` (`wd-date-y`,
+  e.g. education), or exactly one plain `<input>` with neither aria-label (also `wd-date-my`,
+  ankitsharma38's masked-field fallback). The first two are numeric spinbuttons: plain
+  `.value =` + `input`/`change` is silently reverted, so `setWorkdaySpinnerValue()` instead
+  sets the value ONE BELOW the target with no event, then dispatches a real `ArrowUp` keydown
+  (retrying once if a variant needs it twice) — the technique lives only in `scanner.js`, nowhere
+  else. The masked fallback is typed character by character
+  (`keydown`/`keypress`/`input`/`keyup` per character) via `typeMaskedTextField()`. `wd-date-y`
+  accepts either a bare year or a full `MM/YYYY` value and uses only the year part.
+- **`wd-dropdown`** — `button[aria-haspopup="listbox"]` inside a `formField-*` container
+  (Degree, Country, State, ...). Its popup is portalled to `<body>`, found via the button's
+  `aria-controls` id (falling back to any newly-visible `[role="listbox"]`). Opened and
+  selected with a real `pointerdown`/`mousedown`/`pointerup`/`mouseup`/`click` sequence, never
+  a bare `.click()`. Matches an option by exact text, then a small explicit degree-family
+  (bachelor/master/doctorate/associate/high-school) or country-alias table, then a one-way
+  "option contains target" check — **never** the first option when nothing matches
+  confidently; it presses Escape and reports instead.
+- **`wd-prompt`** — `div[data-automation-id^="formField-"] >
+  div[data-automation-id="multiSelectContainer"]`, with an inner `<input>` (Field of Study,
+  School, Certification, Skills, ...). Types the term, presses Enter, polls up to ~3s for
+  `[data-automation-id*="promptOption"]` / `[data-automation-id*="checkboxItem"]` /
+  `[role="option"]` results **scoped to that field's own container/formField only** — never a
+  whole-document search, which could otherwise bind to a different field's results left open
+  elsewhere on the page — then matches by exact text, then an acronym form (`"(SQL)"`), then a
+  word-boundary "starts with", then substring. No confident match clears the typed text and
+  reports, same "never guess" rule as the dropdown. When the service sends a **list** (Skills),
+  each term is added in turn; one with no confident match is skipped, not fatal to the rest.
+  A checkbox-shaped result row (`checkboxItem`) is clicked via the checkbox itself
+  (`isClickSafe`-gated); a plain result row gets the same pointer/mouse sequence as a dropdown
+  option. Skills' exact `formField-*` id is UNVERIFIED against a real tenant — detected
+  structurally (by the `multiSelectContainer`), not by an id whitelist, so this doesn't matter
+  in practice.
+- **Every new interaction path above carries its own guard**
+  (`isWorkdayDropdownOpenerSafe`/`isWorkdayOptionSafe`/`isWorkdaySpinnerInputSafe`/
+  `isWorkdayMaskedDateInputSafe`/`isWorkdayPromptInputSafe`), each with a hard, unconditional
+  refusal for any element whose own `data-automation-id` contains `bottom-navigation`,
+  `submit`, `next`, or `save` — see "The one rule that matters" above.
+- **Résumé upload**: the file attach itself already worked on Workday; only the *verification*
+  was wrong, because Workday consumes the `File` and empties `input.files` right after
+  accepting it. `attachResumeFile()` now checks for `[data-automation-id="file-upload-item-name"]`
+  containing the filename (inside `[data-automation-id="file-upload-item"]`) or
+  `[data-automation-id="file-upload-successful"]`, waiting up to ~5s via a `MutationObserver`,
+  and also dispatches a `drop` at `[data-automation-id="file-upload-drop-zone"]` if the plain
+  input path doesn't produce a file item. Before touching anything, it checks whether a
+  `file-upload-item-name` already shows a file — if so, it reports "a résumé is already
+  attached" and does **not** attach again (uploading twice is worse than not uploading).
 
 ## Filling notes (the part that's easy to get subtly wrong)
 
@@ -202,7 +275,7 @@ and did verify:
   never as part of this extension — see the comment at the top of that file for the exact
   command), loads `test-page.html`, evaluates the real `scanner.js` inside that page's own
   jsdom window (so it runs exactly the way the real content script would — same globals, same
-  prototype chain), and as of this writing asserts 126 checks pass, covering (among others):
+  prototype chain), and as of this writing asserts 206 checks pass, covering (among others):
   every label-resolution pattern, the select, the radio group (collapsed to one descriptor with
   2 options, legend-derived label), the textarea, the three deliberately-excluded fields
   (hidden input, `aria-hidden` wrapper, `display:none` wrapper), the auto-generated-id
@@ -211,11 +284,23 @@ and did verify:
   `type=button` buttons and `role=button` divs/anchors; refuses a no-type in-form trap button,
   `input[type=submit|image]`, and submit/save/continue-labelled buttons), the "Add Another"
   click driving a real DOM-block increase for the right section only, the submit shield
-  blocking and reporting a bypassed click, and the split month/year date pair (both an
+  blocking and reporting a bypassed click, the split month/year date pair (both an
   input+input Workday-style pair and a select+input pair) being scanned as one field and
-  filled back into both underlying controls. What jsdom cannot verify at all — no real
-  rendering/layout, no `DataTransfer`/`DragEvent`, no real network — is called out inline in
-  that file's comments and confirmed separately via `scripts/chrome_load_test.py` instead.
+  filled back into both underlying controls, and every Workday widget in "Workday widget
+  notes" above: the spinner-date ArrowUp technique (proven adversarially — the mock genuinely
+  reverts plain `.value=`+`input`/`change` and only commits on a real keydown), its
+  retry-twice path, the masked single-input fallback, the Degree/Country dropdown (portalled
+  listbox resolution, degree-family and country-alias matching, Escape-and-report on no
+  match), the Field of Study / Skills prompt (exact/acronym/startsWith/substring matching, the
+  Skills list's skip-and-continue, no-blind-first-result), duplicate-résumé prevention, the
+  upload-confirmation `MutationObserver` wait, and every new guard's hard deny-by-automation-id
+  rule. What jsdom cannot verify at all — no real rendering/layout, no `DataTransfer`/
+  `DragEvent` (so the résumé attach's actual file assignment, Workday's own File-consuming
+  behavior, and the drop-zone dispatch are untestable end-to-end here), no `chrome.*` APIs (so
+  none of `content.js`'s message handling, its whole-fill submit-shield install/removal, or
+  `popup.js` can be exercised by this harness at all — only `scanner.js`'s exported functions
+  are), and no real network — is called out inline in that file's comments and confirmed
+  separately via `scripts/chrome_load_test.py` instead.
 - A separate ad hoc script (not committed — it lived in the scratch directory) exercised the
   **filling** path against the same jsdom page: confirmed `applyFill()` on the simulated
   React-controlled input survives the page's own revert-on-re-render loop (while a raw

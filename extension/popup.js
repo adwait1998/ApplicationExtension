@@ -147,6 +147,13 @@
       resumeLineEl.textContent = '✓ Attached ' + (r.filename || 'résumé file') + '.';
       return;
     }
+    if (r.attempted && r.alreadyAttached) {
+      // Duplicate prevention (see scanner.js attachResumeFile): a résumé was already shown as
+      // attached, so nothing was touched. This is a success state, not a failure.
+      resumeLineEl.className = 'resume-line ok';
+      resumeLineEl.textContent = '✓ A résumé is already attached' + (r.filename ? (' (' + r.filename + ')') : '') + ' — left it as is.';
+      return;
+    }
     if (r.attempted && !r.attached && r.errorCode === 'no-resume') {
       resumeLineEl.className = 'resume-line warn';
       resumeLineEl.textContent = 'No résumé stored — upload one in Settings.';
@@ -332,13 +339,20 @@
 
       fillSummaryEl.hidden = false;
       fillSummaryEl.textContent = buildSummaryLine(appliedList, skippedCount, failedCount);
-      // The "Add Another" submit shield firing means the click guard let something through it
-      // should not have — that is never a quiet fact, it must be visible right where the
-      // operator is about to decide whether to trust this page's fill. Overrides the normal
-      // "Done" status and is never cleared by later status text (fillSummaryEl persists).
-      if (expansion && expansion.shieldFired) {
-        setStatus('SAFETY: blocked an attempted form submit while expanding repeating sections. Review this page very carefully before doing anything else.', true);
-        fillSummaryEl.textContent += ' — ⚠ submit shield fired during section expansion, see above';
+      // The submit shield firing (during section expansion OR during the fill itself — see
+      // content.js, which now installs it for the whole APPLY_FILLS call, not just expansion)
+      // means a guard let something through it should not have — that is never a quiet fact,
+      // it must be visible right where the operator is about to decide whether to trust this
+      // page's fill. Overrides the normal "Done" status and is never cleared by later status
+      // text (fillSummaryEl persists).
+      var expansionShieldFired = !!(expansion && expansion.shieldFired);
+      var fillShieldFired = !!applyResp.shieldFired;
+      if (expansionShieldFired || fillShieldFired) {
+        setStatus('SAFETY: blocked an attempted form submit while ' +
+          (expansionShieldFired ? 'expanding repeating sections' : 'filling the page') +
+          '. Review this page very carefully before doing anything else.', true);
+        fillSummaryEl.textContent += ' — ⚠ submit shield fired during ' +
+          (expansionShieldFired ? 'section expansion' : 'fill') + ', see above';
       } else {
         setStatus('Done. Review below, then submit yourself when ready.');
       }

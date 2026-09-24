@@ -77,6 +77,11 @@ for (const f of fields) if (f.name) byName[f.name] = f;
 
 const checks = [];
 function expect(name, cond) { checks.push({ name, pass: !!cond }); }
+// Promises from async test blocks (the Workday dropdown/prompt/résumé widgets all need to wait
+// for a popup or a MutationObserver-driven confirmation) -- collected here and awaited via
+// Promise.all() right before the final tally, so `checks` is guaranteed complete before it's
+// printed. Every synchronous test block above and below still just pushes into `checks` directly.
+const pending = [];
 
 expect('label[for] resolves ("Full Name")', byName.full_name && byName.full_name.label === 'Full Name');
 expect('wrapping <label> resolves (contains "Email")', byName.email && /email/i.test(byName.email.label));
@@ -303,14 +308,21 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('rule 2 (no explicit résumé label): first non-cover-letter file input wins over an earlier cover-letter input',
     fallbackTarget && fallbackTarget.el.id === 'attach_upload');
 
-  // Remove every remaining file input to test the "nothing to attach to" case.
+  // Remove every remaining file input to test the "nothing to attach to" case -- including the
+  // separate Workday résumé fixture (labelled "Attachments", not "Resume/CV", specifically so
+  // it never competed with gh_resume_input/attach_upload above; it still has to be cleared out
+  // here for this to be a genuine "zero file inputs anywhere" case).
   doc.getElementById('attach_upload').remove();
   doc.getElementById('cover_letter_upload').remove();
+  doc.getElementById('wd_resume_input').remove();
   expect('no eligible file input on the page -> null target', Scanner.findResumeFileTarget(doc) === null);
 
-  const noTargetResult = Scanner.attachResumeFile(doc, new dom.window.File(['x'], 'resume.pdf', { type: 'application/pdf' }));
-  expect('attachResumeFile() reports attempted:false when there is nothing to attach to',
-    noTargetResult && noTargetResult.attempted === false);
+  const noTargetPromise = Scanner.attachResumeFile(doc, new dom.window.File(['x'], 'resume.pdf', { type: 'application/pdf' }));
+  expect('attachResumeFile() returns a Promise', noTargetPromise && typeof noTargetPromise.then === 'function');
+  pending.push(noTargetPromise.then((noTargetResult) => {
+    expect('attachResumeFile() reports attempted:false when there is nothing to attach to',
+      noTargetResult && noTargetResult.attempted === false);
+  }));
 })();
 
 // --- résumé attachment: accept-attribute tie-break (no explicit label anywhere) ---
@@ -357,15 +369,18 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
 
   const file = new dom.window.File(['hello'], 'resume.pdf', { type: 'application/pdf' });
   let threw = false;
-  let result;
+  let resultPromise;
   try {
-    result = Scanner.attachResumeFile(doc, file);
+    resultPromise = Scanner.attachResumeFile(doc, file);
   } catch (e) {
     threw = true;
   }
-  expect('attachResumeFile() never throws even when DataTransfer is unavailable', threw === false);
-  expect('attachResumeFile() reports a clear, non-silent failure when DataTransfer is unavailable (jsdom has none)',
-    !!result && result.attempted === true && result.attached === false && /DataTransfer/.test(result.reason || ''));
+  expect('attachResumeFile() never throws synchronously even when DataTransfer is unavailable', threw === false);
+  expect('attachResumeFile() always returns a Promise', resultPromise && typeof resultPromise.then === 'function');
+  pending.push(Promise.resolve(resultPromise).then((result) => {
+    expect('attachResumeFile() reports a clear, non-silent failure when DataTransfer is unavailable (jsdom has none)',
+      !!result && result.attempted === true && result.attached === false && /DataTransfer/.test(result.reason || ''));
+  }));
 })();
 
 // --- "Add Another" guard: isAddAnotherButtonSafe() (v4 spec Part 1) --------
@@ -634,11 +649,471 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('the year <input> reads back "2018"', yearInput.value === '2018');
 })();
 
-let failed = 0;
-console.log('\n--- checks ---');
-for (const c of checks) {
-  console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}`);
-  if (!c.pass) failed++;
-}
-console.log(`\n${checks.length - failed}/${checks.length} checks passed.`);
-process.exit(failed ? 1 : 0);
+// =====================================================================
+// Workday widgets (v6 spec) — ground truth from berellevy/job_app_filler and
+// ankitsharma38/Workday-Autofill-Assistant, exercised against the fixtures added to
+// test-page.html's #wd-form. See that file's own comments for what each fixture proves.
+// =====================================================================
+
+// --- scanning shape: each widget becomes exactly one FieldDescriptor -------
+(() => {
+  const doc = dom.window.document;
+  const scanned = Scanner.scanFields(doc);
+
+  const monthEl = doc.getElementById('wd_start_month');
+  const yearEl = doc.getElementById('wd_start_year');
+  const myField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-date-my'
+    && scanned.registry[f.id].monthEl === monthEl && scanned.registry[f.id].yearEl === yearEl);
+  expect('Workday month/year dateInputWrapper is scanned as ONE field with widget "wd-date-my"',
+    !!myField && myField.widget === 'wd-date-my');
+  expect('...labelled "From" (resolved from the formField-* container\'s own <label>)',
+    myField && myField.label === 'From');
+  expect('...type is "text", not "date" (service must emit raw MM/YYYY, never reformatted)',
+    myField && myField.type === 'text');
+
+  const eduYearEl = doc.getElementById('wd_edu_from_year');
+  const yField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-date-y'
+    && scanned.registry[f.id].yearEl === eduYearEl);
+  expect('Workday year-only dateInputWrapper (no Month input at all) is scanned with widget "wd-date-y"',
+    !!yField && yField.widget === 'wd-date-y');
+
+  const maskedEl = doc.getElementById('wd_cert_masked');
+  const maskedField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-date-my'
+    && scanned.registry[f.id].maskedEl === maskedEl);
+  expect('Workday masked single-input dateInputWrapper (no aria-label Month/Year at all) is ALSO scanned, widget "wd-date-my"',
+    !!maskedField);
+
+  const strayWd = scanned.fields.filter(f => {
+    const e = scanned.registry[f.id];
+    return e && e.kind === 'element' && (e.el === monthEl || e.el === yearEl || e.el === eduYearEl || e.el === maskedEl);
+  });
+  expect('Workday spinner/masked date inputs are never ALSO scanned as ordinary text fields', strayWd.length === 0);
+
+  const degreeBtn = doc.getElementById('wd_degree_button');
+  const degreeField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-dropdown'
+    && scanned.registry[f.id].button === degreeBtn);
+  expect('Workday dropdown button[aria-haspopup=listbox] is scanned as a field with widget "wd-dropdown"',
+    !!degreeField && degreeField.widget === 'wd-dropdown' && degreeField.label === 'Degree');
+
+  const fosInput = doc.getElementById('wd_fos_input');
+  const skillsInput = doc.getElementById('wd_skills_input');
+  const fosField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-prompt'
+    && scanned.registry[f.id].input === fosInput);
+  expect('Workday multiSelectContainer prompt is scanned as a field with widget "wd-prompt"',
+    !!fosField && fosField.widget === 'wd-prompt' && fosField.label === 'Field of Study');
+
+  const strayPromptInputs = scanned.fields.filter(f => {
+    const e = scanned.registry[f.id];
+    return e && e.kind === 'element' && (e.el === fosInput || e.el === skillsInput);
+  });
+  expect('the prompts\' inner <input>s are never ALSO scanned as ordinary text fields', strayPromptInputs.length === 0);
+})();
+
+// --- spinner dates: the ArrowUp technique, its retry-once path, and the masked fallback ----
+(() => {
+  const doc = dom.window.document;
+  const scanned = Scanner.scanFields(doc);
+  const monthEl = doc.getElementById('wd_start_month');
+  const yearEl = doc.getElementById('wd_start_year');
+  const myEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-date-my' && e.monthEl === monthEl);
+  expect('found the Work Experience "From" wd-date-my registry entry', !!myEntry);
+
+  // Prove the mock is genuinely adversarial: the WRONG (previously-shipped) technique —
+  // plain value + input/change — really is ignored, not just assumed to be.
+  monthEl.value = '07';
+  monthEl.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  monthEl.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  expect('the mock Workday spinner genuinely IGNORES plain value+input/change (proves the mock, not just the fix)',
+    monthEl.value !== '07');
+
+  const ok = Scanner.applyFill(myEntry, '09/2020');
+  expect('applyFill commits "09/2020" into the Month/Year spinner pair via the set-then-ArrowUp technique', ok === true);
+  expect('month spinner reads back 9', parseInt(monthEl.value, 10) === 9);
+  expect('year spinner reads back 2020', parseInt(yearEl.value, 10) === 2020);
+  expect('getCurrentValue reassembles the pair as "09/2020" (zero-padded month)', Scanner.getCurrentValue(myEntry) === '09/2020');
+
+  const okBad = Scanner.applyFill(myEntry, 'not-a-date');
+  expect('a non-MM/YYYY value is refused rather than guessed at', okBad === false);
+
+  // Year-only field whose mock spinner deliberately needs ArrowUp TWICE per unit.
+  const eduYearEl = doc.getElementById('wd_edu_from_year');
+  const yEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-date-y' && e.yearEl === eduYearEl);
+  expect('found the Education "From" wd-date-y registry entry', !!yEntry);
+  const okY = Scanner.applyFill(yEntry, '2016');
+  expect('setWorkdaySpinnerValue\'s retry-once path commits a year into a spinner that needs ArrowUp TWICE per unit', okY === true);
+  expect('year-only spinner reads back 2016', parseInt(eduYearEl.value, 10) === 2016);
+
+  const okY2 = Scanner.applyFill(yEntry, '05/2017');
+  expect('a "MM/YYYY" value sent to a wd-date-y field uses ONLY the year part',
+    okY2 === true && parseInt(eduYearEl.value, 10) === 2017);
+
+  // Masked single-input fallback (ankitsharma38).
+  const maskedEl = doc.getElementById('wd_cert_masked');
+  const maskedEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-date-my' && e.maskedEl === maskedEl);
+  expect('found the masked single-input wd-date-my registry entry', !!maskedEntry);
+
+  maskedEl.value = '11/2025'; // plain write, no preceding keydown at all
+  maskedEl.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  expect('the mock masked field genuinely IGNORES plain value+input with no preceding keydown',
+    maskedEl.value !== '11/2025');
+
+  const okMasked = Scanner.applyFill(maskedEntry, '03/2021');
+  expect('typeMaskedTextField types "03/2021" character by character (keydown/keypress/input/keyup per char)', okMasked === true);
+  expect('masked field reads back "03/2021"', maskedEl.value === '03/2021');
+})();
+
+// --- Workday guards: hard-deny-by-automation-id + never-an-arbitrary-element scope checks ---
+(() => {
+  const doc = dom.window.document;
+  // Every element this block creates goes under ONE scratch container, removed at the end —
+  // several of them are deliberately option/listbox-shaped (that's the point of the guard
+  // tests), and left sitting loose in <body> they would otherwise be picked up by a LATER
+  // test's document-wide "no scoped results found" fallback query (see fillWorkdayPromptTerm's
+  // waitFor() in scanner.js) as if they were real search results for an unrelated field.
+  const scratch = doc.createElement('div');
+  doc.body.appendChild(scratch);
+  const mk = (tag, attrs, text) => {
+    const e = doc.createElement(tag);
+    if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (text !== undefined) e.textContent = text;
+    scratch.appendChild(e);
+    return e;
+  };
+
+  // --- dropdown opener guard ---
+  const legitField = mk('div', { 'data-automation-id': 'formField-legit-test' });
+  const legitBtn = doc.createElement('button');
+  legitBtn.setAttribute('aria-haspopup', 'listbox');
+  legitBtn.textContent = 'Select One';
+  legitField.appendChild(legitBtn);
+  expect('isWorkdayDropdownOpenerSafe allows a button[aria-haspopup=listbox] inside formField-*',
+    Scanner.isWorkdayDropdownOpenerSafe(legitBtn) === true);
+
+  const trapField = mk('div', { 'data-automation-id': 'formField-trap-test' });
+  const trapBtn = doc.createElement('button');
+  trapBtn.setAttribute('aria-haspopup', 'listbox');
+  trapBtn.setAttribute('data-automation-id', 'bottom-navigation-submit-button');
+  trapBtn.textContent = 'Select One';
+  trapField.appendChild(trapBtn);
+  expect('isWorkdayDropdownOpenerSafe REFUSES a listbox-shaped button whose OWN automation id contains "bottom-navigation" (hard deny, regardless of shape)',
+    Scanner.isWorkdayDropdownOpenerSafe(trapBtn) === false);
+
+  const nextBtn = doc.createElement('button');
+  nextBtn.setAttribute('aria-haspopup', 'listbox');
+  nextBtn.setAttribute('data-automation-id', 'wd-next-button');
+  legitField.appendChild(nextBtn);
+  expect('isWorkdayDropdownOpenerSafe REFUSES an automation id containing "next" (hard deny)',
+    Scanner.isWorkdayDropdownOpenerSafe(nextBtn) === false);
+
+  expect('isWorkdayDropdownOpenerSafe REFUSES a button with no formField-* ancestor at all',
+    Scanner.isWorkdayDropdownOpenerSafe(mk('button', { 'aria-haspopup': 'listbox' }, 'Select One')) === false);
+
+  const denyTextField = mk('div', { 'data-automation-id': 'formField-deny-text' });
+  const denyTextBtn = doc.createElement('button');
+  denyTextBtn.setAttribute('aria-haspopup', 'listbox');
+  denyTextBtn.textContent = 'Submit';
+  denyTextField.appendChild(denyTextBtn);
+  expect('isWorkdayDropdownOpenerSafe REFUSES a button whose text matches the existing deny list ("Submit")',
+    Scanner.isWorkdayDropdownOpenerSafe(denyTextBtn) === false);
+
+  const disabledOpener = doc.createElement('button');
+  disabledOpener.setAttribute('aria-haspopup', 'listbox');
+  disabledOpener.disabled = true;
+  legitField.appendChild(disabledOpener);
+  expect('isWorkdayDropdownOpenerSafe REFUSES a disabled opener', Scanner.isWorkdayDropdownOpenerSafe(disabledOpener) === false);
+  expect('isWorkdayDropdownOpenerSafe REFUSES null', Scanner.isWorkdayDropdownOpenerSafe(null) === false);
+
+  // --- option guard: must look like an option AND live inside the given scope ---
+  const scopeUl = mk('ul', { role: 'listbox' });
+  const goodOption = doc.createElement('li');
+  goodOption.setAttribute('role', 'option');
+  goodOption.textContent = 'Option A';
+  scopeUl.appendChild(goodOption);
+  expect('isWorkdayOptionSafe allows role=option inside the given scope', Scanner.isWorkdayOptionSafe(goodOption, scopeUl) === true);
+
+  const outsideOption = doc.createElement('li');
+  outsideOption.setAttribute('role', 'option');
+  outsideOption.textContent = 'Option B (elsewhere on the page)';
+  scratch.appendChild(outsideOption);
+  expect('isWorkdayOptionSafe REFUSES a role=option element that is NOT inside the given scope (never an arbitrary element)',
+    Scanner.isWorkdayOptionSafe(outsideOption, scopeUl) === false);
+
+  const trapOption = doc.createElement('li');
+  trapOption.setAttribute('role', 'option');
+  trapOption.setAttribute('data-automation-id', 'bottom-navigation-submit-button');
+  trapOption.textContent = 'Option C';
+  scopeUl.appendChild(trapOption);
+  expect('isWorkdayOptionSafe REFUSES an in-scope role=option whose automation id contains "bottom-navigation" (hard deny)',
+    Scanner.isWorkdayOptionSafe(trapOption, scopeUl) === false);
+
+  const notOptionShaped = doc.createElement('li');
+  notOptionShaped.textContent = 'Not option-shaped';
+  scopeUl.appendChild(notOptionShaped);
+  expect('isWorkdayOptionSafe REFUSES an in-scope element with no role=option / promptOption / checkboxItem shape',
+    Scanner.isWorkdayOptionSafe(notOptionShaped, scopeUl) === false);
+
+  const promptOptionShaped = doc.createElement('div');
+  promptOptionShaped.setAttribute('data-automation-id', 'promptOption-3');
+  promptOptionShaped.textContent = 'Prompt option';
+  scopeUl.appendChild(promptOptionShaped);
+  expect('isWorkdayOptionSafe allows a data-automation-id*=promptOption element (role=option not required)',
+    Scanner.isWorkdayOptionSafe(promptOptionShaped, scopeUl) === true);
+  expect('isWorkdayOptionSafe REFUSES null', Scanner.isWorkdayOptionSafe(null, scopeUl) === false);
+
+  // --- spinner input guard ---
+  const dateField = mk('div', { 'data-automation-id': 'formField-guard-date' });
+  const wrapper = doc.createElement('div');
+  wrapper.setAttribute('data-automation-id', 'dateInputWrapper');
+  dateField.appendChild(wrapper);
+  const monthGuardIn = doc.createElement('input');
+  monthGuardIn.setAttribute('aria-label', 'Month');
+  wrapper.appendChild(monthGuardIn);
+  const yearGuardIn = doc.createElement('input');
+  yearGuardIn.setAttribute('aria-label', 'Year');
+  wrapper.appendChild(yearGuardIn);
+  expect('isWorkdaySpinnerInputSafe allows input[aria-label=Month] inside dateInputWrapper',
+    Scanner.isWorkdaySpinnerInputSafe(monthGuardIn) === true);
+  expect('isWorkdaySpinnerInputSafe allows input[aria-label=Year] inside dateInputWrapper',
+    Scanner.isWorkdaySpinnerInputSafe(yearGuardIn) === true);
+
+  const outsideMonth = doc.createElement('input');
+  outsideMonth.setAttribute('aria-label', 'Month');
+  scratch.appendChild(outsideMonth);
+  expect('isWorkdaySpinnerInputSafe REFUSES an aria-label=Month input that is NOT inside a dateInputWrapper',
+    Scanner.isWorkdaySpinnerInputSafe(outsideMonth) === false);
+
+  const wrongLabel = doc.createElement('input');
+  wrongLabel.setAttribute('aria-label', 'Day');
+  wrapper.appendChild(wrongLabel);
+  expect('isWorkdaySpinnerInputSafe REFUSES aria-label values other than exactly "Month"/"Year"',
+    Scanner.isWorkdaySpinnerInputSafe(wrongLabel) === false);
+
+  const trapWrapper = doc.createElement('div');
+  trapWrapper.setAttribute('data-automation-id', 'dateInputWrapper');
+  dateField.appendChild(trapWrapper);
+  const trapMonth = doc.createElement('input');
+  trapMonth.setAttribute('aria-label', 'Month');
+  trapMonth.setAttribute('data-automation-id', 'wd-save-and-continue');
+  trapWrapper.appendChild(trapMonth);
+  expect('isWorkdaySpinnerInputSafe REFUSES an aria-label=Month input whose OWN automation id contains "save" (hard deny)',
+    Scanner.isWorkdaySpinnerInputSafe(trapMonth) === false);
+
+  monthGuardIn.disabled = true;
+  expect('isWorkdaySpinnerInputSafe REFUSES a disabled spinner input', Scanner.isWorkdaySpinnerInputSafe(monthGuardIn) === false);
+  monthGuardIn.disabled = false;
+  expect('isWorkdaySpinnerInputSafe REFUSES null', Scanner.isWorkdaySpinnerInputSafe(null) === false);
+
+  // --- masked date input guard: only safe when its wrapper holds exactly ONE input ---
+  const maskedWrapper = doc.createElement('div');
+  maskedWrapper.setAttribute('data-automation-id', 'dateInputWrapper');
+  const maskedGuardIn = doc.createElement('input');
+  maskedWrapper.appendChild(maskedGuardIn);
+  scratch.appendChild(maskedWrapper);
+  expect('isWorkdayMaskedDateInputSafe allows the single <input> in an otherwise-empty dateInputWrapper',
+    Scanner.isWorkdayMaskedDateInputSafe(maskedGuardIn) === true);
+  const extraIn = doc.createElement('input');
+  maskedWrapper.appendChild(extraIn);
+  expect('isWorkdayMaskedDateInputSafe REFUSES it once the SAME wrapper holds a second <input> (a real Month/Year pair, not a masked fallback)',
+    Scanner.isWorkdayMaskedDateInputSafe(maskedGuardIn) === false);
+  maskedWrapper.removeChild(extraIn);
+
+  // --- prompt input guard ---
+  const promptField = mk('div', { 'data-automation-id': 'formField-guard-prompt' });
+  const msContainer = doc.createElement('div');
+  msContainer.setAttribute('data-automation-id', 'multiSelectContainer');
+  promptField.appendChild(msContainer);
+  const promptGuardIn = doc.createElement('input');
+  msContainer.appendChild(promptGuardIn);
+  expect('isWorkdayPromptInputSafe allows an <input> inside multiSelectContainer inside formField-*',
+    Scanner.isWorkdayPromptInputSafe(promptGuardIn) === true);
+
+  const orphanPromptIn = doc.createElement('input');
+  scratch.appendChild(orphanPromptIn);
+  expect('isWorkdayPromptInputSafe REFUSES an <input> with no multiSelectContainer ancestor',
+    Scanner.isWorkdayPromptInputSafe(orphanPromptIn) === false);
+
+  scratch.remove();
+})();
+
+// --- Workday dropdown + prompt + résumé, run STRICTLY SEQUENTIALLY -----------------------
+// One combined async block, each step awaited before the next starts — deliberately mirroring
+// how content.js's applyFills() now processes real fills (one field at a time, never
+// concurrently; see content.js). Running these as independent, concurrently-interleaving
+// pending promises is not just unrealistic, it is actively wrong for this suite: the dropdown
+// and prompt widgets share the SAME document-wide `[role="option"]`/promptOption fallback
+// query (see fillWorkdayDropdown/fillWorkdayPromptTerm's waitFor() in scanner.js), so two of
+// these tests genuinely racing would let one widget's popup answer another's query.
+pending.push((async () => {
+  const doc = dom.window.document;
+
+  // ---- dropdown: degree/country synonyms, no-blind-first-option, Escape-to-close ----
+  {
+    const scanned = Scanner.scanFields(doc);
+    const degreeBtn = doc.getElementById('wd_degree_button');
+    const degreeEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-dropdown' && e.button === degreeBtn);
+    expect('found the Degree wd-dropdown registry entry', !!degreeEntry);
+
+    const ok = await Scanner.applyFill(degreeEntry, 'MS');
+    expect('applyFill on a wd-dropdown resolves to a boolean', typeof ok === 'boolean');
+    expect('Degree dropdown filled by synonym "MS" resolves via the master-degree family to "Masters Degree or Equivalent"',
+      ok === true && doc.getElementById('wd_degree_button_text').textContent === 'Masters Degree or Equivalent');
+
+    const okBE = await Scanner.applyFill(degreeEntry, 'B.E.');
+    expect('Degree dropdown filled by synonym "B.E." (dots normalised away) resolves via the bachelor-degree family',
+      okBE === true && doc.getElementById('wd_degree_button_text').textContent === 'Bachelors Degree or Equivalent');
+
+    const okBad = await Scanner.applyFill(degreeEntry, 'Xyzzy Nonexistent Degree');
+    expect('a Degree value with no matching option (exact, family, or contains) selects NOTHING — never falls back to the first option',
+      okBad === false && doc.getElementById('wd_degree_button_text').textContent === 'Bachelors Degree or Equivalent');
+    expect('the dropdown popup is closed (Escape) after a failed match, not left open',
+      doc.getElementById('wd_degree_listbox').style.display !== 'block');
+
+    const countryBtn = doc.getElementById('wd_country_button');
+    const countryEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-dropdown' && e.button === countryBtn);
+    const okCountry = await Scanner.applyFill(countryEntry, 'USA');
+    expect('Country dropdown filled by alias "USA" resolves to "United States of America"',
+      okCountry === true && doc.getElementById('wd_country_button_text').textContent === 'United States of America');
+  }
+
+  // ---- prompt: exact/acronym/startsWith/substring matching, no-blind-first-result,
+  //      the Skills LIST (skip-and-continue on a per-term basis) ----
+  {
+    const scanned = Scanner.scanFields(doc);
+    const fosInput = doc.getElementById('wd_fos_input');
+    const fosEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-prompt' && e.input === fosInput);
+    expect('found the Field of Study wd-prompt registry entry', !!fosEntry);
+    const fosSelected = () => Array.from(doc.querySelectorAll('#wd_fos_selected li')).map(li => li.textContent);
+
+    const ok = await Scanner.applyFill(fosEntry, 'Computer Science');
+    expect('Field of Study: exact match "Computer Science" is added to the selected item list',
+      ok === true && fosSelected().includes('Computer Science'));
+    expect('the prompt input is cleared after a successful add', fosInput.value === '');
+
+    const okBad = await Scanner.applyFill(fosEntry, 'Zoology');
+    expect('Field of Study: a term with NO confident match among the (non-empty) results selects NOTHING',
+      okBad === false && fosSelected().length === 1 && !fosSelected().includes('Zoology'));
+    expect('the typed text is cleared (not left sitting in the field) after no confident match', fosInput.value === '');
+
+    const skillsInput = doc.getElementById('wd_skills_input');
+    const skillsEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-prompt' && e.input === skillsInput);
+    const skillsSelected = () => Array.from(doc.querySelectorAll('#wd_skills_selected li')).map(li => li.textContent);
+    const okSkills = await Scanner.applyFill(skillsEntry, ['SQL', 'Excel', 'Python']);
+    expect('Skills LIST: "SQL" matches via the acronym form "(SQL)" in "Structured Query Language (SQL)"',
+      skillsSelected().includes('Structured Query Language (SQL)'));
+    expect('Skills LIST: "Excel" (no matching option) is skipped, never force-matched to anything',
+      !skillsSelected().some(t => /excel/i.test(t)));
+    expect('Skills LIST: "Python" (exact match) still gets added after the earlier skip (skip-and-continue, not stop-on-first-failure)',
+      skillsSelected().includes('Python'));
+    expect('Skills LIST applyFill reports overall success once at least one skill matched', okSkills === true);
+    expect('Skills rows use checkboxItem automation ids, clicked via the checkbox itself',
+      doc.querySelectorAll('#wd_skills_results [data-automation-id^="checkboxItem-"]').length > 0);
+  }
+
+  // ---- résumé: duplicate prevention (own isolated JSDOM -- no interference with the shared
+  //      test-page.html document, same discipline as the other isolated résumé tests above) ----
+  {
+    const freshDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+    freshDom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+      return { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 };
+    };
+    const fdoc = freshDom.window.document;
+
+    const container = fdoc.createElement('div');
+    container.setAttribute('data-automation-id', 'formField-wd-resume');
+    const input = fdoc.createElement('input');
+    input.type = 'file';
+    input.id = 'dup_resume_input';
+    container.appendChild(input);
+    fdoc.body.appendChild(container);
+
+    expect('findWorkdayUploadedFilename() finds nothing before any upload', Scanner.findWorkdayUploadedFilename(fdoc) === '');
+
+    const file = new freshDom.window.File(['hello'], 'my-resume.pdf', { type: 'application/pdf' });
+    const before = await Scanner.attachResumeFile(fdoc, file);
+    expect('attachResumeFile() with no existing upload does not report alreadyAttached (still fails soft — jsdom has no DataTransfer)',
+      !!before && !before.alreadyAttached);
+
+    // Simulate Workday's own UI already showing a file (as if a previous attach succeeded).
+    const item = fdoc.createElement('div');
+    item.setAttribute('data-automation-id', 'file-upload-item');
+    const nameEl = fdoc.createElement('div');
+    nameEl.setAttribute('data-automation-id', 'file-upload-item-name');
+    nameEl.textContent = 'already-attached.pdf';
+    item.appendChild(nameEl);
+    fdoc.body.appendChild(item);
+
+    expect('findWorkdayUploadedFilename() now finds the already-attached filename',
+      Scanner.findWorkdayUploadedFilename(fdoc) === 'already-attached.pdf');
+
+    const dup = await Scanner.attachResumeFile(fdoc, file);
+    expect('attachResumeFile() refuses to attach again once a résumé is already shown as attached (duplicate prevention — uploading twice is worse than not uploading)',
+      dup && dup.attempted === true && dup.attached === false && dup.alreadyAttached === true);
+    expect('the duplicate-prevention reason names the already-attached file',
+      dup && /already-attached\.pdf/.test(dup.reason || ''));
+  }
+
+  // ---- résumé: the MutationObserver-driven upload-confirmation wait ----
+  // The part of the résumé fix jsdom genuinely cannot exercise end-to-end via
+  // attachResumeFile() itself (no DataTransfer at all — see the pre-existing "fail-soft guard"
+  // test above), so it is tested directly against the exported wait/detection helpers, which
+  // only ever READ the DOM and don't care how a file-upload-item-name element got there.
+  {
+    const freshDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+    const fdoc = freshDom.window.document;
+
+    const neverAppears = await Scanner.waitForWorkdayUploadSuccess(fdoc, 'resume.pdf', 150);
+    expect('waitForWorkdayUploadSuccess() resolves false after its own timeout when nothing ever appears', neverAppears === false);
+
+    setTimeout(() => {
+      const nameEl = fdoc.createElement('div');
+      nameEl.setAttribute('data-automation-id', 'file-upload-item-name');
+      nameEl.textContent = 'resume.pdf (204 KB)';
+      fdoc.body.appendChild(nameEl);
+    }, 40);
+    const found = await Scanner.waitForWorkdayUploadSuccess(fdoc, 'resume.pdf', 2000);
+    expect('waitForWorkdayUploadSuccess() resolves true once its MutationObserver sees a matching file-upload-item-name appear (a 40ms-delayed append, well inside its budget)',
+      found === true);
+  }
+  {
+    const freshDom = new JSDOM('<!DOCTYPE html><body><div data-automation-id="file-upload-successful"></div></body>', { pretendToBeVisual: true });
+    const fdoc = freshDom.window.document;
+    const found = await Scanner.waitForWorkdayUploadSuccess(fdoc, 'anything.pdf', 100);
+    expect('workdayUploadIndicatesSuccess() also short-circuits true via the explicit file-upload-successful marker alone', found === true);
+  }
+
+  // ---- decoy submit button: a REAL trap, and proof nothing above ever reached it ----
+  // Runs last, in the same sequential chain, so this checks the shared document's submit
+  // counter only AFTER every dropdown/prompt interaction above has fully settled.
+  {
+    expect('none of the Workday widget fills above ever triggered the real Workday submit button',
+      !dom.window.__WD_SUBMIT_COUNT__);
+
+    const wdSubmitBtn = doc.getElementById('wd_submit_btn');
+    expect('the Workday decoy submit button is a genuine submit control with a form owner',
+      wdSubmitBtn.type === 'submit' && !!wdSubmitBtn.form && wdSubmitBtn.form.id === 'wd-form');
+    expect('isWorkdayDropdownOpenerSafe REFUSES it (no aria-haspopup=listbox at all)',
+      Scanner.isWorkdayDropdownOpenerSafe(wdSubmitBtn) === false);
+    expect('isAddAnotherButtonSafe ALSO refuses it (its text does not read as an add action)',
+      Scanner.isAddAnotherButtonSafe(wdSubmitBtn) === false);
+
+    // Bypassing every guard and clicking it directly (simulating "a bug let this through") DOES
+    // submit — proving it is a real hazard, exactly like the pre-existing trap-form fixture.
+    wdSubmitBtn.click();
+    expect('bypassing every guard and clicking the Workday decoy submit button directly DOES fire its form\'s submit handler',
+      dom.window.__WD_SUBMIT_COUNT__ === 1);
+  }
+})());
+
+Promise.all(pending).then(() => {
+  let failed = 0;
+  console.log('\n--- checks ---');
+  for (const c of checks) {
+    console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}`);
+    if (!c.pass) failed++;
+  }
+  console.log(`\n${checks.length - failed}/${checks.length} checks passed.`);
+  process.exit(failed ? 1 : 0);
+}, (e) => {
+  console.error('An async check threw:', e);
+  process.exit(1);
+});

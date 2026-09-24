@@ -202,6 +202,13 @@
    * Applies the /resolve response. Only entries with auto_fill:true are ever written to the
    * DOM. Everything else (skipped fields, and any fill the service marked auto_fill:false)
    * is highlighted amber for the human's attention but left untouched.
+   *
+   * Fills are applied ONE AT A TIME, in order, awaiting each before starting the next — never
+   * concurrently. Most widgets are synchronous (ApplyPilotScanner.applyFill() returns a plain
+   * boolean for them, unchanged), but the two Workday popup widgets (wd-dropdown, wd-prompt)
+   * return a Promise instead, since each has to open a popup and wait for Workday's own UI to
+   * catch up before the next field is safe to touch (see scanner.js's applyFill()). Wrapping
+   * every result in Promise.resolve() lets this loop treat both shapes identically.
    */
   function applyFills(fills, skipped) {
     fills = fills || [];
@@ -209,48 +216,62 @@
     var applied = [];
     var failed = [];
 
-    for (var i = 0; i < fills.length; i++) {
+    function step(i) {
+      if (i >= fills.length) return Promise.resolve();
       var fill = fills[i];
       var entry = registry[fill.id];
       if (!entry) {
         failed.push({ id: fill.id, reason: 'Field no longer found on the page (did the page change after scanning?)' });
-        continue;
+        return step(i + 1);
       }
       if (!fill.auto_fill) {
         // The service found a candidate but didn't clear it for auto-fill (e.g. low
         // confidence). Treat exactly like a skip: highlight, never write.
         var targets = ApplyPilotScanner.getHighlightTargets(entry);
         for (var t = 0; t < targets.length; t++) highlight(targets[t], 'skipped', fill.reason || 'Not confident enough to auto-fill');
-        continue;
+        return step(i + 1);
       }
+
       try {
         priorValues[fill.id] = ApplyPilotScanner.getCurrentValue(entry);
-        var ok = ApplyPilotScanner.applyFill(entry, fill.value);
-        var hlTargets = ApplyPilotScanner.getHighlightTargets(entry);
-        var isDraft = !!fill.draft || fill.source === 'draft';
-        if (ok) {
-          var reasonText = (fill.reason || 'Filled') + (fill.profile_key ? ' [' + fill.profile_key + ']' : '');
-          if (isDraft) reasonText += ' — drafted — review before submitting';
-          for (var h = 0; h < hlTargets.length; h++) highlight(hlTargets[h], isDraft ? 'draft' : 'filled', reasonText);
-          applied.push({ id: fill.id, value: fill.value, reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft });
-        } else {
-          for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Could not match "' + fill.value + '" to an option');
-          failed.push({ id: fill.id, reason: 'Could not match value "' + fill.value + '" to an option on the page' });
-        }
       } catch (e) {
-        failed.push({ id: fill.id, reason: 'Error while filling: ' + (e && e.message ? e.message : String(e)) });
+        priorValues[fill.id] = undefined;
       }
+
+      return Promise.resolve()
+        .then(function () { return ApplyPilotScanner.applyFill(entry, fill.value); })
+        .then(function (ok) {
+          var hlTargets = ApplyPilotScanner.getHighlightTargets(entry);
+          var isDraft = !!fill.draft || fill.source === 'draft';
+          if (ok) {
+            var reasonText = (fill.reason || 'Filled') + (fill.profile_key ? ' [' + fill.profile_key + ']' : '');
+            if (isDraft) reasonText += ' — drafted — review before submitting';
+            for (var h = 0; h < hlTargets.length; h++) highlight(hlTargets[h], isDraft ? 'draft' : 'filled', reasonText);
+            applied.push({ id: fill.id, value: fill.value, reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft });
+          } else {
+            // entry._lastReason is set by scanner.js's applyFill() for the Workday popup
+            // widgets (e.g. "no confident match for ... among dropdown options") — surface it
+            // when present rather than only the generic message.
+            var extra = entry._lastReason ? (' — ' + entry._lastReason) : '';
+            for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Could not match "' + fill.value + '" to an option' + extra);
+            failed.push({ id: fill.id, reason: 'Could not match value "' + fill.value + '" to an option on the page' + extra });
+          }
+        }, function (e) {
+          failed.push({ id: fill.id, reason: 'Error while filling: ' + (e && e.message ? e.message : String(e)) });
+        })
+        .then(function () { return step(i + 1); });
     }
 
-    for (var s = 0; s < skipped.length; s++) {
-      var skip = skipped[s];
-      var sEntry = registry[skip.id];
-      if (!sEntry) continue;
-      var sTargets = ApplyPilotScanner.getHighlightTargets(sEntry);
-      for (var st = 0; st < sTargets.length; st++) highlight(sTargets[st], 'skipped', skip.reason || 'Skipped — please answer this yourself');
-    }
-
-    return { applied: applied, failed: failed, skippedCount: skipped.length };
+    return step(0).then(function () {
+      for (var s = 0; s < skipped.length; s++) {
+        var skip = skipped[s];
+        var sEntry = registry[skip.id];
+        if (!sEntry) continue;
+        var sTargets = ApplyPilotScanner.getHighlightTargets(sEntry);
+        for (var st = 0; st < sTargets.length; st++) highlight(sTargets[st], 'skipped', skip.reason || 'Skipped — please answer this yourself');
+      }
+      return { applied: applied, failed: failed, skippedCount: skipped.length };
+    });
   }
 
   function base64ToUint8Array(base64) {
@@ -299,13 +320,22 @@
         return fail('Could not decode the résumé file from the service response.');
       }
 
-      var result = ApplyPilotScanner.attachResumeFile(document, file);
-      if (result.attached) {
-        highlight(target.el, 'filled', 'Résumé attached: ' + result.filename);
-      } else if (result.attempted) {
-        highlight(target.el, 'skipped', 'Résumé not attached — ' + (result.reason || 'unknown error'));
-      }
-      return result;
+      // attachResumeFile() now always returns a Promise: on a real Workday page it consumes
+      // the File and empties input.files right away, so the only honest way to verify success
+      // is a short wait for Workday's own upload-confirmation markers (see scanner.js) —
+      // that's async, so this whole path has to be too.
+      return ApplyPilotScanner.attachResumeFile(document, file).then(function (result) {
+        if (result.attached) {
+          highlight(target.el, 'filled', 'Résumé attached: ' + result.filename);
+        } else if (result.alreadyAttached) {
+          // Duplicate prevention: a résumé was already shown as attached, so nothing was
+          // touched — this is a success state, not a failure, and must not be re-uploaded.
+          highlight(target.el, 'filled', 'Résumé already attached: ' + (result.filename || ''));
+        } else if (result.attempted) {
+          highlight(target.el, 'skipped', 'Résumé not attached — ' + (result.reason || 'unknown error'));
+        }
+        return result;
+      });
     }, function (e) {
       return fail('Could not reach the background worker for the résumé file: ' + (e && e.message ? e.message : e));
     });
@@ -334,10 +364,21 @@
     if (!msg || typeof msg !== 'object') return false;
 
     if (msg.type === 'APPLY_FILLS') {
-      // Async: applying the field fills themselves is synchronous, but the
-      // résumé step needs a round-trip to the background worker for the file
-      // bytes (see maybeAttachResume). Returning true below keeps the message
-      // channel open for this promise chain.
+      // Belt and braces for the WHOLE fill, not just section expansion: every one of the new
+      // Workday interaction paths (dropdown opener, option, prompt result, date spinner) is a
+      // dispatched event that could, if some future bug mis-targeted it, land on a submit
+      // control. Installed before the first field is touched and removed in a `finally`
+      // (the .then(...).then(...) pair below, run unconditionally) so it spans every fill,
+      // the résumé attachment, and any error path. Reuses the SAME shieldFired channel the
+      // popup already surfaces for section expansion (see popup.js).
+      var shieldFired = false;
+      var removeShield = ApplyPilotScanner.installSubmitShield(document, function () { shieldFired = true; });
+
+      // Async: applying the field fills themselves is mostly synchronous, but the new Workday
+      // popup widgets (dropdown/prompt) each wait for their own popup, and the résumé step
+      // needs a round-trip to the background worker for the file bytes (see
+      // maybeAttachResume). Returning true below keeps the message channel open for this
+      // promise chain.
       Promise.resolve()
         .then(function () { return applyFills(msg.fills, msg.skipped); })
         .then(function (result) {
@@ -346,8 +387,16 @@
             return result;
           });
         })
-        .then(sendResponse, function (e) {
-          sendResponse({ error: String(e && e.message ? e.message : e) });
+        .then(function (result) {
+          result.shieldFired = shieldFired;
+          return result;
+        })
+        .catch(function (e) {
+          return { error: String(e && e.message ? e.message : e), shieldFired: shieldFired };
+        })
+        .then(function (result) {
+          removeShield();
+          sendResponse(result);
         });
       return true;
     }
