@@ -343,7 +343,11 @@ def test_workday_work_experience_1_fills_from_first_position():
     assert fills["current"].value == "true"
     assert fills["from"].value == "03/2022"
     assert fills["to"].value == ""  # current position -> end date left blank
-    assert fills["description"].value == "Led design for the core product."
+    # Normalised to a bullet at fill time -- WORKDAY_PROFILE stores a plain
+    # sentence (simulating a profile saved before import-time normalisation
+    # existed); the stored profile itself is untouched (see structured.py's
+    # own tests for that).
+    assert fills["description"].value == "- Led design for the core product."
     for f in fills.values():
         assert f.source == "structured"
         assert f.auto_fill is True
@@ -358,7 +362,7 @@ def test_workday_work_experience_2_fills_from_second_position():
     assert fills["current"].value == "false"
     assert fills["from"].value == "06/2018"
     assert fills["to"].value == "02/2022"
-    assert fills["description"].value == "Owned onboarding flows."
+    assert fills["description"].value == "- Owned onboarding flows."
 
 
 def test_workday_work_experience_3_all_skip_never_wraps_to_position_1():
@@ -512,6 +516,60 @@ def test_secret_field_never_reaches_answer_bank_or_draft(monkeypatch, tmp_path):
     result = resolve.resolve_field(_field(label="Password", type="password"), PROFILE, answer_cache=cache)
     assert isinstance(result, SkipResult)
     assert result.source == "secret_guard"
+
+
+def test_gpa_never_reaches_answer_bank_or_draft_when_profile_has_no_education(monkeypatch, tmp_path):
+    """The non-negotiable: GPA is a factual claim about the applicant's
+    academic record -- it must only ever come from the profile, never the
+    answer bank or a draft, even with both tiers on and a bank primed with
+    a tempting, wrong answer to this exact question."""
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+
+    def _explode(q, c):
+        raise AssertionError("a GPA question must never reach the LLM")
+
+    monkeypatch.setattr(answers, "_real_llm_fn", _explode)
+    bank = tmp_path / "bank.json"
+    bank.write_text('[{"q": "What is your GPA?", "a": "4.0"}]', encoding="utf-8")
+    cache = answers.make_cache(PROFILE, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(label="Cumulative GPA", section="Education 1", section_index=1),
+        PROFILE,  # no education[] at all
+        answer_cache=cache,
+    )
+    assert isinstance(result, SkipResult)
+    assert result.source == "structured"
+    assert result.source not in ("answer_bank", "draft")
+
+
+def test_gpa_never_reaches_answer_bank_or_draft_when_not_set_on_the_matched_entry(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+
+    def _explode(q, c):
+        raise AssertionError("a GPA question must never reach the LLM")
+
+    monkeypatch.setattr(answers, "_real_llm_fn", _explode)
+    bank = tmp_path / "bank.json"
+    bank.write_text('[{"q": "What is your GPA?", "a": "4.0"}]', encoding="utf-8")
+    profile = {**PROFILE, "education": [{"school": "State University", "degree": "B.S.", "gpa": ""}]}
+    cache = answers.make_cache(profile, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(label="GPA", section="Education 1", section_index=1), profile, answer_cache=cache,
+    )
+    assert isinstance(result, SkipResult)
+    assert result.source == "structured"
+
+
+def test_gpa_fills_from_profile_through_the_full_ladder():
+    profile = {**PROFILE, "education": [{"school": "State University", "degree": "B.S.", "gpa": "3.8/4.0"}]}
+    result = resolve.resolve_field(_field(label="GPA", section="Education 1", section_index=1), profile)
+    assert isinstance(result, FillResult)
+    assert result.value == "3.8/4.0"
+    assert result.source == "structured"
 
 
 def test_resolve_fields_batch_shares_one_draft_cap_across_the_request(monkeypatch, tmp_path):

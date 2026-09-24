@@ -502,6 +502,91 @@ def test_profile_full_ambiguous_without_active_profile_is_409(tmp_path):
     assert resp.status_code == 409
 
 
+# --- GET /profile/counts: repeating-block counts for the extension ----------
+
+
+def test_profile_counts_reports_full_profile(tmp_path):
+    _legacy_root(tmp_path, {
+        "work_history": [{"title": "A"}, {"title": "B"}, {"title": "C"}],
+        "education": [{"school": "X"}, {"school": "Y"}],
+    })
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/counts", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert resp.json() == {"work_history": 3, "education": 2}
+
+
+def test_profile_counts_reports_zero_for_missing_sections(tmp_path):
+    _legacy_root(tmp_path, {"personal": {"full_name": "Nida Shah"}})
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/counts", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert resp.json() == {"work_history": 0, "education": 0}
+
+
+def test_profile_counts_reports_zero_for_brand_new_install(tmp_path):
+    # No profile.json at all yet -- must not raise, just report zero.
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/counts", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    assert resp.json() == {"work_history": 0, "education": 0}
+
+
+def test_profile_counts_never_includes_values_only_counts(tmp_path):
+    _legacy_root(tmp_path, {
+        "work_history": [{"title": "Senior Product Designer", "company": "Acme"}],
+        "education": [],
+    })
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/counts", headers={"X-ApplyPilot-Token": token})
+    body = resp.json()
+    assert set(body.keys()) == {"work_history", "education"}
+    assert "Acme" not in json.dumps(body)
+
+
+def test_profile_counts_requires_token(tmp_path):
+    _legacy_root(tmp_path)
+    app, _token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/counts")
+    assert resp.status_code == 401
+
+
+def test_profile_counts_follows_active_profile_switch_without_restart(tmp_path):
+    _multiprofile_root(
+        tmp_path,
+        {
+            "nida": {"work_history": [{"title": "A"}], "education": [{"school": "X"}, {"school": "Y"}]},
+            "adwait": {"work_history": [{"title": "A"}, {"title": "B"}], "education": []},
+        },
+        active="nida",
+    )
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    headers = {"X-ApplyPilot-Token": token}
+
+    resp = client.get("/profile/counts", headers=headers)
+    assert resp.json() == {"work_history": 1, "education": 2}
+
+    activate = client.post("/profiles/adwait/activate", headers=headers)
+    assert activate.status_code == 200
+
+    resp2 = client.get("/profile/counts", headers=headers)
+    assert resp2.json() == {"work_history": 2, "education": 0}
+
+
+def test_profile_counts_ambiguous_without_active_profile_is_409(tmp_path):
+    _multiprofile_root(tmp_path, {"nida": FULL_PROFILE, "adwait": FULL_PROFILE}, active=None)
+    app, token = _disk_app(tmp_path)
+    client = TestClient(app)
+    resp = client.get("/profile/counts", headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 409
+
+
 # --- POST /profile: the secret round-trip bug -------------------------------
 
 

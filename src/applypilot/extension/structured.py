@@ -28,12 +28,29 @@ data to answer from. So the rule here is conservative on purpose:
 * A profile with no ``work_history``/``education`` at all behaves exactly
   as it did before this tier existed: this module returns ``None`` (not a
   skip) so the field falls through to Laya/unresolved and gets the same
-  generic message it always got.
+  generic message it always got. GPA is the one deliberate exception (see
+  below) -- it is a factual claim about the applicant's record, so a GPA
+  question must never fall through to Laya/answer-bank/draft even when the
+  profile has no education data at all to answer it from.
+* A work-history "description" is normalised to bullet lines at fill time
+  (``resume_import._normalize_description``, reused rather than
+  reimplemented) -- profiles imported before that normalisation existed
+  still hold a single paragraph on disk, and this tier's job is to fill the
+  form correctly regardless of when the profile was written, without ever
+  rewriting the profile itself.
+* GPA is only ever filled from a matching ``education[]`` entry, exactly
+  like school/degree/field -- never from the answer bank or a draft (those
+  tiers run after this one and are never even reached once this tier
+  recognises a field as a GPA question). If the form states a scale
+  ("GPA out of 4.0") that does not match the stored value's own scale, the
+  field is skipped with a clear reason rather than converted -- converting
+  grade scales is a judgment call this tier does not make.
 """
 from __future__ import annotations
 
 import re
 
+from applypilot.extension.resume_import import _normalize_description
 from applypilot.extension.schema import FieldDescriptor, FillResult, SkipResult
 
 # ---------------------------------------------------------------------------
@@ -54,7 +71,9 @@ _WORK_KIND_HINT_RE = re.compile(
     r"\bjob\s*title\b|\brole\s*description\b|\bcompany\b|\bemployer\b", re.I
 )
 _EDU_KIND_HINT_RE = re.compile(
-    r"\bschool\b|\buniversity\b|\bcollege\b|\bdegree\b|\bfield\s*of\s*study\b", re.I
+    r"\bschool\b|\buniversity\b|\bcollege\b|\bdegree\b|\bfield\s*of\s*study\b"
+    r"|\bgpa\b|\bgrade\s*point\s*average\b",
+    re.I,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,9 +99,44 @@ _EDU_SLOTS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bschool\b|\buniversity\b|\bcollege\b|\binstitution\b", re.I), "school"),
     (re.compile(r"\bdegree\b", re.I), "degree"),
     (re.compile(r"\bfield\s*of\s*study\b|\bmajor\b|\bdiscipline\b", re.I), "field"),
+    (re.compile(r"\bgpa\b|\bgrade\s*point\s*average\b", re.I), "gpa"),
     (re.compile(r"\bfrom\b|\bstart\s*date\b", re.I), "start"),
     (re.compile(r"\bto\b|\bend\s*date\b", re.I), "end"),
 ]
+
+# A scale the FORM explicitly states it wants ("GPA out of 4.0", "GPA/4.0",
+# "4.0-point scale") -- checked against the stored value's own scale before
+# filling. Deliberately narrow: only an explicit denominator on the field
+# side counts, never an inference, since the whole point is to never
+# convert between scales.
+_GPA_FIELD_SCALE_RE = re.compile(
+    r"\bout\s*of\s*(\d{1,2}(?:\.\d+)?)\b"
+    r"|\bgpa\s*/\s*(\d{1,2}(?:\.\d+)?)\b"
+    r"|(\d{1,2}(?:\.\d+)?)\s*[- ]?point\s*scale\b",
+    re.I,
+)
+
+# The stored value's own scale, when the résumé/profile stated one
+# ("8.9/10"). No "/" at all means the profile's default scale, 4.0 -- see
+# resume_import._validate_gpa, which enforces that same default at import
+# time.
+_GPA_STORED_SCALE_RE = re.compile(r"^\s*\d{1,2}(?:\.\d+)?\s*/\s*(\d{1,2}(?:\.\d+)?)\s*$")
+_DEFAULT_GPA_SCALE = 4.0
+
+
+def _requested_gpa_scale(haystack: str) -> float | None:
+    m = _GPA_FIELD_SCALE_RE.search(haystack)
+    if not m:
+        return None
+    for g in m.groups():
+        if g:
+            return float(g)
+    return None
+
+
+def _stored_gpa_scale(value: str) -> float:
+    m = _GPA_STORED_SCALE_RE.match(value)
+    return float(m.group(1)) if m else _DEFAULT_GPA_SCALE
 
 _TRAILING_DIGITS_RE = re.compile(r"(\d+)\s*$")
 
@@ -197,6 +251,19 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
 
     records = _records_for(kind, profile)
     if not records:
+        if kind == "education" and slot == "gpa":
+            # GPA is a factual claim about the applicant's record: it must
+            # only ever come from the profile, never the answer bank or a
+            # draft. Unlike every other slot, a GPA question this tier
+            # recognises stays terminal even with zero education data, so
+            # it can never fall through to a lower tier that would invent
+            # or fuzzy-match an answer instead.
+            return SkipResult(
+                id=field.id,
+                source="structured",
+                reason="no education on file to answer a GPA question — never guessed, never sourced elsewhere",
+                auto_fill=False,
+            )
         # No data at all for this kind -> defer, unchanged from pre-tier-3
         # behaviour (the generic "no deterministic match" skip downstream).
         return None
@@ -240,6 +307,38 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
             reason=f"structured match: {kind_label}[{idx + 1}] is current — end date left blank",
         )
 
+    if slot == "gpa":
+        raw = record.get("gpa")
+        if raw is None or raw == "":
+            return SkipResult(
+                id=field.id,
+                source="structured",
+                reason=f"matched your {_ordinal(idx + 1)} {kind_label} entry but gpa is not set",
+                auto_fill=False,
+            )
+        requested_scale = _requested_gpa_scale(haystack)
+        if requested_scale is not None:
+            stored_scale = _stored_gpa_scale(str(raw))
+            if abs(stored_scale - requested_scale) > 1e-9:
+                return SkipResult(
+                    id=field.id,
+                    source="structured",
+                    reason=(
+                        f"your stored GPA is on a {stored_scale:g} scale but this form "
+                        f"asks for one out of {requested_scale:g} — not converting, fill in manually"
+                    ),
+                    auto_fill=False,
+                )
+        return FillResult(
+            id=field.id,
+            value=str(raw),
+            source="structured",
+            profile_key=base_key,
+            confidence=1.0 if explicit else 0.9,
+            auto_fill=True,
+            reason=f"structured match: {kind_label}[{idx + 1}].gpa",
+        )
+
     raw = record.get(slot)
     if raw is None or raw == "":
         return SkipResult(
@@ -252,6 +351,12 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
     value = str(raw)
     if slot in ("start", "end"):
         value = _format_date(value, field)
+    elif slot == "description":
+        # Reused verbatim from the résumé-import pipeline (never a second
+        # implementation) so profiles saved before that normalisation
+        # existed still fill as bullets, without ever rewriting the profile
+        # on disk -- this only transforms the in-memory value being filled.
+        value = _normalize_description(value)
 
     return FillResult(
         id=field.id,

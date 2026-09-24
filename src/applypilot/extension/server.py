@@ -462,6 +462,24 @@ def create_app(
         thing standing between this endpoint and a leaked credential."""
         return _strip_secret_values(_load_full_profile())
 
+    @app.get("/profile/counts")
+    def profile_counts(_: None = Depends(_require_token)) -> dict:
+        """{work_history: N, education: M} for the ACTIVE profile -- lets
+        the extension know how many repeating blocks to create before
+        filling a Workday-style form that only renders "Work Experience 1"
+        plus an "Add Another" button. Counts only, never values. Resolved
+        via _load_full_profile (same active-profile resolution as
+        /profile/full, i.e. _current_profile_path(root)) so a profile
+        switch takes effect immediately, and fails safe to 0 for a missing
+        or malformed section rather than raising."""
+        prof = _load_full_profile()
+        work = prof.get("work_history")
+        edu = prof.get("education")
+        return {
+            "work_history": len(work) if isinstance(work, list) else 0,
+            "education": len(edu) if isinstance(edu, list) else 0,
+        }
+
     @app.post("/profile")
     def write_profile(body: dict, _: None = Depends(_require_token)) -> dict:
         """Write the profile: validated, merged so an unseen secret can

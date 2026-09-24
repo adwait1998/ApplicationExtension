@@ -347,6 +347,165 @@ def test_parse_llm_json_keeps_existing_bullets_from_the_model():
 
 
 # ---------------------------------------------------------------------------
+# GPA: a deterministic, high-precision regex pass (no model needed), strict
+# validation, and correct attachment to the right degree when there is more
+# than one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("GPA: 3.8/4.0", "3.8/4.0"),
+        ("GPA 3.8", "3.8"),
+        ("3.8/4.0 GPA", "3.8/4.0"),
+        ("CGPA 8.9/10", "8.9/10"),
+        ("Cumulative GPA: 3.85", "3.85"),
+    ],
+)
+def test_find_gpa_mentions_recognizes_every_documented_format(text, expected):
+    mentions = resume_import._find_gpa_mentions(text)
+    assert len(mentions) == 1
+    line_idx, raw = mentions[0]
+    assert line_idx == 0
+    assert resume_import._validate_gpa(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("3.8", "3.8"),
+        ("3.8/4.0", "3.8/4.0"),
+        ("8.9/10", "8.9/10"),
+        ("4.2/5", "4.2/5"),
+    ],
+)
+def test_validate_gpa_accepts_plausible_values(raw, expected):
+    assert resume_import._validate_gpa(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "9.9",          # no scale given -> default 4.0, way over
+        "4.5",          # default scale 4.0, just over
+        "3.8/6.0",      # scale not one of the honoured 4/5/10-point scales
+        "11/10",        # value exceeds its own stated scale
+        "-1",           # not a plausible GPA at all
+        "not a gpa",
+        "",
+    ],
+)
+def test_validate_gpa_rejects_implausible_values(raw):
+    assert resume_import._validate_gpa(raw) is None
+
+
+def test_gpa_out_of_scale_is_rejected_not_stored_as_garbage():
+    """An LLM-proposed GPA outside its scale must be rejected -- stored as
+    "" (same as "not stated"), never surfaced as a fact about the applicant."""
+    raw = json.dumps({"education": [{"school": "State University", "degree": "B.S.", "gpa": "9.9"}]})
+    fields, _warnings = resume_import.parse_llm_json(raw)
+    assert fields["education"][0]["gpa"] == ""
+
+
+def test_gpa_valid_llm_value_is_kept():
+    raw = json.dumps({"education": [{"school": "State University", "degree": "B.S.", "gpa": "3.8/4.0"}]})
+    fields, _warnings = resume_import.parse_llm_json(raw)
+    assert fields["education"][0]["gpa"] == "3.8/4.0"
+
+
+def test_attach_gpa_single_degree_is_unambiguous_regardless_of_position():
+    text = "Jane Doe\nGPA: 3.9/4.0\nEDUCATION\nState University, B.S. Computer Science"
+    entries = [{"school": "State University", "degree": "B.S. Computer Science", "gpa": ""}]
+    warnings = resume_import._attach_gpa_to_education(text, entries)
+    assert entries[0]["gpa"] == "3.9/4.0"
+    assert warnings == []
+
+
+def test_attach_gpa_two_degrees_attaches_to_the_one_it_appears_beside():
+    text = (
+        "Jane Doe\n"
+        "EDUCATION\n"
+        "State University, M.S. Computer Science, 2018-2020\n"
+        "GPA: 3.9/4.0\n"
+        "\n"
+        "Old College, B.S. Computer Science, 2012-2016\n"
+    )
+    entries = [
+        {"school": "State University", "degree": "M.S. Computer Science", "gpa": ""},
+        {"school": "Old College", "degree": "B.S. Computer Science", "gpa": ""},
+    ]
+    warnings = resume_import._attach_gpa_to_education(text, entries)
+    assert entries[0]["gpa"] == "3.9/4.0"
+    assert entries[1]["gpa"] == ""  # never guessed onto the other degree
+    assert warnings == []
+
+
+def test_attach_gpa_ambiguous_position_attaches_to_neither_and_warns():
+    # The GPA appears before either degree's own text -- cannot tell which
+    # one it belongs to.
+    text = (
+        "Jane Doe\n"
+        "GPA: 3.9/4.0\n"
+        "EDUCATION\n"
+        "State University, M.S. Computer Science, 2018-2020\n"
+        "Old College, B.S. Computer Science, 2012-2016\n"
+    )
+    entries = [
+        {"school": "State University", "degree": "M.S. Computer Science", "gpa": ""},
+        {"school": "Old College", "degree": "B.S. Computer Science", "gpa": ""},
+    ]
+    warnings = resume_import._attach_gpa_to_education(text, entries)
+    assert entries[0]["gpa"] == ""
+    assert entries[1]["gpa"] == ""
+    assert warnings, "expected a warning that the GPA could not be confidently placed"
+
+
+def test_attach_gpa_no_mentions_leaves_entries_untouched():
+    entries = [{"school": "State University", "degree": "B.S.", "gpa": ""}]
+    warnings = resume_import._attach_gpa_to_education("no gpa mentioned anywhere", entries)
+    assert entries[0]["gpa"] == ""
+    assert warnings == []
+
+
+def test_attach_gpa_no_entries_is_a_no_op():
+    assert resume_import._attach_gpa_to_education("GPA: 3.9/4.0", []) == []
+
+
+def test_import_resume_end_to_end_attaches_gpa_to_correct_degree(tmp_path):
+    text = (
+        "Jane Doe\n"
+        "jane.doe@example.com\n"
+        "EDUCATION\n"
+        "State University, M.S. Computer Science, 2018-2020\n"
+        "GPA: 3.9/4.0\n"
+        "\n"
+        "Old College, B.S. Computer Science, 2012-2016\n"
+    )
+    llm_json = json.dumps({
+        "education": [
+            {"school": "State University", "degree": "M.S. Computer Science", "field": "",
+             "start": "08/2018", "end": "05/2020"},
+            {"school": "Old College", "degree": "B.S. Computer Science", "field": "",
+             "start": "08/2012", "end": "05/2016"},
+        ],
+    })
+    result = resume_import.import_resume(
+        filename="resume.txt",
+        data=text.encode("utf-8"),
+        existing_profile={},
+        profile_dir=tmp_path,
+        llm_fn=lambda _text: llm_json,
+    )
+    edu = result.draft_profile["education"]
+    assert edu[0]["gpa"] == "3.9/4.0"
+    assert edu[1]["gpa"] == ""
+    # Surfaced in provenance the same way the rest of the education
+    # contribution is -- "from your résumé" in the options page.
+    assert result.provenance["education"] == "llm"
+
+
+# ---------------------------------------------------------------------------
 # THE non-negotiable: canary fields are never inferred, even if a
 # misbehaving LLM volunteers them despite being told not to.
 # ---------------------------------------------------------------------------

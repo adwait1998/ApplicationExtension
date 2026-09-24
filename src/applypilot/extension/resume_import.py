@@ -265,7 +265,7 @@ def deterministic_extract(text: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 _ALLOWED_WORK_KEYS = ("title", "company", "location", "start", "end", "current", "description")
-_ALLOWED_EDU_KEYS = ("school", "degree", "field", "start", "end")
+_ALLOWED_EDU_KEYS = ("school", "degree", "field", "start", "end", "gpa")
 
 _LLM_SYSTEM_PROMPT = """You extract structured career facts from a résumé's raw text. \
 Output ONLY a single JSON object -- no prose, no markdown code fences, no commentary.
@@ -281,6 +281,12 @@ describes a role in plain sentences with no bullet markers, split it into one sh
 bullet per sentence instead of one long paragraph -- but never invent or add a bullet \
 whose content is not already present in the résumé text.
 
+For each education entry's "gpa", include it ONLY when the résumé explicitly states a \
+GPA for that specific degree, written exactly as it appears (e.g. "3.8" or "3.8/4.0" or \
+"8.9/10") -- never invent, estimate, or convert a GPA to a different scale. If a GPA is \
+present but you cannot tell which of two or more degrees it belongs to, leave "gpa" as \
+"" on every entry rather than guessing.
+
 Do NOT include anything about work authorization, visa/sponsorship status, salary or \
 compensation expectations, or EEO/demographic information (gender, race, ethnicity, \
 veteran status, disability status) -- even if the résumé happens to mention them. \
@@ -293,7 +299,7 @@ Match this exact shape:
 "current": false, "description": "- first bullet\\n- second bullet"}
   ],
   "education": [
-    {"school": "", "degree": "", "field": "", "start": "MM/YYYY", "end": "MM/YYYY"}
+    {"school": "", "degree": "", "field": "", "start": "MM/YYYY", "end": "MM/YYYY", "gpa": ""}
   ],
   "current_title": "",
   "total_years_experience": ""
@@ -419,6 +425,156 @@ def _normalize_description(raw: str) -> str:
     return "\n".join(bullets)
 
 
+# ---------------------------------------------------------------------------
+# GPA -- a deterministic, high-precision regex pass (no model needed), plus
+# strict validation of whatever the LLM proposes per education entry. A GPA
+# is a factual claim about the applicant's academic record, so a value this
+# module cannot confidently place on the right degree is dropped entirely
+# (with a warning) rather than risk stating someone else's GPA on their
+# behalf -- see the module docstring's canary-adjacent non-negotiables.
+# ---------------------------------------------------------------------------
+
+_NUM = r"\d{1,2}(?:\.\d{1,3})?"
+_GPA_LABEL = r"(?:cumulative\s+gpa|cgpa|gpa)"
+# "GPA: 3.8/4.0", "GPA 3.8", "CGPA 8.9/10", "Cumulative GPA: 3.85"
+_GPA_LABEL_FIRST_RE = re.compile(
+    rf"\b{_GPA_LABEL}\b\s*[:\-]?\s*({_NUM})(?:\s*/\s*({_NUM}))?", re.I
+)
+# "3.8/4.0 GPA"
+_GPA_VALUE_FIRST_RE = re.compile(rf"({_NUM})\s*/\s*({_NUM})\s*\b{_GPA_LABEL}\b", re.I)
+
+# Scales this module will actually honour when the résumé states one
+# explicitly. Default (no denominator given) is always 4.0 -- a bare "GPA
+# 8.9" is not a plausible 4.0-scale value and is rejected, never guessed
+# into a different scale.
+_VALID_GPA_SCALES = {4.0, 5.0, 10.0}
+_DEFAULT_GPA_SCALE = 4.0
+
+
+def _find_gpa_mentions(text: str) -> list[tuple[int, str]]:
+    """Every GPA-shaped mention in `text`, one per line (first match only),
+    as ``(line_index, raw_value)`` -- ``raw_value`` is the number and, if
+    stated, its scale (e.g. "3.8" or "3.8/4.0"), never the label. Purely
+    mechanical: a candidate here may still fail `_validate_gpa`."""
+    mentions: list[tuple[int, str]] = []
+    for i, line in enumerate((text or "").splitlines()):
+        m = _GPA_LABEL_FIRST_RE.search(line)
+        if m:
+            value, scale = m.group(1), m.group(2)
+            mentions.append((i, f"{value}/{scale}" if scale else value))
+            continue
+        m = _GPA_VALUE_FIRST_RE.search(line)
+        if m:
+            mentions.append((i, f"{m.group(1)}/{m.group(2)}"))
+    return mentions
+
+
+def _validate_gpa(raw: str) -> str | None:
+    """Strictly validate a candidate GPA string -- from the deterministic
+    pass above or volunteered by the LLM -- and return it normalised
+    (résumé's own formatting preserved: "3.8" or "3.8/4.0"), or None if it
+    is not a plausible GPA. A scale is only ever what the résumé stated
+    explicitly (4.0/5.0/10.0); with none given, 4.0 is assumed and the
+    value must fit it. Never converts between scales."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    m = re.match(rf"^({_NUM})\s*/\s*({_NUM})$", raw)
+    if m:
+        value_s, scale_s = m.group(1), m.group(2)
+        value, scale = float(value_s), float(scale_s)
+        if scale not in _VALID_GPA_SCALES or value < 0 or value > scale:
+            return None
+        return f"{value_s}/{scale_s}"
+    m = re.match(rf"^({_NUM})$", raw)
+    if m:
+        value_s = m.group(1)
+        value = float(value_s)
+        if value < 0 or value > _DEFAULT_GPA_SCALE:
+            return None
+        return value_s
+    return None
+
+
+def _education_block_starts(lines: list[str], entries: list[dict]) -> list[int | None]:
+    """For each education entry (in résumé order), the index of the first
+    line that names it (by school, else degree), or None if no confident
+    match was found. Searched strictly in order, each entry's search
+    starting after the previous entry's match, so two similarly-worded
+    entries never collapse onto the same line."""
+    starts: list[int | None] = []
+    search_from = 0
+    for entry in entries:
+        candidates = [c.strip() for c in (entry.get("school"), entry.get("degree")) if c and c.strip()]
+        found = None
+        for cand in candidates:
+            cand_lower = cand.lower()
+            for i in range(search_from, len(lines)):
+                if cand_lower in lines[i].lower():
+                    found = i
+                    break
+            if found is not None:
+                break
+        starts.append(found)
+        if found is not None:
+            search_from = found + 1
+    return starts
+
+
+def _attach_gpa_to_education(text: str, entries: list[dict]) -> list[str]:
+    """Attach a validated GPA to the education entry it appears beside,
+    using the résumé's own text (the deterministic pass takes priority over
+    anything the LLM guessed per-entry -- see module docstring). Mutates
+    `entries` in place, setting "gpa" only where the attachment is
+    unambiguous; a mention that cannot be pinned to exactly one entry is
+    left unattached and reported as a warning, never guessed.
+
+    Returns the list of warnings (0 or more, deduplicated).
+    """
+    warnings: list[str] = []
+    if not entries:
+        return warnings
+    lines = (text or "").splitlines()
+    mentions = _find_gpa_mentions(text)
+    if not mentions:
+        return warnings
+
+    if len(entries) == 1:
+        # Only one degree on the résumé -- no ambiguity possible regardless
+        # of where on the page the GPA happens to sit.
+        for _line_idx, raw in mentions:
+            valid = _validate_gpa(raw)
+            if valid:
+                entries[0]["gpa"] = valid
+                break
+        return warnings
+
+    starts = _education_block_starts(lines, entries)
+
+    def _block_end(i: int) -> int:
+        for j in range(i + 1, len(starts)):
+            if starts[j] is not None:
+                return starts[j]
+        return len(lines)
+
+    for line_idx, raw in mentions:
+        valid = _validate_gpa(raw)
+        if not valid:
+            continue
+        matches = [
+            i for i, start in enumerate(starts)
+            if start is not None and start <= line_idx < _block_end(i)
+        ]
+        if len(matches) == 1:
+            entries[matches[0]]["gpa"] = valid
+        else:
+            warnings.append(
+                "Found a GPA on the résumé but couldn't tell which degree it belongs "
+                "to -- add it manually rather than risk it on the wrong one."
+            )
+    return list(dict.fromkeys(warnings))
+
+
 def _validate_entry(raw_entry, allowed_keys: tuple[str, ...]) -> dict | None:
     """Keep only the allow-listed keys of one work_history/education entry,
     coercing every value to a safe plain type. Non-dict entries are dropped
@@ -432,6 +588,11 @@ def _validate_entry(raw_entry, allowed_keys: tuple[str, ...]) -> dict | None:
             out[key] = _as_bool(raw_entry.get(key))
         elif key == "description":
             out[key] = _normalize_description(_as_str(raw_entry.get(key)))
+        elif key == "gpa":
+            # Strict validation -- an implausible or malformed value from
+            # the LLM is dropped (stored as "", same as "not stated") rather
+            # than surfaced as a fact about the applicant's record.
+            out[key] = _validate_gpa(_as_str(raw_entry.get(key))) or ""
         else:
             out[key] = _as_str(raw_entry.get(key))
     # Drop entries that carry no identifying information at all.
@@ -632,6 +793,12 @@ def import_resume(
         provenance["work_history"] = "llm"
     if "education" in llm_fields:
         provenance["education"] = "llm"
+        # Deterministic GPA pass takes priority over whatever the LLM
+        # guessed per-entry -- see the module docstring. Runs only once
+        # this résumé's own education entries exist to attach onto; a
+        # profile with no education contribution at all has nowhere to
+        # confidently place a GPA anyway.
+        warnings.extend(_attach_gpa_to_education(text, llm_fields["education"]))
     if llm_fields.get("current_title"):
         provenance["experience.current_job_title"] = "llm"
     if llm_fields.get("total_years_experience"):
