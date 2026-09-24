@@ -38,6 +38,13 @@ class FieldDescriptor:
     # section). Consumed by tier 3 (applypilot.extension.structured).
     section: str = ""
     section_index: int | None = None
+    # The Workday widget driver the content script bound this field to
+    # (e.g. "wd-dropdown", "wd-prompt", "wd-date-my", "wd-date-y"), or "" for
+    # a plain native input/select. Purely informational to the service --
+    # resolution is still driven by label/section as before; the JS side
+    # uses `id` to know which driver to invoke for a fill. Optional and
+    # defaulted so every existing caller/test keeps working unchanged.
+    widget: str = ""
 
 
 @dataclass
@@ -57,9 +64,18 @@ class FillResult:
     # distinctly (blue, "review before submitting") -- see content.js /
     # popup.js, which check `fill.draft || fill.source === "draft"`.
     draft: bool = False
+    # Multi-value fields only (currently just Skills): the individual values
+    # a widget driver should add one at a time (e.g. Workday's "Type to Add
+    # Skills" prompt, which needs one add-cycle per skill). `value` above is
+    # still populated too (joined with ", ") so a plain text field still
+    # gets something sensible. Empty for every other field -- see to_dict().
+    values: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if not d.get("values"):
+            d.pop("values", None)
+        return d
 
 
 @dataclass

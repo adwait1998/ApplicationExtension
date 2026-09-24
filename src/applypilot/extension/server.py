@@ -86,6 +86,11 @@ class FieldIn(BaseModel):
     # scanner build that hasn't shipped this yet keeps working unchanged.
     section: str = ""
     section_index: int | None = None
+    # Workday widget driver the content script bound this field to
+    # ("wd-dropdown" | "wd-prompt" | "wd-date-my" | "wd-date-y"), or "" for a
+    # plain input/select. Optional so a scanner build that hasn't shipped
+    # this yet keeps working unchanged -- see schema.FieldDescriptor.widget.
+    widget: str = ""
 
 
 class ResolveRequest(BaseModel):
@@ -397,6 +402,7 @@ def create_app(
                 options=list(f.options),
                 section=f.section,
                 section_index=f.section_index,
+                widget=f.widget,
             )
             for f in body.fields
         ]

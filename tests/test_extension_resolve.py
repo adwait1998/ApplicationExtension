@@ -647,3 +647,202 @@ def test_ladder_falls_back_to_seed_default_when_employer_unidentifiable(monkeypa
     )
     assert plan.fills[0].value == "No"
     assert "could not be identified" in plan.fills[0].reason
+
+
+# ---------------------------------------------------------------------------
+# The real operator Workday form: Degree / Field of Study / GPA / dates /
+# School / Skills, with the EXACT labels and widget names the rebuilt
+# content script sends (wd-dropdown, wd-prompt, wd-date-y, wd-date-my).
+# JS never told the service which widget a field is beyond passing it
+# through -- resolution is still purely label/section driven, this proves
+# it end to end for the fields that failed on the real form.
+# ---------------------------------------------------------------------------
+
+REAL_WORKDAY_FORM_PROFILE = {
+    "personal": {
+        "full_name": "Nida Shah",
+        "country": "United States of America",
+        "province_state": "Washington",
+    },
+    "education": [
+        {
+            "school": "University of Washington",
+            "degree": "Master of Science",
+            "field": "Human-Computer Interaction",
+            "start": "08/2016",
+            "end": "05/2018",
+            "gpa": "3.8/4.0",
+        },
+    ],
+    "work_history": [
+        {
+            "title": "Senior Product Designer",
+            "company": "Acme",
+            "location": "Seattle, WA",
+            "start": "03/2022",
+            "end": "",
+            "current": True,
+            "description": "Led design for the core product.",
+        },
+    ],
+    "skills_boundary": {
+        "languages": ["Figma", "Sketch", "Python"],
+        "frameworks": ["Design Systems"],
+        "tools": ["Jira", "Confluence"],
+    },
+}
+
+
+def test_real_form_degree_dropdown_fills_raw_profile_string():
+    # The JS driver maps this raw string to Workday's dropdown option
+    # ("Master of Science" -> "Masters Degree or Equivalent") -- the
+    # service's job is only to hand back the profile's own value.
+    result = resolve.resolve_field(
+        _field(label="Degree", widget="wd-dropdown", section="Education 1", section_index=1),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    assert isinstance(result, FillResult)
+    assert result.value == "Master of Science"
+    assert result.source == "structured"
+
+
+def test_real_form_field_of_study_prompt_widget():
+    result = resolve.resolve_field(
+        _field(label="Field of Study", widget="wd-prompt", section="Education 1", section_index=1),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    assert isinstance(result, FillResult)
+    assert result.value == "Human-Computer Interaction"
+    assert result.source == "structured"
+
+
+def test_real_form_school_or_university_prompt_widget():
+    result = resolve.resolve_field(
+        _field(label="School or University", widget="wd-prompt", section="Education 1", section_index=1),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    assert isinstance(result, FillResult)
+    assert result.value == "University of Washington"
+    assert result.source == "structured"
+
+
+def test_real_form_overall_result_gpa_label_matches():
+    # The exact label the operator's real form used. Was skipped for real
+    # because the stored profile predated GPA extraction -- the label match
+    # itself must work regardless, so a profile WITH a GPA fills.
+    result = resolve.resolve_field(
+        _field(label="Overall Result (GPA)", section="Education 1", section_index=1),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    assert isinstance(result, FillResult)
+    assert result.value == "3.8/4.0"
+    assert result.source == "structured"
+
+
+def test_real_form_education_from_date_year_widget():
+    result = resolve.resolve_field(
+        _field(label="From", widget="wd-date-y", section="Education 1", section_index=1),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    assert isinstance(result, FillResult)
+    assert result.value == "08/2016"
+    assert result.source == "structured"
+
+
+def test_real_form_education_to_actual_or_expected_recognized_as_end_date():
+    # The parenthetical "(Actual or Expected)" must not break the "To" match.
+    result = resolve.resolve_field(
+        _field(
+            label="To (Actual or Expected)", widget="wd-date-y",
+            section="Education 1", section_index=1,
+        ),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    assert isinstance(result, FillResult)
+    assert result.value == "05/2018"
+    assert result.source == "structured"
+
+
+def test_real_form_work_experience_dates_month_year_widget():
+    frm = resolve.resolve_field(
+        _field(label="From", widget="wd-date-my", section="Work Experience 1", section_index=1),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    to = resolve.resolve_field(
+        _field(label="To", widget="wd-date-my", section="Work Experience 1", section_index=1),
+        REAL_WORKDAY_FORM_PROFILE,
+    )
+    assert frm.value == "03/2022"
+    assert to.value == ""  # current:true -> end date left blank, checkbox carries the fact
+
+
+def test_real_form_country_and_state_dropdowns():
+    country = resolve.resolve_field(
+        _field(label="Country", widget="wd-dropdown"), REAL_WORKDAY_FORM_PROFILE
+    )
+    state = resolve.resolve_field(
+        _field(label="State", widget="wd-dropdown"), REAL_WORKDAY_FORM_PROFILE
+    )
+    assert country.value == "United States of America"
+    assert country.source == "deterministic"
+    assert state.value == "Washington"
+    assert state.source == "deterministic"
+
+
+def test_real_form_type_to_add_skills_prompt_widget():
+    result = resolve.resolve_field(
+        _field(label="Type to Add Skills", widget="wd-prompt"), REAL_WORKDAY_FORM_PROFILE
+    )
+    assert isinstance(result, FillResult)
+    assert result.source == "deterministic"
+    assert result.values == ["Figma", "Sketch", "Python", "Design Systems", "Jira", "Confluence"]
+    assert result.value == "Figma, Sketch, Python, Design Systems, Jira, Confluence"
+
+
+def test_skills_field_never_reaches_answer_bank_or_draft(monkeypatch, tmp_path):
+    """The non-negotiable: the applicant's declared skill list must only
+    ever come from the profile, never the answer bank or a draft -- even
+    with both tiers on and a bank primed with a tempting, wrong answer to
+    this exact field."""
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+
+    def _explode(q, c):
+        raise AssertionError("a skills field must never reach the LLM")
+
+    monkeypatch.setattr(answers, "_real_llm_fn", _explode)
+    bank = tmp_path / "bank.json"
+    bank.write_text(
+        '[{"q": "Type to Add Skills", "a": "Excel, PowerPoint"}]', encoding="utf-8"
+    )
+    cache = answers.make_cache(REAL_WORKDAY_FORM_PROFILE, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(label="Type to Add Skills", widget="wd-prompt"),
+        REAL_WORKDAY_FORM_PROFILE,
+        answer_cache=cache,
+    )
+    assert isinstance(result, FillResult)
+    assert result.source not in ("answer_bank", "draft")
+    assert result.source == "deterministic"
+    assert result.values == ["Figma", "Sketch", "Python", "Design Systems", "Jira", "Confluence"]
+
+
+def test_skills_field_with_empty_boundary_never_reaches_answer_bank_either(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_ANSWERS", "1")
+    monkeypatch.setenv("APPLYPILOT_DRAFTS", "1")
+
+    def _explode(q, c):
+        raise AssertionError("a skills field must never reach the LLM")
+
+    monkeypatch.setattr(answers, "_real_llm_fn", _explode)
+    bank = tmp_path / "bank.json"
+    bank.write_text('[{"q": "Skills", "a": "Excel, PowerPoint"}]', encoding="utf-8")
+    profile = {**PROFILE}  # no skills_boundary at all
+    cache = answers.make_cache(profile, bank_path=bank)
+
+    result = resolve.resolve_field(
+        _field(label="Skills"), profile, answer_cache=cache,
+    )
+    assert isinstance(result, SkipResult)
+    assert result.source == "deterministic"

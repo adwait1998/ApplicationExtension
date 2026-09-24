@@ -110,6 +110,74 @@ _KEY_SYNONYMS: dict[str, tuple[str, ...]] = {
     "experience.current_job_title": ("title", "role", "position", "job", "occupation"),
 }
 
+# ---------------------------------------------------------------------------
+# Skills — a multi-value field (Workday's "Type to Add Skills" prompt widget
+# adds one skill at a time; a plain text "Skills" field just wants them
+# joined). Recognised by label alone -- like GPA in the structured tier,
+# this is treated as TERMINAL once recognised: the applicant's own declared
+# skill list must only ever come from the profile, never the answer bank or
+# a draft, so a skills-shaped field that matches this pattern is always
+# claimed here (a FillResult when the profile has skills, else a
+# SkipResult) and never falls through to a lower tier.
+_SKILLS_LABEL_RE = re.compile(r"\bskills?\b", re.I)
+
+# Adding 60 skills to a Workday prompt widget one popup at a time is slow
+# and noisy for the operator to watch/verify -- 15 covers a realistic résumé
+# without turning the fill into a multi-minute loop.
+MAX_SKILLS = 15
+
+
+def _flatten_skills(profile: dict, limit: int = MAX_SKILLS) -> list[str]:
+    """Every skill across every skills_boundary category (languages,
+    frameworks, devops, databases, tools, ... -- whatever categories the
+    profile actually has, mirroring the flattening already done by
+    scoring/tailor.py, scoring/validator.py and scoring/cover_letter.py
+    rather than hardcoding a fixed set of category names), profile order
+    preserved, deduplicated case-insensitively (first-seen casing wins),
+    capped at `limit`."""
+    boundary = (profile or {}).get("skills_boundary") or {}
+    if not isinstance(boundary, dict):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for items in boundary.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            skill = str(item).strip()
+            if not skill:
+                continue
+            key = skill.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(skill)
+    return out[:limit]
+
+
+def _match_skills(field: FieldDescriptor, haystack: str, profile: dict) -> FillResult | SkipResult | None:
+    if not _SKILLS_LABEL_RE.search(haystack):
+        return None
+    skills = _flatten_skills(profile)
+    if not skills:
+        return SkipResult(
+            id=field.id,
+            source="deterministic",
+            reason="skills-shaped field matched but no skills_boundary set in profile",
+            auto_fill=False,
+        )
+    return FillResult(
+        id=field.id,
+        value=", ".join(skills),
+        values=list(skills),
+        source="deterministic",
+        profile_key="skills_boundary",
+        confidence=0.9,
+        auto_fill=True,
+        reason="skills-shaped label matched profile skills_boundary",
+    )
+
+
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -207,6 +275,17 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
             auto_fill=False,
         )
 
+    haystack = " ".join(str(x or "") for x in (field.label, field.name, field.placeholder))
+
+    # Skills: terminal once recognised, same invariant as GPA in the
+    # structured tier -- checked before autocomplete/name-label matching so
+    # a skills-shaped field can never be misread as something else, and
+    # never falls through to a lower tier that could source it from the
+    # answer bank or a draft instead of the profile's own declared skills.
+    skills_result = _match_skills(field, haystack, profile)
+    if skills_result is not None:
+        return skills_result
+
     autocomplete = (field.autocomplete or "").strip().lower()
     if autocomplete:
         # autocomplete can carry multiple tokens ("shipping given-name") —
@@ -233,7 +312,6 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
                 auto_fill=False,
             )
 
-    haystack = " ".join(str(x or "") for x in (field.label, field.name, field.placeholder))
     for pattern, path in _NAME_LABEL_PATTERNS:
         if pattern.search(haystack):
             base_path = path.split("#", 1)[0]

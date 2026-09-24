@@ -270,6 +270,40 @@ def test_resolve_password_field_returns_nothing(client, auth_headers):
     assert "hunter2" not in str(plan)
 
 
+def test_resolve_accepts_and_uses_widget_field(client, auth_headers):
+    # Additive request field for the rebuilt Workday widget drivers -- a
+    # scanner that now sends it must resolve exactly as before, and the
+    # request must not 422 on an unrecognized field.
+    body = {
+        "url": "https://acme.wd1.myworkdayjobs.com/en-US/Acme/job/123",
+        "fields": [
+            {"id": "f0", "tag": "input", "type": "text", "name": "email",
+             "autocomplete": "email", "label": "Email", "widget": "wd-prompt"},
+        ],
+    }
+    resp = client.post("/resolve", json=body, headers=auth_headers)
+    assert resp.status_code == 200
+    plan = resp.json()
+    assert plan["fills"][0]["value"] == "nida@example.com"
+
+
+def test_resolve_skills_field_returns_values_list(tmp_path):
+    profile = {**PROFILE, "skills_boundary": {"tools": ["Figma", "Sketch"]}}
+    token = get_or_create_token(tmp_path)
+    app = create_app(app_dir=tmp_path, profile=profile)
+    local_client = TestClient(app)
+    body = {
+        "url": "https://example.com",
+        "fields": [{"id": "fskills", "tag": "input", "type": "text",
+                    "label": "Type to Add Skills", "widget": "wd-prompt"}],
+    }
+    resp = local_client.post("/resolve", json=body, headers={"X-ApplyPilot-Token": token})
+    assert resp.status_code == 200
+    plan = resp.json()
+    assert plan["fills"][0]["values"] == ["Figma", "Sketch"]
+    assert plan["fills"][0]["value"] == "Figma, Sketch"
+
+
 # ---------------------------------------------------------------------------
 # Test the real thing: a realistic Greenhouse-shaped field list end to end
 # through the actual HTTP API.

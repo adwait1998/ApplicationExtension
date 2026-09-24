@@ -224,3 +224,99 @@ def test_schema_shapes_serialize_to_spec_json():
     assert d["skipped"][0]["source"] == "canary"
     assert "profile_key" not in d["skipped"][0]
     assert d["tiers_available"] == ["canary", "deterministic"]
+
+
+def test_field_descriptor_widget_defaults_empty_and_is_settable():
+    # Additive field for the rebuilt Workday widget drivers -- every
+    # existing caller that never sets it keeps working unchanged.
+    assert _field().widget == ""
+    assert _field(widget="wd-dropdown").widget == "wd-dropdown"
+
+
+def test_fill_result_values_omitted_from_to_dict_when_empty():
+    fill = FillResult(
+        id="f0", value="Nida", source="deterministic", profile_key="personal.full_name",
+        confidence=1.0, auto_fill=True, reason="autocomplete=given-name",
+    )
+    assert fill.values == []
+    assert "values" not in fill.to_dict()
+
+
+def test_fill_result_values_present_in_to_dict_when_non_empty():
+    fill = FillResult(
+        id="f0", value="Figma, Sketch", source="deterministic", profile_key="skills_boundary",
+        confidence=0.9, auto_fill=True, reason="skills-shaped label matched profile skills_boundary",
+        values=["Figma", "Sketch"],
+    )
+    d = fill.to_dict()
+    assert d["values"] == ["Figma", "Sketch"]
+
+
+# ---------------------------------------------------------------------------
+# Skills — a multi-value field. Source: profile.skills_boundary only, never
+# the answer bank or a draft (see test_extension_resolve.py for the
+# through-the-ladder proof of that non-negotiable).
+# ---------------------------------------------------------------------------
+
+SKILLS_PROFILE = {
+    "skills_boundary": {
+        "languages": ["Python", "SQL", "python"],  # duplicate, different case
+        "frameworks": ["FastAPI", "Flask"],
+        "tools": ["Git", "Linux"],
+    },
+}
+
+
+def test_skills_field_recognized_by_various_workday_labels():
+    for label in ("Skills", "Type to Add Skills", "Technical Skills", "Key Skills"):
+        result = match(_field(label=label), SKILLS_PROFILE)
+        assert isinstance(result, FillResult), f"{label!r} should be recognized as skills-shaped"
+        assert result.source == "deterministic"
+
+
+def test_skills_field_value_joins_with_comma_space_in_profile_order():
+    result = match(_field(label="Skills"), SKILLS_PROFILE)
+    assert result.value == "Python, SQL, FastAPI, Flask, Git, Linux"
+
+
+def test_skills_field_values_list_matches_joined_value_deduped():
+    result = match(_field(label="Skills"), SKILLS_PROFILE)
+    # "python" (lowercase duplicate) is dropped, first-seen "Python" casing kept
+    assert result.values == ["Python", "SQL", "FastAPI", "Flask", "Git", "Linux"]
+
+
+def test_skills_field_caps_at_fifteen():
+    profile = {"skills_boundary": {"tools": [f"Skill{i}" for i in range(30)]}}
+    result = match(_field(label="Skills"), profile)
+    assert isinstance(result, FillResult)
+    assert len(result.values) == 15
+    assert result.values == [f"Skill{i}" for i in range(15)]
+
+
+def test_skills_field_flattens_every_category_not_just_three():
+    # profile.example.json's real shape has 5 categories (languages,
+    # frameworks, devops, databases, tools) -- the flattening must not
+    # hardcode a fixed subset of category names.
+    profile = {
+        "skills_boundary": {
+            "languages": ["Python"],
+            "frameworks": ["React"],
+            "devops": ["Docker"],
+            "databases": ["PostgreSQL"],
+            "tools": ["Git"],
+        },
+    }
+    result = match(_field(label="Skills"), profile)
+    assert result.values == ["Python", "React", "Docker", "PostgreSQL", "Git"]
+
+
+def test_skills_field_with_no_skills_in_profile_skips_cleanly():
+    result = match(_field(label="Skills"), {})
+    assert isinstance(result, SkipResult)
+    assert result.source == "deterministic"
+    assert result.auto_fill is False
+
+
+def test_skills_field_never_matches_unrelated_label():
+    result = match(_field(label="Why do you want to work here?"), SKILLS_PROFILE)
+    assert result is None
