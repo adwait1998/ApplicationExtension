@@ -1492,7 +1492,7 @@
           options: options,
           section: radioSection.section,
           section_index: radioSection.section_index,
-          widget: null
+          widget: ''
         });
         continue;
       }
@@ -1518,7 +1518,7 @@
         options: tagLower === 'select' ? getSelectOptions(el) : [],
         section: fieldSection.section,
         section_index: fieldSection.section_index,
-        widget: null
+        widget: ''
       });
     }
 
@@ -1545,7 +1545,7 @@
         options: [],
         section: dateSection.section,
         section_index: dateSection.section_index,
-        widget: null
+        widget: ''
       });
     }
 

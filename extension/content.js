@@ -238,8 +238,14 @@
         priorValues[fill.id] = undefined;
       }
 
+      // Multi-value fields (currently just Skills) carry the individual values to add one at a
+      // time in `fill.values` (a non-empty array) alongside a comma-joined `fill.value` for any
+      // caller that only understands a single string — see schema.FillResult.values on the
+      // service side. Prefer `values` whenever the service sent it.
+      var fillValue = (Array.isArray(fill.values) && fill.values.length) ? fill.values : fill.value;
+
       return Promise.resolve()
-        .then(function () { return ApplyPilotScanner.applyFill(entry, fill.value); })
+        .then(function () { return ApplyPilotScanner.applyFill(entry, fillValue); })
         .then(function (ok) {
           var hlTargets = ApplyPilotScanner.getHighlightTargets(entry);
           var isDraft = !!fill.draft || fill.source === 'draft';
