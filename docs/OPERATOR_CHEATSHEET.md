@@ -192,6 +192,34 @@ forms). Verification harnesses: `scripts/e2e_extension.py`, `scripts/e2e_profile
 
 ---
 
+### 0d. Copilot — what only you can verify (about 40 minutes, once)
+
+Automated tests and the live probe cover Greenhouse, Ashby and Lever with a fictional applicant.
+These four things need a real Chrome, a real Workday account and your real profile. Evidence for
+each page: the panel's **Export fill report** (labels and statuses only, never values) plus a
+screenshot. Never press Submit during this check.
+
+**A. Install (5 min).** Run `applypilot extension install-host`; in `chrome://extensions` Remove
+the old ApplyPilot entry, then Load unpacked. Settings → Connection says "Connected automatically".
+Reboot, open a posting, click the icon: the status dot is green and no terminal was opened.
+
+**B. Permissions (5 min).** Click Fill on a new `job-boards.greenhouse.io` posting: Chrome's prompt
+names that site; Allow, and it fills. On a company page that embeds Greenhouse (e.g. a
+`sofi.com/careers/job/...` page) the prompt names both sites. Deny once: the panel names the
+missing site and nothing is filled.
+
+**C. Workday on a real tenant (20 min).** Turn on "Keep filling as I go", then step through My
+Information → My Experience (at least 2 jobs and 1 degree) → Application Questions → Voluntary
+Disclosures → Self Identify, exporting a fill report at each step. Pass if: every date, degree,
+field of study and skill shows **verified**; exactly one résumé file card; EEO answers show your
+values or a decline; the agreement checkbox is untouched; on the disability form the right box is
+ticked and the signature is left for you; the extension never pressed Next or Submit; Undo on My
+Experience puts back three fields you spot-check.
+
+**D. Your real profile (10 min).** One Greenhouse job-boards posting and one Ashby posting: the
+work-authorization and sponsorship answers match your situation (for a visa holder: authorized,
+needs sponsorship — never a citizenship option). Export the fill reports.
+
 ## 1. TL;DR daily flow
 
 ```powershell
