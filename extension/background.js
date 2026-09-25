@@ -52,6 +52,124 @@ if (self.chrome && chrome.sidePanel && typeof chrome.sidePanel.setPanelBehavior 
 }
 
 // ---------------------------------------------------------------------
+// AUTO-CONNECT — no terminal, no pasted token.
+//
+// manifest.json pins this extension's id (via its top-level "key") to the one value the native
+// host's install-host command writes into com.applypilot.copilot.json's allowed_origins, so
+// chrome.runtime.sendNativeMessage below only ever reaches a host that was deliberately set up
+// for THIS extension. Chrome itself refuses to start the host at all for any other extension id
+// — this file never has to check that itself.
+//
+// The host speaks a tiny two-command protocol (see native_host.py):
+//   {cmd:"hello"}         -> {ok:true, version}            — not used here, kept for options.js
+//   {cmd:"ensure_server"} -> {ok:true, port, token, started} once a service answers /health, or
+//                            {ok:false, error} (not installed, or it never came up).
+// A missing host is a normal, expected state (the operator hasn't run
+// `applypilot extension install-host` yet) — never a hard failure. In that case this file falls
+// back to exactly the manual-token flow that existed before this build (paste serviceUrl+token
+// in Options), and the panel gets a one-line tip via chrome.storage.local.serviceConnection.
+// ---------------------------------------------------------------------
+var NATIVE_HOST_NAME = 'com.applypilot.copilot';
+
+function sendNativeMessage(message) {
+  return new Promise(function (resolve) {
+    try {
+      if (!chrome.runtime.sendNativeMessage) { resolve({ ok: false, error: 'nativeMessaging unavailable in this browser' }); return; }
+      chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, function (response) {
+        var err = chrome.runtime.lastError;
+        if (err) { resolve({ ok: false, error: (err && err.message) || String(err) }); return; }
+        resolve(response && typeof response === 'object' ? response : { ok: false, error: 'empty response from the native host' });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  });
+}
+
+// Chrome's own wording for "no host manifest registered for this id" — this is the expected,
+// common case on a machine that never ran `applypilot extension install-host`.
+function isHostMissingError(message) {
+  return typeof message === 'string' && /native messaging host not found/i.test(message);
+}
+
+/** Merges `patch` into chrome.storage.local.serviceConnection — read by the Settings page. */
+function recordServiceConnection(patch) {
+  return chrome.storage.local.get(['serviceConnection']).then(function (data) {
+    var merged = {};
+    var existing = data.serviceConnection || {};
+    for (var k in existing) if (Object.prototype.hasOwnProperty.call(existing, k)) merged[k] = existing[k];
+    for (var k2 in patch) if (Object.prototype.hasOwnProperty.call(patch, k2)) merged[k2] = patch[k2];
+    merged.checkedAt = Date.now();
+    return chrome.storage.local.set({ serviceConnection: merged });
+  });
+}
+
+/**
+ * Asks the native host to make sure the local service is up, and if it answers with a real
+ * {port, token}, stores them into chrome.storage.local under the SAME keys getConfig() already
+ * reads (serviceUrl/token) — so this is indistinguishable, to every existing call site, from the
+ * operator having pasted them into Options. Always resolves (never rejects); the caller decides
+ * what to do next.
+ */
+function ensureServerViaNativeHost() {
+  return sendNativeMessage({ cmd: 'ensure_server' }).then(function (resp) {
+    if (resp && resp.ok && resp.port && resp.token) {
+      return chrome.storage.local.set({
+        serviceUrl: 'http://127.0.0.1:' + resp.port,
+        token: resp.token
+      }).then(function () {
+        return recordServiceConnection({ mode: 'native', ok: true, error: null, started: !!resp.started });
+      }).then(function () {
+        return { ok: true };
+      });
+    }
+    var errMsg = (resp && resp.error) || 'the native host gave no usable response';
+    var hostMissing = isHostMissingError(errMsg);
+    return recordServiceConnection({
+      mode: hostMissing ? 'manual' : 'native',
+      ok: false,
+      error: errMsg
+    }).then(function () {
+      return { ok: false, hostMissing: hostMissing, error: errMsg };
+    });
+  });
+}
+
+/**
+ * Wraps any of the service-call functions below (each of which independently reads
+ * serviceUrl/token via getConfig()) with the auto-connect contract from the build spec:
+ *   - if nothing is configured yet, call ensure_server BEFORE the first real attempt;
+ *   - if a real attempt still comes back unauthorized/unreachable/unconfigured, call ensure_server
+ *     ONCE more and retry the SAME call ONCE more.
+ * At most one native-host round trip and at most two HTTP attempts per call, either way — this
+ * can never loop. `callFn` takes no arguments and returns the same {ok, error, ...} shape every
+ * call*() function below already returns; this changes none of those shapes.
+ */
+function requestWithAutoConnect(callFn) {
+  var connectAttempted = false;
+  function isRetryableFailure(result) {
+    return !!(result && result.ok === false &&
+      (result.error === 'unauthorized' || result.error === 'unreachable' || result.error === 'no-token'));
+  }
+  function attempt() {
+    return callFn().then(function (result) {
+      if (isRetryableFailure(result) && !connectAttempted) {
+        connectAttempted = true;
+        return ensureServerViaNativeHost().then(attempt);
+      }
+      return result;
+    });
+  }
+  return getConfig().then(function (cfg) {
+    if (!cfg.token && !connectAttempted) {
+      connectAttempted = true;
+      return ensureServerViaNativeHost().then(attempt);
+    }
+    return attempt();
+  });
+}
+
+// ---------------------------------------------------------------------
 // per-tab fill state — chrome.storage.session, keyed by tab id
 // ---------------------------------------------------------------------
 //
@@ -108,6 +226,10 @@ function friendlyFetchError(serviceUrl) {
 }
 
 function callResolve(url, fields) {
+  return requestWithAutoConnect(function () { return callResolveRaw(url, fields); });
+}
+
+function callResolveRaw(url, fields) {
   return getConfig().then(function (cfg) {
     if (!cfg.token) {
       return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
@@ -162,6 +284,10 @@ function parseFilenameFromDisposition(disposition) {
  * rather than throwing, so content.js can fall back to today's skip behaviour.
  */
 function callResume() {
+  return requestWithAutoConnect(callResumeRaw);
+}
+
+function callResumeRaw() {
   return getConfig().then(function (cfg) {
     if (!cfg.token) {
       return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
@@ -221,6 +347,10 @@ function callResume() {
  * expansion entirely and fill the page exactly as it did before this feature existed.
  */
 function callProfileCounts() {
+  return requestWithAutoConnect(callProfileCountsRaw);
+}
+
+function callProfileCountsRaw() {
   return getConfig().then(function (cfg) {
     if (!cfg.token) {
       return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
@@ -239,6 +369,10 @@ function callProfileCounts() {
 }
 
 function callHealth() {
+  return requestWithAutoConnect(callHealthRaw);
+}
+
+function callHealthRaw() {
   return getConfig().then(function (cfg) {
     var headers = cfg.token ? { 'X-ApplyPilot-Token': cfg.token } : {};
     return fetch(cfg.serviceUrl + '/health', { headers: headers }).then(function (resp) {

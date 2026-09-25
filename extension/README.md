@@ -60,17 +60,42 @@ fill, never to the panel's UI.
 ## Connecting it to the local service
 
 The extension talks to a companion service that runs on your machine (built separately, under
-`src/applypilot/`, started with something like `applypilot serve-extension`). On first run
-that service prints a URL and a token.
+`src/applypilot/`, started with something like `applypilot serve-extension`).
+
+### Auto-connect (the normal path)
+
+Run `applypilot extension install-host` once, from a terminal, and you never need a terminal or
+a pasted token again. That command pins this extension's id (giving `manifest.json` a `key`, so
+the id no longer depends on which folder you loaded it from) and registers a Chrome
+native-messaging host (`com.applypilot.copilot`) that only THIS extension id may talk to.
+
+From then on, `background.js` calls that host itself, right before the first service call it
+ever needs to make (and again, once, if a later call ever comes back unauthorized or
+unreachable — e.g. the service was restarted and rotated its token): the host starts
+`applypilot serve-extension` if nothing is already answering on its port, waits for it to come
+up, and hands back its port and token, which `background.js` stores exactly where the manual
+flow below already looks (`chrome.storage.local.serviceUrl`/`token`). Nothing is pasted, nothing
+is typed — the first time you click **Fill this page** after installing the host, it just works.
+Every attempt (success or failure) is recorded to `chrome.storage.local.serviceConnection` —
+`{mode: "native"|"manual", ok, error, checkedAt}` — for the Settings page to show.
+
+### Manual fallback
+
+If you haven't run `install-host` (or you're on a browser build where native messaging isn't
+available), the extension falls back to exactly the flow that existed before auto-connect:
 
 1. Right-click the extension icon → **Options** (or click **Settings** inside the side panel).
 2. Paste the **Service URL** (defaults to `http://127.0.0.1:8787` — it must always be
-   `http://127.0.0.1`, the options page refuses anything else) and the **token**.
+   `http://127.0.0.1`, the options page refuses anything else) and the **token** `applypilot
+   serve-extension` printed on its own first run.
 3. Click **Save**, then **Test connection**. You should see which decision tiers the service
    reports (`canary`, `deterministic`, and — if the optional Laya model loaded — `laya`).
 
-If the service isn't running, or the token is wrong, the panel and options page show a plain
-error message instead of failing silently (see `background.js` — 401 → "token is wrong",
+The panel's footer line says so directly when the native host genuinely isn't installed yet
+("Specified native messaging host not found" is Chrome's own wording for that) and nothing is
+configured: "Tip: run `applypilot extension install-host` once and the service will start by
+itself." If the service isn't running, or the token is wrong, the panel and options page show a
+plain error message instead of failing silently (see `background.js` — 401 → "token is wrong",
 fetch failure → "is the service running?", any other non-2xx → the status code and body).
 
 ## Using it on a job application page
@@ -254,6 +279,11 @@ erases an existing one, so "already has something" is never a reason to stop add
     own.
 - `storage`: holds the service URL and token in `chrome.storage.local` (never synced), and is
   also what backs `chrome.storage.session` — the per-tab fill-result store described below.
+- `nativeMessaging`: lets `background.js` talk to the `com.applypilot.copilot` native host (see
+  "Auto-connect" above) to start the local service and fetch its port/token without a terminal.
+  The host only ever accepts a connection from the extension id `manifest.json`'s `key` pins —
+  see `allowed_origins` in the host manifest `install-host` writes — so this permission cannot be
+  used to reach any OTHER native host on the machine.
 
 ## Architecture / file map
 

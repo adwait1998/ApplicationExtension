@@ -23,15 +23,24 @@ chrome.scripting.executeScript's own `func` form targeting the SAME tab/frame wi
 isolated world — which is the same world content.js already runs in, so this patches the exact
 function content.js calls, without editing a single line of scanner.js or test-page.html.
 """
+import base64
+import hashlib
 import json
 import pathlib
+import socket
 import sys
 import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EXT = pathlib.Path(r"E:\auto-apply-pipeline\extension")
+# Resolved relative to this script's own location (repo_root/scripts/.. -> repo_root/extension)
+# rather than a hardcoded absolute path: this repo is worked on from multiple git worktrees at
+# once, each with its own extension/ copy, and this test must exercise WHICHEVER copy sits next
+# to it (i.e. the worktree it's actually run from) so it proves out that worktree's own changes
+# instead of some other checkout's — and so two worktrees running this concurrently never race
+# on the same files.
+EXT = pathlib.Path(__file__).resolve().parent.parent / "extension"
 MANIFEST_PATH = EXT / "manifest.json"
 TEST_PAGE_BYTES = (EXT / "test-page.html").read_bytes()
 
@@ -69,6 +78,25 @@ check("manifest requests the webNavigation permission (needed to enumerate a tab
       "webNavigation" in (manifest.get("permissions") or []))
 check("minimum_chrome_version bumped to 116 (chrome.sidePanel.setPanelBehavior needs it)",
       manifest.get("minimum_chrome_version") == "116", manifest.get("minimum_chrome_version"))
+
+# --- item 1: auto-connect via native messaging ---
+check("manifest requests the nativeMessaging permission (auto-connect)",
+      "nativeMessaging" in (manifest.get("permissions") or []))
+
+
+def _chrome_extension_id_from_key(b64_key: str) -> str:
+    """Same algorithm as applypilot.extension.native_install.extension_id_from_key, duplicated
+    here (stdlib only, no dependency on the applypilot package being importable from wherever
+    this script runs) so this file can prove manifest.json's pinned "key" really does derive to
+    the id the native host's allowed_origins names, independently."""
+    digest = hashlib.sha256(base64.b64decode(b64_key)).hexdigest()[:32]
+    return "".join(chr(ord("a") + int(c, 16)) for c in digest)
+
+
+EXPECTED_EXTENSION_ID = "noooclaijfiejnfgabkemnpabcbdnaac"
+check("manifest has a pinned \"key\" that derives to the native host's allowed extension id",
+      bool(manifest.get("key")) and _chrome_extension_id_from_key(manifest["key"]) == EXPECTED_EXTENSION_ID,
+      (manifest.get("key") or "")[:40] + "...")
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +498,58 @@ with sync_playwright() as p:
                   "#scanBtn, #cancelBtn, #undoBtn, #reportBtn", "els => els.length") == 4)
         check("panel title is ApplyPilot Copilot", helper.title() == "ApplyPilot Copilot", helper.title())
 
+        # =====================================================================
+        # AUTO-CONNECT (item 1), cold start: nothing configured yet, and no
+        # `applypilot extension install-host` native host is registered on this machine for
+        # com.applypilot.copilot. That second fact was confirmed by hand against the real Windows
+        # registry before this test was written (HKCU\...\NativeMessagingHosts\com.applypilot.copilot
+        # is absent by default), so chrome.runtime.sendNativeMessage below gives Chrome's REAL
+        # "native messaging host not found" answer — this proves the fallback path end to end
+        # rather than mocking chrome.runtime.sendNativeMessage. serviceUrl is pointed at a port
+        # nothing is listening on (grabbed, then immediately closed) instead of the default 8787,
+        # so this can never accidentally reach a real `applypilot serve-extension` a developer
+        # happens to have running on this machine.
+        # =====================================================================
+        def _unused_local_port():
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+            s.close()
+            return port
+
+        UNREACHABLE_URL = f"http://127.0.0.1:{_unused_local_port()}"
+        helper.evaluate(
+            "(cfg) => chrome.storage.local.set(cfg).then(() => "
+            "chrome.storage.local.remove(['token', 'serviceConnection']))",
+            {"serviceUrl": UNREACHABLE_URL},
+        )
+
+        panel0 = ctx.new_page()
+        panel0.goto(panel_url)
+        panel0.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        try:
+            panel0.wait_for_function(
+                "() => (document.getElementById('tiersLine').textContent || "
+                "'').toLowerCase().includes('install-host')",
+                timeout=8000)
+            tip_shown = True
+        except Exception:
+            tip_shown = False
+        tip_text = panel0.eval_on_selector("#tiersLine", "el => el.textContent")
+        check("the panel shows the install-host tip when nothing is configured and the native "
+              "host is missing", tip_shown, repr(tip_text))
+
+        conn = helper.evaluate("() => chrome.storage.local.get('serviceConnection')")
+        conn_val = (conn or {}).get("serviceConnection") or {}
+        check("a missing native host is recorded honestly (mode manual, ok false) in "
+              "chrome.storage.local.serviceConnection",
+              conn_val.get("mode") == "manual" and conn_val.get("ok") is False, json.dumps(conn_val))
+        check("the recorded error names Chrome's own native-messaging-host-not-found failure",
+              "native messaging host" in (conn_val.get("error") or "").lower(), json.dumps(conn_val))
+        panel0.close()
+
+        # Real config for every test below this point — auto-connect never runs again once a
+        # token is already stored and calls keep succeeding (see requestWithAutoConnect).
         helper.evaluate(
             "(cfg) => chrome.storage.local.set(cfg)",
             {"serviceUrl": SERVICE_URL, "token": "test-token"},

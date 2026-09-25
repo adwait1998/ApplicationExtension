@@ -461,6 +461,26 @@
     }
   });
 
+  // AUTO-CONNECT (see background.js): background.js already tried the native host itself before
+  // answering HEALTH (see requestWithAutoConnect there), so by the time this runs the outcome is
+  // final for this check — this only decides what to SHOW. chrome.storage.local.serviceConnection
+  // is written on every attempt (native success/failure, or "host not installed at all"); the one
+  // case worth a dedicated hint is "host not installed" while nothing is configured yet, since
+  // that's the one thing the operator can fix in one command.
+  async function maybeNativeHostTip() {
+    try {
+      var data = await chrome.storage.local.get(['serviceConnection', 'token']);
+      var conn = data.serviceConnection;
+      if (!data.token && conn && conn.mode === 'manual' && conn.ok === false &&
+          /native messaging host not found/i.test(conn.error || '')) {
+        return ' Tip: run `applypilot extension install-host` once and the service will start by itself.';
+      }
+    } catch (e) {
+      // best-effort hint only — never blocks the rest of the status line
+    }
+    return '';
+  }
+
   async function checkHealth() {
     try {
       var resp = await chrome.runtime.sendMessage({ type: 'HEALTH' });
@@ -470,7 +490,8 @@
         tiersLine.textContent = 'Service connected. Tiers: ' + (tiers.length ? tiers.join(', ') : 'none reported');
       } else {
         setDot('err');
-        tiersLine.textContent = (resp && resp.message) || 'Service unreachable.';
+        var tip = await maybeNativeHostTip();
+        tiersLine.textContent = ((resp && resp.message) || 'Service unreachable.') + tip;
       }
     } catch (e) {
       setDot('err');
