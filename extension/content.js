@@ -436,6 +436,23 @@
     });
   }
 
+  // Reviewer round 3, item 1 (export safety): a small, CLOSED vocabulary standing in for the
+  // free-text `reason` in the fill-report export (item 6) — never derived by parsing any
+  // dynamic text (the service's `reason` strings, a page's own label copy, ...), only ever set
+  // to one of these fixed literals at the exact point content.js already knows, from its own
+  // code path, WHY an entry was produced. `source` on a FillResult/SkipResult from the service
+  // is itself a small closed enum (schema.py: "canary"|"deterministic"|"structured"|"laya"|
+  // "answer_bank"|"draft"|"secret_guard"|"unresolved") rather than free text, so it is safe to
+  // pass through as-is; anything else (an older service build, a stub, ...) collapses to
+  // 'other' rather than ever being echoed verbatim.
+  var KNOWN_SOURCE_CATEGORIES = {
+    canary: 1, deterministic: 1, structured: 1, laya: 1, answer_bank: 1, draft: 1,
+    secret_guard: 1, unresolved: 1
+  };
+  function categoryForSource(source) {
+    return KNOWN_SOURCE_CATEGORIES[source] ? source : 'other';
+  }
+
   /**
    * @param fields Object<string, FieldDescriptor> — id -> the originally-scanned descriptor,
    *   used only to get a human-readable label for progress text and the "needs you" list.
@@ -479,13 +496,13 @@
 
       if (ctx.isCancelled()) {
         for (var c = i; c < fills.length; c++) {
-          failed.push({ id: fills[c].id, reason: 'Not attempted — cancelled', status: 'failed', required: requiredFor(fills[c]), tag: tagFor(fills[c]), widget: widgetFor(fills[c]) });
+          failed.push({ id: fills[c].id, reason: 'Not attempted — cancelled', status: 'failed', category: 'cancelled', required: requiredFor(fills[c]), tag: tagFor(fills[c]), widget: widgetFor(fills[c]) });
         }
         return Promise.resolve();
       }
       if (ctx.overBudget()) {
         for (var b = i; b < fills.length; b++) {
-          failed.push({ id: fills[b].id, reason: 'Not attempted — time budget exceeded', status: 'failed', required: requiredFor(fills[b]), tag: tagFor(fills[b]), widget: widgetFor(fills[b]) });
+          failed.push({ id: fills[b].id, reason: 'Not attempted — time budget exceeded', status: 'failed', category: 'time_budget', required: requiredFor(fills[b]), tag: tagFor(fills[b]), widget: widgetFor(fills[b]) });
         }
         return Promise.resolve();
       }
@@ -496,7 +513,7 @@
       ctx.onProgress({ current: i + 1, total: total, label: label });
 
       if (!entry) {
-        failed.push({ id: fill.id, reason: 'Field no longer found on the page (did the page change after scanning?)', status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill) });
+        failed.push({ id: fill.id, reason: 'Field no longer found on the page (did the page change after scanning?)', status: 'failed', category: 'field_missing', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill) });
         return step(i + 1);
       }
       if (!fill.auto_fill) {
@@ -506,7 +523,7 @@
         for (var t = 0; t < targets.length; t++) highlight(targets[t], 'skipped', fill.reason || 'Not confident enough to auto-fill');
         needsYou.push({
           id: fill.id, label: label, reason: fill.reason || 'Not confident enough to auto-fill',
-          status: 'left_for_you', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+          status: 'left_for_you', category: categoryForSource(fill.source), required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
         });
         return step(i + 1);
       }
@@ -538,7 +555,7 @@
         for (var kt = 0; kt < keepTargets.length; kt++) highlight(keepTargets[kt], 'skipped', 'kept your value');
         needsYou.push({
           id: fill.id, label: label, reason: 'kept your value',
-          status: 'kept_value', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+          status: 'kept_value', category: 'kept_value', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
         });
         return step(i + 1);
       }
@@ -562,13 +579,14 @@
             id: fill.id, label: label, value: fill.value,
             values: (Array.isArray(fill.values) && fill.values.length) ? fill.values : null,
             reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft,
-            status: isDraft ? 'draft' : 'verified', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+            status: isDraft ? 'draft' : 'verified', category: isDraft ? 'draft' : categoryForSource(fill.source),
+            required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
           });
         } else if (outcome.timedOut) {
           for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Timed out waiting for this field to respond');
           failed.push({
             id: fill.id, label: label, reason: 'Timed out after ' + Math.round(ctx.fieldTimeoutMs / 1000) + 's — the page did not respond in time',
-            status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+            status: 'failed', category: 'timed_out', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
           });
         } else {
           // entry._lastReason is set by scanner.js's applyFill() for the Workday popup
@@ -578,7 +596,7 @@
           for (var h3 = 0; h3 < hlTargets.length; h3++) highlight(hlTargets[h3], 'skipped', 'Could not match "' + fill.value + '" to an option' + extra);
           failed.push({
             id: fill.id, label: label, reason: 'Could not match value "' + fill.value + '" to an option on the page' + extra,
-            status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+            status: 'failed', category: 'no_match', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
           });
         }
       }).then(function () { return step(i + 1); });
@@ -591,7 +609,7 @@
         needsYou.push({
           id: skip.id, label: (fieldsById[skip.id] || {}).label || (fieldsById[skip.id] || {}).name,
           reason: skip.reason || 'Skipped — please answer this yourself',
-          status: 'left_for_you', required: requiredFor(skip), tag: tagFor(skip), widget: widgetFor(skip)
+          status: 'left_for_you', category: categoryForSource(skip.source), required: requiredFor(skip), tag: tagFor(skip), widget: widgetFor(skip)
         });
         if (!sEntry) continue;
         var sTargets = ApplyPilotScanner.getHighlightTargets(sEntry);
@@ -631,7 +649,7 @@
           }
           reverted.push({
             id: a.id, label: a.label, source: a.source, required: a.required, tag: a.tag, widget: a.widget,
-            status: 'didnt_stick',
+            status: 'didnt_stick', category: 'didnt_stick',
             reason: "Didn't stick — the page reverted this field after it was filled (re-render, or the widget cleared itself)"
           });
         }
@@ -642,12 +660,125 @@
     });
   }
 
+  // ---------------------------------------------------------------------
+  // RE-SCAN FOR NEWLY-REVEALED FIELDS (reviewer round 3, item 2). Some forms only render part of
+  // themselves in response to an earlier answer — e.g. a Lever-style US EEO survey (16 radios)
+  // that appears only once "What is your location?" is set to United States. Without this, those
+  // fields were never filled (they didn't exist at scan time) AND never counted as "couldn't
+  // read" (countUnreadControls() only ever ran against the pre-fill page — see prepareAndScan()).
+  // After the normal apply+verify pass, this frame re-scans ITSELF (never another frame — each
+  // frame already runs its own independent pipeline, see the file header) up to
+  // MAX_RESCAN_ROUNDS more times, resolving and filling ONLY whatever is genuinely new each time,
+  // through the exact same guards/shield/verification/per-field-timeout/cancel this frame's first
+  // round already used — nothing about how a rescanned field is filled is special-cased.
+  // ---------------------------------------------------------------------
+  var MAX_RESCAN_ROUNDS = 2;
+
+  /** Every DOM element any CURRENT registry entry points at, as a Set — see scanForNewFields(). */
+  function knownElementSet() {
+    if (typeof Set === 'undefined') return null;
+    var set = new Set();
+    for (var id in registry) {
+      if (!Object.prototype.hasOwnProperty.call(registry, id)) continue;
+      entryElements(registry[id]).forEach(function (el) { set.add(el); });
+    }
+    return set;
+  }
+
+  var rescanRoundCounter = 0;
+
+  /**
+   * Re-scans the page and returns only the FieldDescriptors for elements this frame's registry
+   * has never pointed at before — compared by the actual DOM ELEMENT, never scanner.js's own
+   * positional id (scanner.js assigns ids like "f0"/"f1" in DOM-order at scan time; splicing new
+   * fields into the middle of the page can shift what id an ALREADY-handled field gets on a
+   * later scan). Only the genuinely new entries are merged into the live `registry`, and always
+   * under a freshly-namespaced id ("rescanN_...") that can never collide with — and so can never
+   * silently reassign — an id an earlier round's highlight/priorValues/report already depends
+   * on; every OLD entry is left completely untouched. A composite entry (radio group, date pair,
+   * ...) counts as new only if EVERY element it touches is unseen — sharing even one element
+   * with a known entry means this frame has already accounted for it.
+   */
+  function scanForNewFields() {
+    var known = knownElementSet();
+    var result = ApplyPilotScanner.scanAll(document);
+    rescanRoundCounter++;
+    var fresh = [];
+    result.fields.forEach(function (f) {
+      var entry = result.registry[f.id];
+      var els = entryElements(entry);
+      var isNew = known && els.length > 0 && els.every(function (el) { return !known.has(el); });
+      if (!isNew) return;
+      var newId = 'rescan' + rescanRoundCounter + '_' + f.id;
+      var copy = {};
+      for (var k in f) if (Object.prototype.hasOwnProperty.call(f, k)) copy[k] = f[k];
+      copy.id = newId;
+      registry[newId] = entry;
+      fresh.push(copy);
+    });
+    return fresh;
+  }
+
+  /**
+   * Runs up to MAX_RESCAN_ROUNDS additional scan -> resolve -> apply -> verify passes for fields
+   * that only appeared after an earlier round's own fills, merging every round's results into
+   * `accum` ({applied, failed, needsYou, total}) and pushing a live progress update after each
+   * one. Stops early on Cancel/over-budget (checked the same way between rounds as applyFills()
+   * already checks between fields) or once a round finds nothing new. Fails soft: a
+   * RESOLVE_NEW_FIELDS round trip that errors just stops further rescanning — it never loses or
+   * rejects the results already accumulated from earlier rounds.
+   */
+  function runRescanRounds(accum, ctx, roundsLeft) {
+    if (roundsLeft <= 0 || ctx.isCancelled() || ctx.overBudget()) return Promise.resolve(accum);
+    var freshFields = scanForNewFields();
+    if (!freshFields.length) return Promise.resolve(accum);
+
+    freshFields.forEach(function (f) { if (currentPrepare) currentPrepare.fieldsById[f.id] = f; });
+    var fieldsById = (currentPrepare && currentPrepare.fieldsById) || {};
+    ctx.onProgress({ current: accum.total, total: accum.total + freshFields.length, label: 'Checking newly-revealed fields…' });
+
+    return chrome.runtime.sendMessage({ type: 'RESOLVE_NEW_FIELDS', url: location.href, fields: freshFields }).then(function (resp) {
+      if (!resp || !resp.ok) return accum; // fail soft — keep whatever earlier rounds already produced
+      return applyFills(resp.fills || [], resp.skipped || [], fieldsById, ctx)
+        .then(verifyAppliedFills)
+        .then(function (roundResult) {
+          var merged = {
+            applied: accum.applied.concat(roundResult.applied),
+            failed: accum.failed.concat(roundResult.failed),
+            needsYou: accum.needsYou.concat(roundResult.needsYou),
+            total: accum.total + roundResult.total
+          };
+          ctx.onProgress({ current: merged.total, total: merged.total, label: 'Confirming new fields stuck…' });
+          return runRescanRounds(merged, ctx, roundsLeft - 1);
+        });
+    }, function () { return accum; });
+  }
+
   function base64ToUint8Array(base64) {
     var binary = atob(base64);
     var len = binary.length;
     var bytes = new Uint8Array(len);
     for (var i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
     return bytes;
+  }
+
+  /**
+   * Generalizes attachResumeFile()'s own Workday-only "already attached" duplicate-prevention
+   * signal (findWorkdayUploadedFilename()) to also cover a plain, non-Workday `<input
+   * type=file>` that already has a file selected — from an earlier fill on this same page, or
+   * the operator's own manual choice. Read-only; built entirely from functions scanner.js
+   * already exports, same pattern countUnreadControls() above uses, never a new scanner.js
+   * export. Used ONLY by the tailored-résumé path below (never the plain base-résumé path,
+   * which keeps relying on attachResumeFile()'s own Workday-only check exactly as before this
+   * feature existed) so "never a second upload over an existing one" holds for switching to the
+   * tailored PDF without changing any already-tested base-résumé behaviour.
+   */
+  function findAlreadyAttachedResume(doc, target) {
+    var wd = ApplyPilotScanner.findWorkdayUploadedFilename(doc);
+    if (wd) return wd;
+    var el = target && target.el;
+    if (el && el.files && el.files.length) return el.files[0].name || '(attachment present)';
+    return '';
   }
 
   /**
@@ -680,6 +811,24 @@
         return fail((resp && resp.message) || 'Could not reach the local service for the résumé file.', resp && resp.error);
       }
       var d = resp.data || {};
+      // background.js's GET_RESUME handler decides base vs. tailored for THIS tab (see
+      // callResumeForAttach() there — driven by the panel's "Use for this application") and
+      // tags which one it actually fetched here, so the résumé line can say so honestly (build
+      // spec item 3) regardless of which branch below runs.
+      var kind = d.kind === 'tailored' ? 'tailored' : 'base';
+
+      // TAILORED RÉSUMÉ ("Use for this application" / build spec item 2): "If a résumé is
+      // already attached on the page, do NOT remove or replace it automatically." See
+      // findAlreadyAttachedResume()'s own doc comment for why this check is generalized here
+      // but not for the plain base-résumé path below (kind === 'base' never reaches this block).
+      if (kind === 'tailored') {
+        var already = findAlreadyAttachedResume(document, target);
+        if (already) {
+          highlight(target.el, 'filled', 'Résumé already attached: ' + already);
+          return { attempted: true, attached: false, alreadyAttached: true, filename: already, kind: kind };
+        }
+      }
+
       var file;
       try {
         var bytes = base64ToUint8Array(d.base64 || '');
@@ -693,8 +842,9 @@
       // is a short wait for Workday's own upload-confirmation markers (see scanner.js) —
       // that's async, so this whole path has to be too.
       return ApplyPilotScanner.attachResumeFile(document, file).then(function (result) {
+        result.kind = kind;
         if (result.attached) {
-          highlight(target.el, 'filled', 'Résumé attached: ' + result.filename);
+          highlight(target.el, 'filled', 'Résumé attached: ' + result.filename + (kind === 'tailored' ? ' (tailored)' : ''));
         } else if (result.alreadyAttached) {
           // Duplicate prevention: a résumé was already shown as attached, so nothing was
           // touched — this is a success state, not a failure, and must not be re-uploaded.
@@ -706,6 +856,23 @@
       });
     }, function (e) {
       return fail('Could not reach the background worker for the résumé file: ' + (e && e.message ? e.message : e));
+    });
+  }
+
+  /**
+   * Standalone attach, OUTSIDE the normal prepareAndScan()/applyFills() pipeline — the panel's
+   * "Use for this application" (right after setting the preference) and "Attach tailored résumé"
+   * button both run this via the ATTACH_RESUME_NOW message. Reuses maybeAttachResume() verbatim
+   * (same guarded path, same verification, same "never remove or replace" refusal) and folds the
+   * result into whatever this frame already reported — via patchReportedState(), the same
+   * "patch without resetting the visible summary" pattern insertCoverLetterDraft() uses — so
+   * clicking this before ever running a Fill on the page still shows a proper résumé line, and
+   * clicking it after a Fill never wipes that fill's own filled/drafts/needsYou/failed lists.
+   */
+  function attachResumeNow() {
+    return maybeAttachResume().then(function (result) {
+      patchReportedState({ resume: result });
+      return result;
     });
   }
 
@@ -790,21 +957,25 @@
   function undo() {
     var ids = Object.keys(priorValues);
     var restored = 0;
+    var notRestored = 0;
 
     function next(i) {
       if (i >= ids.length) return Promise.resolve();
       var id = ids[i];
       var entry = registry[id];
-      if (!entry) return next(i + 1);
+      if (!entry) { notRestored++; return next(i + 1); } // gone from the page — cannot even attempt it
       var target = priorValues[id];
       return Promise.resolve().then(function () {
         return ApplyPilotScanner.applyFill(entry, target);
       }).then(function () {
         var after;
         try { after = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { after = undefined; }
-        if (isSameValue(after, target)) restored++;
+        // Item 3 (reviewer round 3): report how many restores could NOT be confirmed, not just
+        // how many were confirmed — a widget that rejects the programmatic write back (the same
+        // class of failure a fill itself can hit) must not silently vanish from the count.
+        if (isSameValue(after, target)) restored++; else notRestored++;
       }, function () {
-        // best-effort — a restore that errors just doesn't count; never aborts the rest
+        notRestored++; // best-effort — a restore that errors is reported, never silently dropped
       }).then(function () { return next(i + 1); });
     }
 
@@ -812,7 +983,7 @@
       priorValues = {};
       for (var i = 0; i < highlightedElements.length; i++) clearHighlight(highlightedElements[i]);
       highlightedElements = [];
-      return { restored: restored };
+      return { restored: restored, notRestored: notRestored };
     });
   }
 
@@ -845,7 +1016,14 @@
       shieldFired: false,
       undoAvailable: highlightedElements.length > 0 && Object.keys(priorValues).length > 0,
       error: null,
-      note: null
+      note: null,
+      // Item 2 (reviewer round 3): how many visible, interactive-control-shaped elements this
+      // frame's own registry never captured, as of the LAST time this frame actually checked
+      // (see countUnreadControls()) — refreshed after every rescan round in the APPLY_FILLS
+      // handler below, so background.js's applyFrameReport() can recompute the tab-wide
+      // "couldn't read" figure from the page as it stands once the whole run is done, not
+      // frozen at the pre-fill snapshot prepareAndScan() first took.
+      unreadControls: 0
     };
   }
 
@@ -979,6 +1157,11 @@
         registry = result.registry;
         result.fields.forEach(function (f) { currentPrepare.fieldsById[f.id] = f; });
         var unreadControls = countUnreadControls(document, registry);
+        // Seeded here (the pre-fill snapshot) so a page with NOTHING to fill (finishRun() called
+        // right from this same PREPARE_AND_SCAN response, no APPLY_FILLS ever coming) still
+        // reports a real number; a page that DOES go on to APPLY_FILLS gets this refreshed to the
+        // POST-fill (and post-rescan) figure before that handler's own finishRun() — see there.
+        state.unreadControls = unreadControls;
         return { ok: true, cancelled: false, fields: result.fields, skippedFrames: result.skippedFrames, unreadControls: unreadControls };
       })
       .catch(function (e) {
@@ -1110,7 +1293,7 @@
       if (!already) {
         var drafts = (state && state.drafts || []).concat([{
           id: fieldId, label: label, value: text, reason: 'Cover letter draft inserted', profile_key: null,
-          source: 'cover-letter', draft: true, status: 'draft', required: false, tag: 'textarea', widget: ''
+          source: 'cover-letter', draft: true, status: 'draft', category: 'draft', required: false, tag: 'textarea', widget: ''
         }]);
         var counts = (state && state.counts) || emptyCounts();
         patchReportedState({
@@ -1337,16 +1520,25 @@
       function isCancelled() { return run.cancelled; }
       function overBudget() { return (Date.now() - startedAt) > budgetMs; }
 
-      applyFills(msg.fills || [], msg.skipped || [], pending.fieldsById || {}, {
+      var applyCtx = {
         isCancelled: isCancelled,
         overBudget: overBudget,
         fieldTimeoutMs: fieldTimeoutMs,
         preResumeValues: pending.preResumeValues,
         onProgress: function (progress) { state.progress = progress; sendStateUpdate(state); }
-      }).then(function (result) {
+      };
+
+      applyFills(msg.fills || [], msg.skipped || [], pending.fieldsById || {}, applyCtx).then(function (result) {
         state.progress = { current: result.total, total: result.total, label: 'Confirming fields stuck…' };
         sendStateUpdate(state);
         return verifyAppliedFills(result);
+      }).then(function (result) {
+        // Item 2 (reviewer round 3): before finishing, give this frame up to MAX_RESCAN_ROUNDS
+        // more chances to catch a field that only appeared because of an earlier answer (e.g. a
+        // Lever-style EEO section revealed once "location" is set to US) — see
+        // runRescanRounds()/scanForNewFields() above. A page where nothing new ever appears (the
+        // overwhelming majority) resolves this immediately with `result` unchanged.
+        return runRescanRounds(result, applyCtx, MAX_RESCAN_ROUNDS);
       }).then(function (result) {
         var factApplied = result.applied.filter(function (a) { return !a.draft; });
         var draftApplied = result.applied.filter(function (a) { return a.draft; });
@@ -1361,6 +1553,9 @@
           failed: result.failed.length
         };
         state.undoAvailable = result.applied.length > 0;
+        // "Couldn't read" now reflects the FINAL page (after every rescan round), not the
+        // pre-fill snapshot prepareAndScan() took — see background.js's applyFrameReport().
+        state.unreadControls = countUnreadControls(document, registry);
         finishRun(run, isCancelled() ? 'cancelled' : 'done');
       }, function (e) {
         finishRun(run, 'error', 'Error while filling: ' + (e && e.message ? e.message : String(e)));
@@ -1401,7 +1596,8 @@
       if (msg.type === 'UNDO') {
         undo().then(function (result) {
           var idle = freshState('idle');
-          idle.note = 'Restored ' + result.restored + ' field(s) to their previous values.';
+          idle.note = 'Restored ' + result.restored + ' field(s) to their previous values.' +
+            (result.notRestored ? (' ' + result.notRestored + ' could not be confirmed restored.') : '');
           sendStateUpdate(idle);
           sendResponse(result);
         });
@@ -1426,6 +1622,11 @@
       }
       if (msg.type === 'INSERT_COVER_LETTER') {
         insertCoverLetterDraft(msg.fieldId, String(msg.text || '')).then(sendResponse);
+        return true; // async response
+      }
+      if (msg.type === 'ATTACH_RESUME_NOW') {
+        // "Use for this application" / "Attach tailored résumé" — see attachResumeNow() above.
+        attachResumeNow().then(sendResponse);
         return true; // async response
       }
       if (msg.type === 'READ_FIELDS_FOR_ANSWERS') {

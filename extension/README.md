@@ -2,8 +2,12 @@
 
 A Manifest V3 Chrome extension that reads a job application form on the page you're looking
 at, asks a **local** ApplyPilot service (`127.0.0.1` only) which of your profile values
-belongs in each field, fills them in, and highlights exactly what it did. Nothing leaves your
-machine. Nothing is submitted for you.
+belongs in each field, fills them in, and highlights exactly what it did. Your profile and the
+page you're on never leave your machine — every request goes to that local service and nowhere
+else. The AI-generated features (**Draft cover letter**, **Tailor my résumé**) use a model
+running on this computer by default; they only ever reach a model that isn't on this computer if
+you've explicitly turned that on in Settings ("Allow AI features to use a model that isn't on
+this computer" — off by default). Nothing is submitted for you.
 
 ## The one rule that matters
 
@@ -194,6 +198,44 @@ and résumé, against the job behind the page you're looking at:
    against", or the draft was refused because it claimed experience the profile doesn't have — see
    `grounding.py`) is shown **verbatim** — the service's own `detail` text, not a generic failure.
 
+## Tailor my résumé
+
+The panel's **Tailor my résumé for this job** button (next to Draft cover letter) asks the local
+service to tailor your résumé against the job behind the page you're looking at, the same
+page-text/frame-URL sourcing **Draft cover letter** already uses:
+
+1. `background.js` calls `POST /resume/tailor` with the tab's URL, every frame's URL, and the
+   page's own visible text as a last resort, and gets back `{id, url, title, company, status
+   ("approved" | "approved_with_judge_warning"), judge: {verdict, issues}, warnings, created, pdf,
+   text}`.
+2. The result is shown in a clearly-marked **TAILORED RÉSUMÉ — review before using** box (the
+   same blue "generated content, review before using" color the cover-letter draft uses, never
+   green — this is model-tailored text, not a plain fact pulled from your profile) with the job
+   identified, the judge's own issues when the status carries a warning, the validator's
+   warnings, a collapsible preview of the tailored text, **Download PDF**, and **Use for this
+   application**.
+3. A 403 (no model on this computer, and no cloud model allowed), 422 (no job description found,
+   no résumé on file, or the tailored version failed the fabrication checks), or 503 (no model
+   available at all) is shown **verbatim** — the service's own `detail` text, exactly like the
+   cover letter's own 403/422 handling above.
+4. **Download PDF** fetches `GET /resume/tailored/{id}` through `background.js` (the panel never
+   holds the token) and saves it under the filename the service's own `Content-Disposition`
+   header names (`"<Full Name> - Resume.pdf"`).
+5. **Use for this application** remembers the choice **per tab** (it survives this tab's next
+   fill, the same way the multi-step continuation toggle's own state does) and, right away, tries
+   attaching the tailored PDF immediately if this page already has a résumé upload with nothing
+   in it yet — through the exact same guarded `attachResumeFile()` path (and the same Workday
+   upload-confirmation wait) the base résumé already uses. If nothing on the page can take a
+   résumé yet, nothing happens immediately and the **next** "Fill this page" attaches the
+   tailored PDF instead of the base résumé when it gets to its own résumé-first step. Either way,
+   the résumé line says which file actually landed — `"Attached <name> (tailored)"` or `"...
+   (base)"` — never leaving that ambiguous.
+6. If a résumé is **already** attached on the page (base or otherwise) when either of the above
+   runs, nothing is removed or replaced automatically: the panel says "A résumé is already
+   attached — remove it on the page, then click Attach tailored résumé," and offers that button,
+   which retries the exact same guarded attach and refuses again for as long as something is
+   still sitting there.
+
 ## Remember my answers
 
 After a fill, if it left anything for you to answer yourself, the panel shows a **Remember my
@@ -240,11 +282,17 @@ read" count (see "Report honestly" below) is unchanged by any of this.
 
 **Export fill report** downloads a JSON file built entirely from what's already in
 `chrome.storage.session` — no page access, no permission prompt. Per field: which frame it's in
-(id and URL), its label, its tag/widget, its status, its source, and its reason — plus the page's
-host/path and the fill's counts. **Never a value, anywhere in the file** — even a reason string
-that quotes the attempted value for your own benefit on screen (e.g. `Could not match "Senior
-Engineer" to an option`) has that quoted text redacted before it's written out, since this file is
-meant to be sent to someone else to diagnose a bad fill.
+(id and URL), its label, its tag/widget, its status, its source, and a **category** for why it
+landed where it did — plus the page's host/path and the fill's counts. **Never a value, and
+never the free-text reason, anywhere in the file.** An earlier build redacted only double-quoted
+substrings out of the reason text, which missed a value in single/curly quotes or with no quotes
+at all (an unquoted skills term, a canary question's own wording); the export is now built from
+an **allow-list** instead — `category` is one of a small, fixed, closed vocabulary
+(`content.js`'s `categoryForSource()`/every push site in `applyFills()`) content.js sets at the
+exact point it already knows why an entry was produced, never derived by parsing anyone's prose —
+so nothing the service or the page ever says can leak into this file, regardless of how either
+one happens to phrase a reason on screen. This file is meant to be sent to someone else to
+diagnose a bad fill.
 
 ## Keyboard shortcuts
 
@@ -532,6 +580,16 @@ The fill summary is written to never overstate what actually happened:
   that no longer matches — some controlled-input re-render reasserting old state, or a combobox
   clearing its own search text on blur — is moved out of "Filled" and reported as **"didn't
   stick"** instead. The summary's Filled count only ever includes verified fills.
+- **A question an earlier answer only just revealed is not missed.** Some forms render part of
+  themselves only in response to an earlier answer — e.g. a Lever-style US EEO survey (16 radios)
+  that appears only once "What is your location?" is set to United States. After the verify step
+  above, each frame re-scans **itself** (comparing by the actual DOM element, never scanner.js's
+  own positional id, which can shift once new fields are spliced in) for up to 2 more rounds,
+  resolving and filling only what's genuinely new through the exact same guards, shield,
+  verification, per-field timeout and Cancel as the first round — nothing about a rescanned field
+  is treated any differently. The "couldn't read" figure below is computed from the page as it
+  stands after every rescan round, not frozen at the snapshot taken before the first field was
+  ever touched.
 - The summary line includes how many visible, interactive-control-shaped elements on the page
   (`input`/`select`/`textarea`/`role=combobox`/`role=radiogroup`, minus the ones the scanner
   itself excludes on purpose) never made it into the scanner's own registry at all, **plus** any
@@ -549,7 +607,10 @@ snapshots through the same `applyFill()` path used to fill them (so it survives 
 controlled-input re-renders the same way filling does), removing every highlight it added. It
 then reads each restored field back and reports how many were actually **confirmed** restored
 — not how many restores were merely attempted, which can silently overstate what Undo did if a
-widget rejects a programmatic write the same way a fill sometimes can.
+widget rejects a programmatic write the same way a fill sometimes can — and, just as honestly,
+how many restores it attempted but could **not** confirm, so a widget that quietly rejected the
+restore is surfaced ("3 could not be confirmed restored — check them by hand") instead of just
+disappearing from the count.
 
 ## Known limitations / where a real ATS form could defeat the scanner
 
@@ -638,7 +699,7 @@ can prove and what a plain offline check already covers:
   functions are), and no real network — is called out inline in that file's comments and
   confirmed separately via `scripts/chrome_load_test.py` instead.
 - **`scripts/chrome_panel_test.py`** (same real-Chromium-via-Playwright approach as
-  `chrome_load_test.py`, `--load-extension` and all), as of this writing 88 checks across 7 tabs
+  `chrome_load_test.py`, `--load-extension` and all), as of this writing 255 checks across 19 tabs
   plus the manifest/panel-load checks, exercises everything this README's "Using it on a job
   application page" section above describes that `chrome_load_test.py` cannot:
   - the manifest has no `default_popup`, does declare `side_panel`, holds no static broad

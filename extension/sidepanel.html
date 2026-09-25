@@ -51,6 +51,7 @@
   </div>
   <div class="actions">
     <button id="coverLetterBtn" class="secondary" title="Draft a cover letter for this job from your profile and résumé">Draft cover letter</button>
+    <button id="tailorResumeBtn" class="secondary" title="Tailor your résumé for this job">Tailor my résumé for this job</button>
   </div>
 
   <div id="coverLetterStatus" class="cover-letter-status" hidden></div>
@@ -64,6 +65,27 @@
       <button id="coverLetterDownloadBtn" class="secondary">Download .txt</button>
       <button id="coverLetterInsertBtn" class="secondary" hidden>Insert into the cover-letter box</button>
     </div>
+  </div>
+
+  <div id="tailorResumeStatus" class="cover-letter-status" hidden></div>
+  <div id="tailorResumeBox" class="cover-letter-box" hidden>
+    <div class="draft-badge">TAILORED RÉSUMÉ — review before using</div>
+    <div id="tailorResumeJob" class="cover-letter-job"></div>
+    <div id="tailorResumeVerdict" class="tailor-resume-verdict"></div>
+    <div id="tailorResumeIssues" class="cover-letter-warnings" hidden></div>
+    <div id="tailorResumeWarnings" class="cover-letter-warnings" hidden></div>
+    <details id="tailorResumePreviewDetails">
+      <summary>Preview the tailored text</summary>
+      <textarea id="tailorResumeText" class="cover-letter-text" readonly rows="10"></textarea>
+    </details>
+    <div class="actions">
+      <button id="tailorResumeDownloadBtn" class="secondary">Download PDF</button>
+      <button id="tailorResumeUseBtn" class="secondary">Use for this application</button>
+    </div>
+  </div>
+  <div id="tailorResumeUseStatus" class="cover-letter-status" hidden></div>
+  <div class="actions" id="attachTailoredRow" hidden>
+    <button id="attachTailoredBtn" class="secondary" title="Attach the tailored résumé now, in place of the base résumé, if nothing is attached to the page yet">Attach tailored résumé</button>
   </div>
 
   <div id="fillSummary" class="fill-summary" hidden></div>

@@ -338,6 +338,99 @@ function callResumeRaw() {
   });
 }
 
+// ---------------------------------------------------------------------
+// TAILORED RÉSUMÉ — "Tailor my résumé for this job" / "Use for this application". POST
+// /resume/tailor {urls, page_text} -> {id, url, title, company, status, judge, warnings,
+// created, pdf, text}; 403 (model not on this computer, not allowed)/422 (no job description,
+// no résumé, or the tailored version failed the fabrication checks)/503 (no model) are all
+// surfaced with their real `detail` text intact — see handleResponseVerbatim() — exactly like
+// /cover-letter above. GET /resume/tailored/{id} -> the PDF bytes, same shape callResumeRaw()
+// already returns for the base résumé (filename/contentType/size/base64) so content.js's
+// existing base64ToUint8Array()+File() path needs no changes to accept either one.
+// ---------------------------------------------------------------------
+function callResumeTailorRaw(urls, pageText) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/resume/tailor', { urls: urls || [], page_text: pageText || '' }, handleResponseVerbatim);
+  });
+}
+function callResumeTailor(urls, pageText) {
+  return requestWithAutoConnect(function () { return callResumeTailorRaw(urls, pageText); });
+}
+
+function callResumeTailoredBytesRaw(id) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    var headers = { 'X-ApplyPilot-Token': cfg.token };
+    return fetch(cfg.serviceUrl + '/resume/tailored/' + encodeURIComponent(id), { headers: headers }).then(function (resp) {
+      if (resp.status === 401) {
+        return { ok: false, error: 'unauthorized', message: 'The service rejected the token (401 Unauthorized). Check the token in the extension options page.' };
+      }
+      if (!resp.ok) {
+        return resp.json().then(function (body) {
+          var detail = (body && body.detail) || ('HTTP ' + resp.status);
+          return { ok: false, error: 'http-' + resp.status, message: String(detail) };
+        }, function () {
+          return { ok: false, error: 'http-' + resp.status, message: 'Service returned HTTP ' + resp.status + ' fetching the tailored résumé.' };
+        });
+      }
+      var contentType = resp.headers.get('Content-Type') || 'application/pdf';
+      var headerFilename = parseFilenameFromDisposition(resp.headers.get('Content-Disposition') || '');
+      return resp.arrayBuffer().then(function (buf) {
+        return {
+          ok: true,
+          data: {
+            filename: headerFilename || 'Resume.pdf',
+            contentType: contentType,
+            size: buf.byteLength,
+            base64: bufferToBase64(buf)
+          }
+        };
+      });
+    }, function () {
+      return { ok: false, error: 'unreachable', message: friendlyFetchError(cfg.serviceUrl) };
+    });
+  });
+}
+function callResumeTailoredBytes(id) {
+  return requestWithAutoConnect(function () { return callResumeTailoredBytesRaw(id); });
+}
+
+/** Tags a callResume()/callResumeTailoredBytes() success payload with which kind of résumé it
+ * actually is, so every caller downstream (content.js's highlight text, the panel's résumé
+ * line — "the résumé line in the panel says which file was attached (base vs tailored)") can
+ * report honestly regardless of which branch below produced the bytes. */
+function tagResumeKind(resp, kind) {
+  if (resp && resp.ok && resp.data) resp.data.kind = kind;
+  return resp;
+}
+
+/**
+ * Decides which résumé content.js's maybeAttachResume() should attach for THIS tab: the
+ * tailored PDF if the operator clicked "Use for this application" for this tab (see
+ * USE_TAILORED_RESUME below) — falling back to the base résumé if no tab id is available (a
+ * sender this file can't attribute to a tab, which should not happen for a real content.js
+ * frame) or if the tailored fetch itself fails (the tailored PDF was since deleted service-side,
+ * the service restarted, ...) — never worse than the pre-tailoring behaviour, and the returned
+ * `kind` always reflects what ACTUALLY got fetched, never what was merely requested.
+ */
+function callResumeForAttach(tabId) {
+  if (tabId == null) return callResume().then(function (r) { return tagResumeKind(r, 'base'); });
+  return chrome.storage.session.get(tabStateKey(tabId)).then(function (stored) {
+    var state = stored[tabStateKey(tabId)];
+    var pref = state && state.useTailoredResume;
+    if (pref && pref.id) {
+      return callResumeTailoredBytes(pref.id).then(function (resp) {
+        if (resp && resp.ok) return tagResumeKind(resp, 'tailored');
+        return callResume().then(function (r) { return tagResumeKind(r, 'base'); });
+      });
+    }
+    return callResume().then(function (r) { return tagResumeKind(r, 'base'); });
+  }, function () {
+    return callResume().then(function (r) { return tagResumeKind(r, 'base'); });
+  });
+}
+
 /**
  * GET /profile/counts -> { work_history: <int>, education: <int> }, used ONLY to decide how
  * many times to click a Workday-style "Add Another" button before scanning (see content.js's
@@ -714,6 +807,7 @@ function initialCombinedState(frameIds) {
     logEntry: null,
     permissionNeeded: null,
     continuation: null,
+    useTailoredResume: null,
     _frameStates: {},
     _expectedFrameIds: (frameIds || []).slice()
   };
@@ -810,6 +904,18 @@ function applyFrameReport(combined, frameId, frameState) {
   } else if (!anyRunning) {
     var doneTotal = combined.counts.filled + combined.counts.drafts + combined.counts.needsYou + combined.counts.failed;
     combined.progress = { current: doneTotal, total: doneTotal, label: '' };
+    // Item 2 (reviewer round 3): "couldNotRead" is recomputed from the FINAL page, not frozen at
+    // the pre-fill snapshot runFillForTab() first wrote (before any rescan round could have
+    // registered a field that only appeared mid-fill — see content.js's scanForNewFields()).
+    // combined.skippedFrames itself never changes after runFillForTab() sets it (a whole frame
+    // this run could never get into does not become injectable later), so it's added back in
+    // here rather than recomputed; each frame's own `unreadControls` DOES get refreshed by its
+    // last state update (see content.js's freshState()/the end of its APPLY_FILLS handling), so
+    // summing the LATEST one per frame here is what makes this figure honest about the page as
+    // it stands once the whole run is truly finished, not as it stood before a single field was
+    // ever touched.
+    var unreadFinalSum = reported.reduce(function (sum, s) { return sum + (s.unreadControls || 0); }, 0);
+    combined.couldNotRead = (combined.skippedFrames || 0) + unreadFinalSum;
   }
 
   return combined;
@@ -837,6 +943,11 @@ function runFillForTab(tabId, opts) {
       // CONTINUATION_RUN_FILL below) keep the watch armed instead of silently turning it off the
       // moment the first new-step fill starts.
       fresh.continuation = (existing && existing.continuation) || null;
+      // "Use for this application" is a per-tab preference, not a per-fill result — it must
+      // survive exactly like `continuation` above (see USE_TAILORED_RESUME) so THIS fill's own
+      // résumé-attach step (see content.js's maybeAttachResume()) still knows to use the
+      // tailored PDF.
+      fresh.useTailoredResume = (existing && existing.useTailoredResume) || null;
       return fresh;
     })
       .then(function () {
@@ -1000,13 +1111,39 @@ function undoFillForTab(tabId) {
     }).then(function () {
       return Promise.all(frames.map(function (f) {
         return chrome.tabs.sendMessage(tabId, { type: 'UNDO' }, { frameId: f.frameId })
-          .then(function (r) { return (r && r.restored) || 0; })
-          .catch(function () { return 0; });
+          .then(function (r) { return { restored: (r && r.restored) || 0, notRestored: (r && r.notRestored) || 0 }; })
+          .catch(function () { return { restored: 0, notRestored: 0 }; });
       }));
     });
   }).then(function (counts) {
-    var total = counts.reduce(function (a, b) { return a + b; }, 0);
-    return { ok: true, restored: total };
+    // Honest like every other count in this file: how many restores were actually CONFIRMED
+    // (read back, see content.js's undo()) vs. how many were attempted but could not be
+    // confirmed — never just a single "restored" figure that quietly drops the difference.
+    var total = counts.reduce(function (a, c) { return a + c.restored; }, 0);
+    var totalNotRestored = counts.reduce(function (a, c) { return a + c.notRestored; }, 0);
+    return { ok: true, restored: total, notRestored: totalNotRestored };
+  });
+}
+
+/**
+ * "Use for this application" / "Attach tailored résumé" (build spec item 2): fans an immediate,
+ * standalone attach attempt (OUTSIDE the normal PREPARE_AND_SCAN/APPLY_FILLS pipeline — no
+ * scanning, no other fields touched) out to every frame the operator has already granted, and
+ * returns the FIRST frame's result that actually found a résumé-shaped input to act on (`
+ * attempted: true`) — realistically at most one frame on a real page ever has one. `{attempted:
+ * false}` (nothing found anywhere the fill runs) if none did. Every frame runs the exact same
+ * guarded content.js path (maybeAttachResume(), via a new ATTACH_RESUME_NOW message) a normal
+ * Fill's own résumé-first step already uses — see content.js.
+ */
+function attachResumeNowForTab(tabId) {
+  return getFrames(tabId).then(function (frameInfo) {
+    return Promise.all(frameInfo.frames.map(function (f) {
+      return chrome.tabs.sendMessage(tabId, { type: 'ATTACH_RESUME_NOW' }, { frameId: f.frameId })
+        .catch(function () { return null; });
+    }));
+  }).then(function (results) {
+    var hit = results.filter(function (r) { return r && r.attempted; })[0];
+    return hit || { attempted: false };
   });
 }
 
@@ -1096,7 +1233,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'UNDO_TAB') {
     undoFillForTab(msg.tabId).then(sendResponse, function (e) {
-      sendResponse({ ok: false, error: String(e && e.message ? e.message : e), restored: 0 });
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e), restored: 0, notRestored: 0 });
     });
     return true;
   }
@@ -1105,7 +1242,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     return true;
   }
   if (msg.type === 'GET_RESUME') {
-    callResume().then(sendResponse);
+    // Tab-aware: attaches the tailored PDF instead of the base résumé when this tab has "Use
+    // for this application" active (see USE_TAILORED_RESUME below) — sender.tab.id is always
+    // populated for a real content.js frame, never the side panel/options page (see the
+    // FILL_STATE_UPDATE handler's own comment on this).
+    var resumeTabId = (sender && sender.tab && typeof sender.tab.id === 'number') ? sender.tab.id : null;
+    callResumeForAttach(resumeTabId).then(sendResponse);
     return true;
   }
   if (msg.type === 'PROFILE_COUNTS') {
@@ -1114,6 +1256,86 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'DRAFT_COVER_LETTER') {
     callCoverLetter(msg.urls, msg.pageText).then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'RESUME_TAILOR') {
+    // "Tailor my résumé for this job" — same request shape and same verbatim-403/422/503
+    // handling as DRAFT_COVER_LETTER above; see callResumeTailor().
+    callResumeTailor(msg.urls, msg.pageText).then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'GET_TAILORED_RESUME_PDF') {
+    // "Download PDF" in the tailored-résumé review box — the panel can't fetch this itself (it
+    // never holds the token; see the file header), so it asks this worker for the bytes and
+    // builds the download client-side, same pattern DRAFT_COVER_LETTER's Insert already uses.
+    callResumeTailoredBytes(msg.id).then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'USE_TAILORED_RESUME') {
+    // "Use for this application": remembered per tab (survives a fresh RUN_FILL — see
+    // runFillForTab()'s own preservation of `existing.useTailoredResume`, mirroring how item 8's
+    // `continuation` toggle already survives one) so THIS tab's next Fill (or an immediate
+    // attach right now, see ATTACH_TAILORED_RESUME_NOW below) uses the tailored PDF instead of
+    // the base résumé — see GET_RESUME's own tab-aware handling above.
+    var tailorTabId = msg.tabId;
+    updateStoredState(tailorTabId, function (existing) {
+      var combined = existing || initialCombinedState([]);
+      if (!existing) combined.status = 'idle'; // defensive — see openPanelWithPermissionNotice()'s comment
+      combined.useTailoredResume = { id: msg.id, filename: msg.filename || '' };
+      return combined;
+    }).then(function () {
+      // "...or an immediate attach if the page has a résumé input and nothing is attached yet"
+      // — best-effort, standalone (see attachResumeNowForTab()); a page with no résumé input at
+      // all, or one that already has something attached, both resolve normally here (the
+      // response just says so) rather than treating either as an error.
+      return attachResumeNowForTab(tailorTabId);
+    }).then(function (result) { sendResponse({ ok: true, attach: result }); },
+            function (e) { sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }); });
+    return true;
+  }
+  if (msg.type === 'ATTACH_TAILORED_RESUME_NOW') {
+    // The panel's own "Attach tailored résumé" button — same standalone action
+    // USE_TAILORED_RESUME already runs once, offered again on demand (e.g. once the operator has
+    // removed whatever was already attached on the page, per the build spec's own wording).
+    attachResumeNowForTab(msg.tabId).then(function (result) { sendResponse({ ok: true, attach: result }); },
+      function (e) { sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }); });
+    return true;
+  }
+  if (msg.type === 'RESOLVE_NEW_FIELDS') {
+    // Item 2 (reviewer round 3): a single frame's own incremental /resolve round trip for
+    // fields ITS OWN rescan found that were not part of the page when the fill's main /resolve
+    // call went out (e.g. a US-only EEO section a Lever form only renders after "location" is
+    // answered) — see content.js's scanForNewFields()/runRescanRounds(). Deliberately a plain
+    // per-frame request/response (not folded into runFillForTab()'s cross-frame batching above)
+    // since this only ever fires for the one frame that actually found something new; content.js
+    // caps how many times it will ask again (MAX_RESCAN_ROUNDS), so this can never loop forever.
+    if (!sender || !sender.tab || typeof sender.tab.id !== 'number') { sendResponse({ ok: false, error: 'no sender tab' }); return false; }
+    var rescanFrameId = typeof sender.frameId === 'number' ? sender.frameId : 0;
+    var rescanFields = (msg.fields || []).map(function (f) {
+      var qf = {};
+      for (var k in f) if (Object.prototype.hasOwnProperty.call(f, k)) qf[k] = f[k];
+      qf.id = qualifyId(rescanFrameId, f.id);
+      return qf;
+    });
+    callResolve(msg.url || '', rescanFields).then(function (resp) {
+      if (!resp || !resp.ok) { sendResponse({ ok: false, error: (resp && resp.message) || 'The local service call failed.' }); return; }
+      var data = resp.data || {};
+      function unqualifyList(list) {
+        var out = [];
+        (list || []).forEach(function (item) {
+          var parts = splitQualifiedId(item.id);
+          if (!parts) return;
+          var copy = {};
+          for (var k in item) if (Object.prototype.hasOwnProperty.call(item, k)) copy[k] = item[k];
+          copy.id = parts.localId;
+          out.push(copy);
+        });
+        return out;
+      }
+      sendResponse({ ok: true, fills: unqualifyList(data.fills), skipped: unqualifyList(data.skipped) });
+    }, function (e) {
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+    });
     return true;
   }
   if (msg.type === 'REMEMBER_ANSWERS') {

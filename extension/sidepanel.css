@@ -300,6 +300,26 @@ button.secondary.cancel:hover { background: var(--err-bg); }
 }
 .cover-letter-box .actions { padding: 10px 0 0; }
 
+/* -- tailor my résumé (build spec): reuses every .cover-letter-* class above (same "generated
+   content, review before using" blue theme) plus a couple of its own for the status verdict and
+   the native <details> preview. -- */
+.tailor-resume-verdict {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.tailor-resume-verdict.warn { color: var(--warn); }
+#tailorResumePreviewDetails { margin-top: 4px; }
+#tailorResumePreviewDetails summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--draft);
+  user-select: none;
+}
+#tailorResumePreviewDetails .cover-letter-text { margin-top: 6px; }
+
 /* -- remember my answers (item 3) -- */
 .remember-box { padding: 0 12px 8px; }
 .remember-box .actions { padding: 0 0 8px; }
