@@ -465,6 +465,12 @@
         : 'Filling…');
     } else if (!state) {
       setStatus('Ready — click Fill this page to scan and fill.');
+    } else if (state.permissionNeeded && (state.permissionNeeded.hosts || []).length) {
+      // Item 7: the fill-page keyboard shortcut found a cross-origin frame it wasn't already
+      // allowed to fill and refused to partially fill the rest silently — same wording the
+      // panel's own Fill/Report click handlers use when chrome.permissions.request() is declined.
+      setStatus('ApplyPilot needs permission to fill forms on ' + state.permissionNeeded.hosts.join(', ') +
+        ' — nothing runs until you allow it. Click Fill this page to grant it.', true);
     } else if (state.error) {
       setStatus('SAFETY/ERROR: ' + state.error, true);
     } else if (state.shieldFired) {

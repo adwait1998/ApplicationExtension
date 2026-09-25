@@ -712,6 +712,7 @@ function initialCombinedState(frameIds) {
     skippedFrames: 0,
     couldNotRead: 0,
     logEntry: null,
+    permissionNeeded: null,
     _frameStates: {},
     _expectedFrameIds: (frameIds || []).slice()
   };
@@ -996,6 +997,75 @@ function undoFillForTab(tabId) {
   }).then(function (counts) {
     var total = counts.reduce(function (a, b) { return a + b; }, 0);
     return { ok: true, restored: total };
+  });
+}
+
+// ---------------------------------------------------------------------
+// KEYBOARD SHORTCUT (item 7) — manifest.json's "commands": _execute_action (Alt+Shift+F) is a
+// reserved name Chrome dispatches by simulating the toolbar icon's own click, which already
+// opens the side panel (setPanelBehavior() at the top of this file) — no code needed for that
+// one. "fill-page" (Alt+Shift+G) is this file's own command: fill the ACTIVE tab directly,
+// without making the operator open the panel and click Fill first.
+// ---------------------------------------------------------------------
+
+/**
+ * The command gesture itself grants activeTab for the tab's own top frame — enough to inject and
+ * scan/fill it even on a site this extension has never been allowed on before. It does NOT
+ * extend to a genuinely cross-origin child frame (an embedded ATS iframe); getFrames() already
+ * excludes any same-origin child (see excludeFramesCoveredByParentRecursion()), so every frame
+ * left in `nonTopFrames` below is one that needs its OWN real host permission regardless of
+ * activeTab. If any of those isn't already granted, this never fills the top frame alone and
+ * quietly skips the rest — it opens the panel and leaves the exact same permission-needed note
+ * the panel's own Fill/Report click handlers show, so the operator can grant it the normal way.
+ */
+function handleFillPageCommand(tab) {
+  if (!tab || typeof tab.id !== 'number' || !/^https?:\/\//.test(tab.url || '')) return Promise.resolve();
+  var tabId = tab.id;
+  return getFrames(tabId).then(function (frameInfo) {
+    var nonTopFrames = frameInfo.frames.filter(function (f) { return f.frameId !== 0; });
+    return Promise.all(nonTopFrames.map(function (f) {
+      var origin = frameOrigin(f.url);
+      if (!origin) return true; // unparseable — never block the whole command over this alone
+      return chrome.permissions.contains({ origins: [origin + '/*'] });
+    })).then(function (allGranted) {
+      if (allGranted.every(Boolean)) {
+        return chrome.scripting.executeScript({ target: { tabId: tabId, allFrames: true }, files: ['scanner.js', 'capture.js', 'content.js'] })
+          .then(function () { return runFillForTab(tabId, { url: tab.url }); });
+      }
+      return openPanelWithPermissionNotice(tabId, nonTopFrames);
+    });
+  }).catch(function () {});
+}
+
+function openPanelWithPermissionNotice(tabId, missingFrames) {
+  var hosts = [];
+  missingFrames.forEach(function (f) {
+    var origin = frameOrigin(f.url);
+    if (origin) {
+      var h = origin.replace(/^https?:\/\//, '');
+      if (hosts.indexOf(h) === -1) hosts.push(h);
+    }
+  });
+  var openPromise = (chrome.sidePanel && typeof chrome.sidePanel.open === 'function')
+    ? chrome.sidePanel.open({ tabId: tabId }).catch(function () {})
+    : Promise.resolve();
+  return openPromise.then(function () {
+    return updateStoredState(tabId, function (existing) {
+      var combined = existing || initialCombinedState([]);
+      // A brand-new state defaults to 'running' (see initialCombinedState) — nothing is actually
+      // running here, so that would misrender as "Filling…" forever. An EXISTING state (a
+      // previous fill's own result) is left exactly as it was; only `permissionNeeded` is added.
+      if (!existing) combined.status = 'idle';
+      combined.permissionNeeded = { hosts: hosts, checkedAt: Date.now() };
+      return combined;
+    });
+  });
+}
+
+if (self.chrome && chrome.commands && chrome.commands.onCommand &&
+    typeof chrome.commands.onCommand.addListener === 'function') {
+  chrome.commands.onCommand.addListener(function (command, tab) {
+    if (command === 'fill-page') handleFillPageCommand(tab);
   });
 }
 

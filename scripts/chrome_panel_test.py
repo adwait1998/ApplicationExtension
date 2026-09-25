@@ -98,6 +98,15 @@ check("manifest has a pinned \"key\" that derives to the native host's allowed e
       bool(manifest.get("key")) and _chrome_extension_id_from_key(manifest["key"]) == EXPECTED_EXTENSION_ID,
       (manifest.get("key") or "")[:40] + "...")
 
+# --- item 7: keyboard shortcuts ---
+commands = manifest.get("commands") or {}
+check("manifest declares _execute_action with the Alt+Shift+F suggested key (opens the panel)",
+      (commands.get("_execute_action") or {}).get("suggested_key", {}).get("default") == "Alt+Shift+F",
+      json.dumps(commands.get("_execute_action")))
+check("manifest declares a fill-page command with the Alt+Shift+G suggested key",
+      (commands.get("fill-page") or {}).get("suggested_key", {}).get("default") == "Alt+Shift+G",
+      json.dumps(commands.get("fill-page")))
+
 
 # ---------------------------------------------------------------------------
 # 1. a tiny stub of the local ApplyPilot service — stdlib only, ephemeral port.
@@ -1315,6 +1324,67 @@ with sync_playwright() as p:
                   "Test Value" not in raw_report_text, raw_report_text[:300])
 
         # =====================================================================
+        # TAB 13 — KEYBOARD SHORTCUT (item 7): "fill-page"'s handler (background.js's
+        #          handleFillPageCommand()) fills the ACTIVE tab directly -- no panel click
+        #          involved -- when every frame it needs is already permitted (a plain
+        #          single-frame 127.0.0.1 page always is, via the manifest's own static
+        #          host_permissions). Invoked directly against the real service worker
+        #          (Playwright has no API to simulate an OS-level keyboard shortcut for an
+        #          extension command) -- the exact same function chrome.commands.onCommand calls.
+        # =====================================================================
+        tab13 = ctx.new_page()
+        tab13.goto(PAGE_BASE + "#t=13")
+        tab13_id = find_tab_id(helper, "#t=13")
+        check("found tab 13's chrome tab id", tab13_id is not None)
+
+        sw.evaluate(
+            "(args) => handleFillPageCommand({ id: args.tabId, url: args.url })",
+            {"tabId": tab13_id, "url": PAGE_BASE + "#t=13"},
+        )
+        state13 = wait_for_done(helper, tab13_id, timeout_s=20)
+        check("the fill-page command filled the active tab directly, with no panel click involved",
+              state13 is not None and state13.get("status") == "done", str(state13)[:200])
+        if state13:
+            check("the fill-page command's fill actually filled real fields",
+                  (state13.get("counts") or {}).get("filled", 0) > 0, json.dumps(state13.get("counts")))
+
+        # The downstream half of the "missing permission" path: a genuinely cross-origin,
+        # ungranted frame can't be produced in THIS harness -- every fixture is 127.0.0.1, always
+        # covered by the manifest's own static host_permissions (see this file's existing notes on
+        # why the real chrome.permissions.request() prompt itself is equally out of reach here).
+        # This calls openPanelWithPermissionNotice() directly with a fabricated missing-frame list
+        # to prove what it does once handleFillPageCommand() decides permission is needed: record
+        # the right host, open the panel, and never silently fill anything.
+        tab14 = ctx.new_page()
+        tab14.goto(PAGE_BASE + "#t=14")
+        tab14_id = find_tab_id(helper, "#t=14")
+        check("found tab 14's chrome tab id", tab14_id is not None)
+        sw.evaluate(
+            "(args) => openPanelWithPermissionNotice(args.tabId, "
+            "[{ frameId: 99, url: 'https://embedded.example.com/app' }])",
+            {"tabId": tab14_id},
+        )
+        state14 = get_state(helper, tab14_id)
+        check("openPanelWithPermissionNotice records the missing host, never a fill",
+              bool(state14) and (state14.get("permissionNeeded") or {}).get("hosts") == ["embedded.example.com"]
+              and (state14.get("counts") or {}).get("filled", 0) == 0,
+              json.dumps(state14))
+
+        panel14 = ctx.new_page()
+        panel14.goto(f"{panel_url}?tabId={tab14_id}")
+        panel14.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel14.wait_for_function(
+            "() => (document.getElementById('statusBox').textContent || '').includes('embedded.example.com')",
+            timeout=5000)
+        status14 = panel14.eval_on_selector("#statusBox", "el => el.textContent")
+        check("the panel shows the exact permission-needed line naming the missing host",
+              "needs permission" in (status14 or "").lower() and "embedded.example.com" in (status14 or ""),
+              repr(status14))
+        check("the panel does NOT show a fill summary since nothing was actually filled",
+              panel14.eval_on_selector("#fillSummary", "el => el.hidden") is True)
+        panel14.close()
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -1325,7 +1395,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))

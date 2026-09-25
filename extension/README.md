@@ -246,6 +246,20 @@ that quotes the attempted value for your own benefit on screen (e.g. `Could not 
 Engineer" to an option`) has that quoted text redacted before it's written out, since this file is
 meant to be sent to someone else to diagnose a bad fill.
 
+## Keyboard shortcuts
+
+Two commands, both rebindable at `chrome://extensions/shortcuts`:
+
+- **Alt+Shift+F** opens the panel (`_execute_action`, a name Chrome itself dispatches by
+  simulating the toolbar icon's own click — no code here, it just reuses `openPanelOnActionClick`).
+- **Alt+Shift+G** fills the active tab directly, without opening the panel or clicking Fill first.
+  The shortcut's own gesture grants `activeTab` for the tab's top frame, which is enough on its
+  own for a page with no cross-origin embedded form. If the page DOES have one (an embedded
+  Greenhouse/Lever-style iframe) and its origin isn't already granted, this never fills the top
+  frame alone and silently skips the rest — it opens the panel and shows the same "ApplyPilot
+  needs permission..." line the panel's own Fill/Report buttons show, so you grant it the normal
+  way (click **Fill this page**).
+
 ## Fill every frame
 
 About a quarter of real job postings are a company's own careers page embedding the actual
@@ -682,3 +696,15 @@ submissions). What's left is genuinely manual — things automation on a mock pa
 6. Try it against a real company careers page that embeds its ATS form in a cross-origin
    `<iframe>` (the scenario "Fill every frame" above exists for) and confirm the embedded form's
    fields get scanned, filled and highlighted exactly like a top-level form would.
+7. **The keyboard shortcuts** — press Alt+Shift+F on any tab and confirm the panel opens exactly
+   as it does from the toolbar icon; press Alt+Shift+G on a real job application page (no panel
+   open at all) and confirm it fills the page directly. On a real page embedding a cross-origin
+   ATS iframe you haven't already granted, confirm Alt+Shift+G does NOT partially fill the top
+   frame — it opens the panel showing the "needs permission" line instead, and a real, native
+   `chrome.commands` keypress is not something Playwright can simulate at all, so
+   `chrome_panel_test.py` instead calls `handleFillPageCommand()`/`openPanelWithPermissionNotice()`
+   directly against the real service worker — see that file's own comments on both this and item
+   7's other genuinely-manual-only gap, `chrome.sidePanel.open()`'s user-gesture timing once the
+   permission check's own `await` has already happened (this build's own code degrades safely
+   either way: the permission note is written to storage regardless of whether the panel visibly
+   auto-opens, so it's there the next time the panel *is* opened, manually or otherwise).
