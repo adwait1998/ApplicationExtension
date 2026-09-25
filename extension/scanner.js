@@ -4389,12 +4389,35 @@
     if (entry.kind === 'checkbox-group') {
       return entry.elements.filter(function (e) { return e.checked; }).map(function (e) { return getLabel(e); }).join(', ');
     }
-    if (entry.kind === 'combobox') return getComboboxCommittedValue(entry);
+    // Reviewer round 6, false "didn't stick" (live probe, 2026-09-24/25 — every Greenhouse
+    // posting checked: gitlab, twilio, faire, figma, the sofi embed): a phone "Country"
+    // combobox's own committed react-select chip collapses to just the bare dial code ("+1")
+    // once a country is picked -- it can never say WHICH country that is (see
+    // phoneCountrySelectedName's own comment) -- so a raw read here must defer to the SAME
+    // paired intl-tel-input button verifyComboboxSelection()/fillComboboxOne()'s own "already
+    // set" check already reads, never the lossy chip. Every other combobox is unaffected:
+    // pairedPhoneCountryButton() only ever matches this one specific fieldset+button shape, and
+    // an unselected/genuinely-reverted widget's button reports "Select country" (no match),
+    // reading back '' rather than ever defaulting to some assumed country.
+    if (entry.kind === 'combobox') {
+      var currentPhoneBtn = pairedPhoneCountryButton(entry.input);
+      if (currentPhoneBtn) return phoneCountrySelectedName(currentPhoneBtn);
+      return getComboboxCommittedValue(entry);
+    }
     if (entry.kind === 'button-group') {
       var selected = entry.buttons.filter(isChoiceButtonSelected)[0];
       return selected ? accessibleControlText(selected) : '';
     }
-    if (entry.kind === 'lever-location') return cleanText((entry.hidden && entry.hidden.value) || '');
+    // Ground truth (live probe, 2026-09-25, jobs.lever.co/zerohomes): the hidden
+    // `selectedLocation` field's own committed value is a JSON-encoded object,
+    // {"name":"Seattle, WA, USA","id":"..."}, not always the plain display string -- unwrap it
+    // down to its "name" (the SAME plain text fillLeverLocation()'s own matchedText already
+    // stashes onto entry._committedText -- see applyFill()'s lever-location branch below) via
+    // the SAME extractLocationName() already used to unwrap a service-SENT JSON fill value, or a
+    // genuinely-correct commit would forever compare a name against its own raw JSON encoding
+    // and misreport "didn't stick". A no-op for a plain, non-JSON value (this file's own mock,
+    // or a Lever deployment that commits a plain string).
+    if (entry.kind === 'lever-location') return cleanText(extractLocationName((entry.hidden && entry.hidden.value) || ''));
     if (entry.kind === 'wd-checkbox-group') {
       var checkedBox = entry.boxes.filter(function (b) { return b.checked; })[0];
       return checkedBox ? getWorkdayCheckboxGroupOptionLabel(checkedBox) : '';
@@ -4460,6 +4483,18 @@
    * say. Left unset for every other kind (plain text/number/tel/email inputs, dates, wd-prompt's
    * additive pills) -- content.js falls back to the service's original value for those, exactly
    * as before.
+   *
+   * Reviewer round 6 (live probe, 2026-09-24/25): the phone-country example above understated
+   * the bug -- entry._committedText and a LATER getCurrentValue() re-read must land on the exact
+   * same REPRESENTATION, not just both be "truthy". Before this round, committedText held the
+   * matched option's full text ("United States +1") while getCurrentValue()'s combobox branch
+   * read the react-select chip ("+1" only) -- two honestly-different strings for the SAME
+   * correct fill, always failing the verify sweep's comparison. Fixed by making both sides defer
+   * to the paired intl-tel-input button's own NAME (phoneCountrySelectedName/
+   * phoneCountryOptionName, both below) for this one widget shape, and by making the
+   * lever-location branch's getCurrentValue() unwrap the hidden field's JSON encoding the same
+   * way its own matchedText always was already (extractLocationName) -- see both branches in
+   * getCurrentValue() above.
    */
   function applyFill(entry, value, fillOptions) {
     var canaryStrict = !!(fillOptions && fillOptions.canary);
@@ -4517,7 +4552,20 @@
         // path's aggregate {ok, failedTerms} result has no single option list to offer, so this
         // is simply cleared (null) for it, same as on any success.
         entry._lastOptions = r.optionsSeen || null;
-        if (r.ok) entry._committedText = (r.matchedText != null) ? r.matchedText : getCurrentValue(entry);
+        if (r.ok) {
+          // Reviewer round 6: a phone "Country" combobox's matchedText is the rendered OPTION's
+          // full accessible text ("United States +1") -- but getCurrentValue() above now reads
+          // the paired button's bare NAME ("United States"), never the "+<dial code>" suffix.
+          // Strip it here too so the verify sweep is always comparing the SAME representation,
+          // never a name against its own "+<dial code>"-suffixed twin. A no-op for every other
+          // combobox's matchedText (phoneCountryOptionName only strips a trailing "+<digits>"),
+          // and for the "already correct" early-return's own matchedText (fillComboboxOne's
+          // alreadyCountry, from this SAME phoneCountrySelectedName() -- already name-only).
+          var committedPhoneBtn = pairedPhoneCountryButton(entry.input);
+          entry._committedText = (r.matchedText != null)
+            ? (committedPhoneBtn ? phoneCountryOptionName(r.matchedText) : r.matchedText)
+            : getCurrentValue(entry);
+        }
         return !!r.ok;
       });
     }

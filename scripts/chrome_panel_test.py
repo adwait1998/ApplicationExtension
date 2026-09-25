@@ -697,6 +697,225 @@ BLOCKER_A_VERIFY_PAGE_BYTES = b"""<!DOCTYPE html>
 </body></html>
 """
 
+# A fixture for reviewer round 6 (live probe, 2026-09-24/25): the two ATS widgets whose
+# getCurrentValue() reads back in a DIFFERENT SHAPE than what applyFill() actually committed --
+# which made content.js's post-fill verify sweep report a genuinely CORRECT fill as "didn't
+# stick" on EVERY Greenhouse posting checked (gitlab, twilio, faire, figma, the sofi embed) and
+# on Lever's own "Current location" widget:
+#   - phone_country_combobox: Greenhouse's phone "Country" combobox -- the SAME shape as
+#     extension/test-page.html's own gh_phone_country_input fixture (this page's own
+#     makePhoneCountrySelect() mock is that shape, duplicated per this file's usual convention --
+#     see BLOCKER_A_VERIFY_PAGE_BYTES's own comment on why nothing here is shared/imported). Its
+#     own react-select chip collapses to just the dial code ("+1") once committed; only the
+#     paired intl-tel-input button still names the country -- must end VERIFIED.
+#   - lever_location_combobox: Lever's "Current location" type-ahead, whose hidden
+#     `selectedLocation` field THIS mock deliberately commits as a JSON-encoded object (ground
+#     truth: jobs.lever.co/zerohomes, live probe 2026-09-25) -- {"name": "...", "id": "..."} --
+#     never the plain display string extension/test-page.html's own simpler mock uses. Must ALSO
+#     end VERIFIED.
+#   - revert_phone_country_combobox: the NEGATIVE control. A MutationObserver on the paired
+#     intl-tel-input button wipes BOTH the chip and the button's aria-label back to unset ~200ms
+#     after a genuine commit -- well inside content.js's own 500ms VERIFY_SETTLE_MS window -- so
+#     this must STILL be reported "didn't stick", proving the fix re-reads the button's ACTUAL
+#     current state every time, never just trusting entry._committedText forever.
+PHONE_LEVER_VERIFY_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Phone-country / Lever-location verify-sweep fixture</title></head>
+<body>
+<h1>Phone-country / Lever-location verify-sweep fixture</h1>
+<form id="phone-lever-form">
+  <fieldset id="phone_fieldset">
+    <legend>Phone</legend>
+    <div class="select" id="phone_country_field">
+      <label id="phone_country_label">Country</label>
+      <div class="select-shell">
+        <div class="select__control">
+          <div class="select__value-container" id="phone_country_value">
+            <input type="text" role="combobox" id="phone_country_input" class="select__input" name="phone_country_combobox"
+                   aria-labelledby="phone_country_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+          </div>
+          <div class="select__indicators">
+            <button type="button" aria-label="Toggle flyout" id="phone_country_toggle">v</button>
+          </div>
+        </div>
+        <div class="select__menu" id="phone_country_menu" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="iti">
+      <button type="button" class="iti__selected-country" id="phone_iti_button" aria-label="Select country"></button>
+    </div>
+  </fieldset>
+
+  <fieldset id="revert_phone_fieldset">
+    <legend>Phone (reverts after commit - negative control)</legend>
+    <div class="select" id="revert_phone_country_field">
+      <label id="revert_phone_country_label">Country (reverts after commit - negative control)</label>
+      <div class="select-shell">
+        <div class="select__control">
+          <div class="select__value-container" id="revert_phone_country_value">
+            <input type="text" role="combobox" id="revert_phone_country_input" class="select__input" name="revert_phone_country_combobox"
+                   aria-labelledby="revert_phone_country_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+          </div>
+          <div class="select__indicators">
+            <button type="button" aria-label="Toggle flyout" id="revert_phone_country_toggle">v</button>
+          </div>
+        </div>
+        <div class="select__menu" id="revert_phone_country_menu" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="iti">
+      <button type="button" class="iti__selected-country" id="revert_phone_iti_button" aria-label="Select country"></button>
+    </div>
+  </fieldset>
+
+  <label id="lever_location_wrap">
+    <div class="application-label">Current location</div>
+    <div class="application-field">
+      <input type="text" id="lever_location_input" name="lever_location_combobox" class="location-input" autocomplete="off">
+      <input type="hidden" id="lever_selected_location" name="selectedLocation">
+      <div class="location-suggestions-list" id="lever_location_results" style="display:none;"></div>
+      <div id="lever_location_status">No location found. Try entering a different location</div>
+    </div>
+  </label>
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('phone-lever-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+
+  // Same react-select mock shape as extension/test-page.html's own Greenhouse phone-country
+  // fixture (duplicated, not shared -- see BLOCKER_A_VERIFY_PAGE_BYTES's own comment on this
+  // file's convention), trimmed to only what this page needs: single-value, non-multi,
+  // non-async, with the phoneCountry chip/paired-button shape.
+  function makePhoneCountrySelect(cfg) {
+    var input = document.getElementById(cfg.inputId);
+    var toggle = document.getElementById(cfg.toggleId);
+    var menu = document.getElementById(cfg.menuId);
+    var valueContainer = document.getElementById(cfg.valueId);
+    var btn = document.getElementById(cfg.buttonId);
+    var committed = null;
+    var mousedownArmed = null;
+    var openCount = 0;
+
+    function renderValue() {
+      Array.prototype.slice.call(valueContainer.querySelectorAll('.select__single-value')).forEach(function (n) { n.remove(); });
+      if (!committed) return;
+      var dial = /\\+\\d+\\s*$/.exec(committed);
+      var sv = document.createElement('div');
+      sv.className = 'select__single-value';
+      sv.textContent = dial ? dial[0] : committed;
+      valueContainer.insertBefore(sv, input);
+      var nameOnly = committed.replace(/\\s*\\+\\d+\\s*$/, '');
+      btn.setAttribute('aria-label', 'Change country, selected ' + nameOnly + ' (' + (dial ? dial[0] : '') + ')');
+    }
+    function openMenu() { openCount++; menu.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
+    function closeMenu() { menu.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
+    function renderOptions(list) {
+      menu.innerHTML = '';
+      list.forEach(function (text) {
+        var opt = document.createElement('div');
+        opt.className = 'select__option';
+        opt.setAttribute('role', 'option');
+        opt.textContent = text;
+        opt.addEventListener('mousedown', function (e) { e.preventDefault(); mousedownArmed = text; });
+        opt.addEventListener('click', function () {
+          if (mousedownArmed !== text) return;
+          mousedownArmed = null;
+          committed = text;
+          renderValue();
+          input.value = '';
+          closeMenu();
+        });
+        menu.appendChild(opt);
+      });
+    }
+    menu.style.display = 'none';
+    toggle.addEventListener('mouseup', function () {
+      if (menu.style.display === 'block') { closeMenu(); return; }
+      renderOptions(cfg.options);
+      openMenu();
+    });
+    toggle.addEventListener('click', function (e) { e.preventDefault(); });
+    input.addEventListener('keyup', function (e) {
+      if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(cfg.options); openMenu(); }
+    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    input.addEventListener('blur', function () {
+      setTimeout(function () { input.value = ''; closeMenu(); }, 0);
+    });
+    return { openCount: function () { return openCount; } };
+  }
+
+  var PHONE_COUNTRY_OPTIONS = ['United States +1', 'Canada +1', 'United Kingdom +44'];
+  makePhoneCountrySelect({ inputId: 'phone_country_input', toggleId: 'phone_country_toggle',
+    menuId: 'phone_country_menu', valueId: 'phone_country_value', buttonId: 'phone_iti_button',
+    options: PHONE_COUNTRY_OPTIONS });
+  makePhoneCountrySelect({ inputId: 'revert_phone_country_input', toggleId: 'revert_phone_country_toggle',
+    menuId: 'revert_phone_country_menu', valueId: 'revert_phone_country_value', buttonId: 'revert_phone_iti_button',
+    options: PHONE_COUNTRY_OPTIONS });
+
+  // NEGATIVE CONTROL: ~200ms after the revert widget's paired button first shows a genuine
+  // commit, wipe BOTH the chip and the button back to unset -- well inside content.js's own
+  // 500ms VERIFY_SETTLE_MS window -- so the post-fill verify sweep's re-read must still catch
+  // it.
+  (function () {
+    var revertBtn = document.getElementById('revert_phone_iti_button');
+    var revertValue = document.getElementById('revert_phone_country_value');
+    var reverted = false;
+    var obs = new MutationObserver(function () {
+      if (reverted) return;
+      if (!/^Change country/.test(revertBtn.getAttribute('aria-label') || '')) return;
+      reverted = true;
+      setTimeout(function () {
+        Array.prototype.slice.call(revertValue.querySelectorAll('.select__single-value')).forEach(function (n) { n.remove(); });
+        revertBtn.setAttribute('aria-label', 'Select country');
+      }, 200);
+    });
+    obs.observe(revertBtn, { attributes: true, attributeFilter: ['aria-label'] });
+  })();
+
+  // ---- Lever location type-ahead (mirrors extension/test-page.html's own mock, but commits a
+  //      JSON-ENCODED object onto the hidden field -- ground truth, live probe 2026-09-25,
+  //      jobs.lever.co/zerohomes -- never the plain display string that mock uses). ----
+  (function () {
+    var input = document.getElementById('lever_location_input');
+    var hidden = document.getElementById('lever_selected_location');
+    var results = document.getElementById('lever_location_results');
+    var CATALOG = ['Seattle, WA, USA', 'Portland, OR, USA'];
+    function render(list) {
+      results.innerHTML = '';
+      list.forEach(function (text) {
+        var row = document.createElement('div');
+        row.className = 'dropdown-location';
+        row.textContent = text;
+        row.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          hidden.value = JSON.stringify({ name: text, id: 'mock-loc-' + text.length });
+          input.value = text;
+          results.style.display = 'none';
+        });
+        results.appendChild(row);
+      });
+      results.style.display = list.length ? 'block' : 'none';
+    }
+    var debounceTimer = null;
+    input.addEventListener('keydown', function () {
+      hidden.value = ''; // Lever clears the committed value as soon as the query is edited again
+      clearTimeout(debounceTimer);
+      var q = input.value.trim().toLowerCase();
+      debounceTimer = setTimeout(function () {
+        render(q ? CATALOG.filter(function (c) { return c.toLowerCase().indexOf(q) !== -1; }) : []);
+      }, 60);
+    });
+    input.addEventListener('blur', function () {
+      setTimeout(function () { if (!hidden.value) { input.value = ''; results.style.display = 'none'; } }, 0);
+    });
+  })();
+</script>
+</body></html>
+"""
+
 # A fixture for reviewer round 4: "never overwrite the user" now covers EVERY widget kind (item
 # 1), including two widget shapes the pre-round-4 code deliberately excluded: a react-select/ARIA
 # combobox and an Ashby-style Yes/No button group. Self-contained (not reusing
@@ -926,6 +1145,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/phone-lever-verify-page.html"):
+            body = PHONE_LEVER_VERIFY_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path.startswith("/kept-values-page.html"):
             body = KEPT_VALUES_PAGE_BYTES
             self.send_response(200)
@@ -1048,6 +1274,30 @@ class StubHandler(BaseHTTPRequestHandler):
                             "reason": "test stub: profile says Engineering",
                             "profile_key": "test.department", "source": "profile", "draft": False,
                         })
+            if "phone-lever-verify-page" in url:
+                # Reviewer round 6: both fields scan as widget "combobox" (see
+                # PHONE_LEVER_VERIFY_PAGE_BYTES's own comment), which build_fills() always leaves
+                # for the human (real options are unknown at scan time) -- so each needs its own
+                # deliberate, always-succeeds-on-the-first-pass answer here, exactly like the
+                # blocker-a-verify-page branch above does for decline_combobox.
+                for f in fields:
+                    name = f.get("name") or ""
+                    if name in ("phone_country_combobox", "revert_phone_country_combobox"):
+                        fills = [x for x in fills if x["id"] != f["id"]]
+                        skipped = [x for x in skipped if x["id"] != f["id"]]
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "United States",
+                            "reason": "test stub: profile says United States",
+                            "profile_key": "test.phone_country", "source": "profile", "draft": False,
+                        })
+                    elif name == "lever_location_combobox":
+                        fills = [x for x in fills if x["id"] != f["id"]]
+                        skipped = [x for x in skipped if x["id"] != f["id"]]
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "Seattle, WA",
+                            "reason": "test stub: profile says Seattle, WA",
+                            "profile_key": "test.current_location", "source": "profile", "draft": False,
+                        })
             if "kept-values-page" in url:
                 # Reviewer round 4: build_fills() always leaves "combobox"-widget fields for the
                 # human (see its own comment — real options are unknown at scan time), which would
@@ -1167,6 +1417,7 @@ WRAPPER_URL = f"{SERVICE_URL}/embed-wrapper.html"
 RESUME_TAILOR_URL = f"{SERVICE_URL}/resume-tailor-page.html"
 SPONSOR_RESOLVE_URL = f"{SERVICE_URL}/sponsor-resolve-page.html"
 BLOCKER_A_VERIFY_URL = f"{SERVICE_URL}/blocker-a-verify-page.html"
+PHONE_LEVER_VERIFY_URL = f"{SERVICE_URL}/phone-lever-verify-page.html"
 KEPT_VALUES_URL = f"{SERVICE_URL}/kept-values-page.html"
 
 
@@ -2978,6 +3229,71 @@ with sync_playwright() as p:
         check("tab 25: no native form submission at any point", counters25["form"] is False, json.dumps(counters25))
 
         # =====================================================================
+        # TAB 26 — reviewer round 6, false "didn't stick" (live probe, 2026-09-24/25): two ATS
+        #          widgets whose getCurrentValue() used to read back in a DIFFERENT SHAPE than
+        #          what applyFill() actually committed (see PHONE_LEVER_VERIFY_PAGE_BYTES's own
+        #          comment for the full reasoning). Three fields, three outcomes:
+        #            (a) phone_country_combobox — Greenhouse's phone "Country" combobox (chip
+        #                collapses to "+1"; only the paired intl-tel-input button names the
+        #                country) must end VERIFIED.
+        #            (b) lever_location_combobox — Lever's "Current location", whose hidden
+        #                selectedLocation field commits a JSON-encoded object, must ALSO end
+        #                VERIFIED.
+        #            (c) revert_phone_country_combobox — the NEGATIVE control: the SAME phone-
+        #                country shape, but genuinely reverted (both the chip and the paired
+        #                button) well inside the 500ms verify window, must STILL end
+        #                "didn't stick" — this fix must never become too lenient.
+        # =====================================================================
+        tab26 = ctx.new_page()
+        tab26.goto(PHONE_LEVER_VERIFY_URL + "#t=26")
+        tab26_id = find_tab_id(helper, "#t=26")
+        check("found tab 26's chrome tab id", tab26_id is not None)
+
+        panel26 = ctx.new_page()
+        panel26.goto(f"{panel_url}?tabId={tab26_id}")
+        panel26.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel26.click("#scanBtn")
+        state26 = wait_for_done(helper, tab26_id, timeout_s=60)
+        check("tab 26's fill reached a terminal status", state26 is not None and state26.get("status") == "done",
+              str(state26)[:200])
+
+        filled26 = (state26 or {}).get("filled") or []
+        failed26 = (state26 or {}).get("failed") or []
+
+        phone_row26 = next((f for f in filled26 if f.get("label") == "Country"), None)
+        check("tab 26a: Greenhouse phone \"Country\" combobox (chip shows only \"+1\", the paired "
+              "intl-tel-input button names the country) ends VERIFIED, never \"didn't stick\"",
+              phone_row26 is not None and phone_row26.get("status") == "verified", str(phone_row26))
+        committed_phone26 = tab26.eval_on_selector("#phone_iti_button", "el => el.getAttribute('aria-label')")
+        check("tab 26a: the page really did commit the applicant's country onto the paired button",
+              committed_phone26 == "Change country, selected United States (+1)", repr(committed_phone26))
+
+        location_row26 = next((f for f in filled26 if f.get("label") == "Current location"), None)
+        check("tab 26b: Lever \"Current location\" (hidden selectedLocation commits a "
+              "JSON-encoded object, {\"name\":..., \"id\":...}) ends VERIFIED, never \"didn't stick\"",
+              location_row26 is not None and location_row26.get("status") == "verified", str(location_row26))
+        committed_location26 = tab26.eval_on_selector("#lever_selected_location", "el => el.value")
+        check("tab 26b: the hidden field really is the JSON shape (not a plain display string)",
+              isinstance(committed_location26, str) and committed_location26.startswith("{") and
+              "Seattle, WA, USA" in committed_location26, repr(committed_location26))
+
+        revert_label26 = "Country (reverts after commit - negative control)"
+        revert_failed26 = next((f for f in failed26 if f.get("label") == revert_label26), None)
+        check("tab 26c NEGATIVE CONTROL: a genuinely reverted phone-country widget (both the chip "
+              "and the paired button reset, well inside the verify-sweep window) still ends "
+              "\"didn't stick\" — this fix is not too lenient",
+              revert_failed26 is not None and revert_failed26.get("status") == "didnt_stick", str(revert_failed26))
+        revert_in_filled26 = next((f for f in filled26 if f.get("label") == revert_label26), None)
+        check("tab 26c NEGATIVE CONTROL: that same field is never ALSO reported verified",
+              revert_in_filled26 is None, str(revert_in_filled26))
+        reverted_btn26 = tab26.eval_on_selector("#revert_phone_iti_button", "el => el.getAttribute('aria-label')")
+        check("tab 26c: the real page confirms the paired button really is back to unset",
+              reverted_btn26 == "Select country", repr(reverted_btn26))
+
+        counters26 = submission_counters(tab26)
+        check("tab 26: no native form submission at any point", counters26["form"] is False, json.dumps(counters26))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -2988,7 +3304,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22), ("tab23", tab23), ("tab24", tab24), ("tab25", tab25)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22), ("tab23", tab23), ("tab24", tab24), ("tab25", tab25), ("tab26", tab26)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))

@@ -2381,13 +2381,29 @@ pending.push((async () => {
       itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
     expect('phone Country combobox: its OWN chip only ever shows the dial code, never the country name -- the real bug this guards against',
       byId('gh_phone_country_value').querySelector('.select__single-value').textContent === '+1');
-    // Reviewer round 5, blocker A: this is the EXACT "phone -> '+1'" shape from the reviewer's
-    // repro. getCurrentValue()/getComboboxCommittedValue() for THIS widget is UNAVOIDABLY lossy
-    // (the chip really does only ever show "+1" -- see the comment above), so entry._committedText
-    // must come from the fill function's OWN matchedText ("United States +1") instead of a later
-    // getCurrentValue() re-read, or a verify sweep comparing the two would ALWAYS see them differ.
-    expect('blocker A: entry._committedText carries the FULL option text ("United States +1") the fill function itself matched, immune to the chip\'s own lossy "+1"-only display',
-      entry._committedText === 'United States +1');
+    // Reviewer round 6 (live probe, 2026-09-24/25 — every Greenhouse posting checked): round 5's
+    // own fix left entry._committedText as the FULL matched option text ("United States +1")
+    // while a later getCurrentValue() re-read this SAME widget via its chip/generic combobox
+    // path -- still just "+1", never "United States +1" -- so content.js's verify sweep compared
+    // two honestly-different strings for the SAME correct fill and reported "didn't stick" on
+    // every single one. Both sides must now defer to the SAME paired intl-tel-input button (via
+    // phoneCountrySelectedName/phoneCountryOptionName), landing on the bare country NAME with no
+    // dial-code suffix on either side.
+    expect('blocker A round 6: entry._committedText now carries the bare country NAME ("United States"), not "United States +1"',
+      entry._committedText === 'United States');
+    expect('blocker A round 6: getCurrentValue() reads the SAME paired-button NAME as entry._committedText -- the exact equality content.js\'s verify sweep checks',
+      Scanner.getCurrentValue(entry) === entry._committedText);
+
+    // NEGATIVE CONTROL: a GENUINE revert of this exact widget shape (both signals reset -- the
+    // chip cleared AND the paired button back to "Select country") must still read back empty,
+    // never silently keep reporting the stale committed country -- proving getCurrentValue()
+    // re-reads the button's CURRENT state every time rather than caching/trusting the commit
+    // forever, and never defaults an unselected combobox to "the applicant's country" just
+    // because that happens to be what was last filled.
+    byId('gh_phone_country_value').querySelector('.select__single-value').remove();
+    itiBtn.setAttribute('aria-label', 'Select country');
+    expect('blocker A round 6 NEGATIVE CONTROL: a genuinely reverted phone-country widget reads back empty, never the stale committed country, and no longer equals entry._committedText',
+      Scanner.getCurrentValue(entry) === '' && Scanner.getCurrentValue(entry) !== entry._committedText);
   }
 
   // ---- combobox: Greenhouse phone "Country", ALREADY showing the applicant's country ----
@@ -2408,6 +2424,13 @@ pending.push((async () => {
       dom.window.__gh_phone_country_prefilled__.openCount() === opensBefore);
     expect('phone Country combobox already correct: the iti button label is unchanged',
       itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
+    // "Kept, not filled" still ends up with entry._committedText/getCurrentValue() agreeing on
+    // the SAME representation ("United States", not "United States +1") -- the "never overwrite"
+    // path is never a second, differently-shaped code path from the ordinary commit above.
+    expect('phone Country combobox already correct: entry._committedText is the bare country NAME, same representation as a fresh commit',
+      entry._committedText === 'United States');
+    expect('phone Country combobox already correct: getCurrentValue() agrees with entry._committedText',
+      Scanner.getCurrentValue(entry) === entry._committedText);
   }
 
   // ---- combobox: Greenhouse "Location (City)", geocoded "City, State, Country" catalog ----
@@ -2621,6 +2644,25 @@ pending.push((async () => {
     const okJson = await Scanner.applyFill(entry, '{"name":"Austin, Texas, United States","id":"abc123"}');
     expect('Lever location: a JSON-object value ({"name": "City, State, Country", ...}) is unwrapped and still resolves',
       okJson === true && byId('lever_selected_location').value === 'Austin, Texas');
+
+    // Reviewer round 6, live probe (2026-09-25, jobs.lever.co/zerohomes): the REAL widget's own
+    // hidden `selectedLocation` field commits a JSON-encoded object itself
+    // ({"name":"Seattle, WA, USA","id":"f93b..."}), not the plain display string this mock's own
+    // commit path happens to write above -- getCurrentValue() must unwrap it down to the SAME
+    // human name fillLeverLocation()'s own matchedText already stashes onto entry._committedText
+    // (applyFill()'s lever-location branch), or a genuinely-correct commit would forever compare
+    // a name against its own raw JSON and misreport "didn't stick" -- the exact live bug this
+    // build fixes.
+    byId('lever_selected_location').value = '{"name":"Seattle, WA, USA","id":"f93b1234-5678-90ab-cdef-1234567890ab"}';
+    expect('blocker A round 6: Lever location getCurrentValue() unwraps a JSON-encoded hidden value down to its plain "name", never the raw JSON',
+      Scanner.getCurrentValue(entry) === 'Seattle, WA, USA');
+
+    // NEGATIVE CONTROL: a genuinely EMPTY hidden field (a real revert — Lever clears it as soon
+    // as the search query is edited again, or the widget wipes it on its own re-render) must
+    // still read back empty, never some stale leftover.
+    byId('lever_selected_location').value = '';
+    expect('blocker A round 6 NEGATIVE CONTROL: Lever location getCurrentValue() reads back empty once the hidden field is genuinely cleared',
+      Scanner.getCurrentValue(entry) === '');
   }
 
   // ---- final safety check: none of the choice-widget interactions above ever submitted the
