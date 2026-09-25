@@ -2411,8 +2411,14 @@
   function pairedPhoneCountryButton(input) {
     var fieldset = input.closest ? input.closest('fieldset') : null;
     if (!fieldset) return null;
-    var btn = fieldset.querySelector('button.iti__selected-country');
-    return (btn && isVisible(btn)) ? btn : null;
+    // Deliberately NOT an isVisible() check -- a live probe (2026-09-24,
+    // job-boards.greenhouse.io/gitlab) found this button's own `.iti__country-container`
+    // wrapper rendered `display: none` on the real page (the accessible "Country" combobox is
+    // the actual interactive control in this layout; the intl-tel-input flag button is a
+    // hidden mirror kept in sync purely for its aria-label text). It is never clicked, only
+    // ever READ from -- so its own visibility is irrelevant; only that it is a genuine
+    // `.iti__selected-country` element inside THIS field's own fieldset matters.
+    return fieldset.querySelector('button.iti__selected-country');
   }
 
   /** The country NAME the paired intl-tel-input button currently reports as selected, or ''
