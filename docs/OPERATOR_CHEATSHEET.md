@@ -85,9 +85,11 @@ Then load the extension once: Chrome → `chrome://extensions` → enable **Deve
 **Load unpacked** → select `E:\auto-apply-pipeline\extension`. Open its **Options**, paste the
 token the command printed, and hit **Test Connection**.
 
-Day to day: open an application, click the extension, then **Scan & Fill**. Green means
-filled, amber means deliberately skipped — hover for the reason. **Undo** restores the
-previous values.
+Day to day: open an application and click the ApplyPilot icon — it opens Chrome's **side panel**,
+which stays open as you switch tabs and keeps each tab's last result. Click **Fill this page**;
+progress shows live and **Cancel** stops between fields. Green means filled, amber means
+deliberately left for you — the panel lists why. **Undo** reverts the fields this fill changed;
+check them afterwards (a site can re-render a field on its own).
 
 How each field is decided, first match wins:
 
@@ -108,7 +110,7 @@ Canary questions are **never** answered by a model. An unanswerable canary is le
 purpose — that is the design, not a failure.
 
 **Drafts are the one tier that puts generated text under your name.** They render blue rather
-than green and are grouped separately in the popup. A draft that claims experience somewhere
+than green and are grouped separately in the panel. A draft that claims experience somewhere
 absent from your history is refused outright ("draft refused — it claimed experience at X"),
 so a model ignoring its instructions cannot invent an employer for you. Answer-bank hits are
 never second-guessed: those are your own past words.
@@ -162,7 +164,7 @@ The extension attaches your stored résumé to the form's file input, including
 Greenhouse-style drag-and-drop zones. It picks the résumé target over a cover-letter input,
 and **verifies the file is genuinely attached afterwards** rather than assuming — some ATS
 sites reject programmatic uploads, and a silent failure would mean submitting with no
-résumé. The popup shows an explicit attached/not-attached line either way.
+résumé. The panel shows an explicit attached/not-attached line either way.
 
 See `extension/README.md` for known limitations (cross-origin iframes, shadow DOM, multi-step
 forms). Verification harnesses: `scripts/e2e_extension.py`, `scripts/e2e_profile_editor.py`,

@@ -79,6 +79,15 @@ PROFILE = {
     ],
 }
 
+# The same fictional person, shaped like the real operator's key paths: needs
+# sponsorship on a work visa, has a salary expectation, EEO all unset (so
+# every EEO question exercises the decline path).
+PROFILE_SPONSOR = json.loads(json.dumps(PROFILE))
+PROFILE_SPONSOR["profile_id"] = "probe-sponsor"
+PROFILE_SPONSOR["work_authorization"] = {"legally_authorized_to_work": True, "require_sponsorship": True,
+                                         "work_permit_type": "H-1B"}
+PROFILE_SPONSOR["compensation"] = {"salary_expectation": "120000", "salary_currency": "USD"}
+
 ATS_PATTERNS = {
     "gh-job-boards": "job-boards.greenhouse.io",
     "gh-legacy": "boards.greenhouse.io",
@@ -177,8 +186,8 @@ def pick_urls(per_ats: int, seed: int) -> list[tuple[str, str]]:
     return out
 
 
-def start_service(tmp: pathlib.Path, port: int):
-    (tmp / "profile.json").write_text(json.dumps(PROFILE), encoding="utf-8")
+def start_service(tmp: pathlib.Path, port: int, profile: dict = PROFILE):
+    (tmp / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
     env = dict(os.environ)
     env["APPLYPILOT_DIR"] = str(tmp)
     env["APPLYPILOT_ROOT"] = str(tmp)
@@ -247,7 +256,8 @@ UNSEEN_JS = """(ids) => {
   }
   const out = [];
   const q = 'input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea, ' +
-            '[role=combobox], [role=radiogroup], [role=listbox], [contenteditable=true], button[aria-haspopup]';
+            '[role=combobox], [role=radiogroup], [role=listbox], [role=radio], [role=checkbox], [role=switch], ' +
+            '[contenteditable=true], button[aria-haspopup], button[aria-pressed], fieldset button[type=button]';
   document.querySelectorAll(q).forEach(el => {
     if (seen.has(el) || !ApplyPilotScanner.isVisible(el)) return;
     if (el.closest && [...seen].some(s => s.contains && s.contains(el))) return;
@@ -257,8 +267,54 @@ UNSEEN_JS = """(ids) => {
                role: el.getAttribute('role') || '', label: label.slice(0, 90),
                cls: (typeof el.className === 'string' ? el.className : '').slice(0, 60) });
   });
+  let shadowHosts = 0;
+  document.querySelectorAll('*').forEach(el => { if (el.shadowRoot) shadowHosts++; });
+  if (shadowHosts) out.push({ tag: '#shadow-roots', type: String(shadowHosts), role: '',
+                              label: 'elements with a shadow root (not scanned)', cls: '' });
   return out.slice(0, 60);
 }"""
+
+# After every fill in a frame: blur, let the page settle, and read EVERYTHING
+# back. A value that reverted (React re-render, a combobox clearing typed text
+# on blur) is "didn't stick", never "filled".
+REREAD_JS = """async (ids) => {
+  try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
+  await new Promise(r => setTimeout(r, 900));
+  const out = {};
+  for (const id of ids) {
+    const entry = (window.__AP_REG || {})[id];
+    let v = '';
+    try { v = entry ? String(ApplyPilotScanner.getCurrentValue(entry) || '') : ''; } catch (e) {}
+    out[id] = v.slice(0, 200);
+  }
+  return out;
+}"""
+
+
+def _norm(v) -> str:
+    return re.sub(r"\s+", " ", str(v or "")).strip().lower()
+
+
+_PLACEHOLDER = re.compile(r"^(select\.{0,3}|choose.*|please select.*|--.*|)$", re.I)
+
+
+def _is_choice(field: dict) -> bool:
+    return bool(field.get("options")) or field.get("type") in ("radio", "checkbox") or bool(field.get("widget"))
+
+
+def _stuck(intended, settled: str, field: dict) -> bool:
+    """Did the value survive blur + settle? Text must read back as written
+    (phone formatting aside); a choice must show a real, non-placeholder
+    selection (the chosen option's wording can legitimately differ from the
+    intended value — "Decline to self-identify" -> "I don't wish to answer")."""
+    got, want = _norm(settled), _norm(intended)
+    if not got or _PLACEHOLDER.match(got):
+        return False
+    if _is_choice(field):
+        return True
+    if field.get("type") == "tel":
+        return re.sub(r"\D", "", got) == re.sub(r"\D", "", want)
+    return got == want or bool(want and want in got)
 
 
 def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathlib.Path, tag: str) -> dict:
@@ -330,6 +386,10 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
                 r = {"ok": False, "detail": f"evaluate: {str(e)[:120]}", "readback": ""}
             results[fill["id"]] = (fill, r)
         frec["fill_s"] = round(time.time() - t2, 1)
+        try:
+            settled = frame.evaluate(REREAD_JS, [fid for fid, (_f, r) in results.items() if r.get("ok")])
+        except Exception:
+            settled = {}
         skipped = {s["id"]: s for s in plan.get("skipped", [])}
         for f in fields:
             row = {"label": (f.get("label") or f.get("name") or "")[:90], "tag": f.get("tag"),
@@ -337,9 +397,17 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
                    "n_options": len(f.get("options") or []), "required": f.get("required", False)}
             if f["id"] in results:
                 fill, r = results[f["id"]]
-                row.update(status="filled" if r.get("ok") else "FAILED", source=fill["source"],
-                           value=str(fill["value"])[:80], readback=r.get("readback", "")[:80],
-                           detail=r.get("detail"), draft=fill.get("draft", False))
+                settled_val = settled.get(f["id"], "")
+                if not r.get("ok"):
+                    status = "FAILED"
+                elif _stuck(fill["value"], settled_val, f):
+                    status = "verified"
+                else:
+                    status = "DIDNT-STICK"
+                row.update(status=status, source=fill["source"],
+                           value=str(fill["value"])[:80], readback=settled_val[:80],
+                           detail=r.get("detail"), draft=fill.get("draft", False),
+                           choice=_is_choice(f))
             elif f["id"] in skipped:
                 s = skipped[f["id"]]
                 row.update(status="left", source=s.get("source"), detail=s.get("reason", "")[:140])
@@ -372,7 +440,13 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
 
 
 def summarize(results: list[dict]) -> str:
-    lines = ["# Live ATS probe", ""]
+    lines = ["# Live ATS probe", "",
+             "Status per field: verified = read back after blur + settle; DIDNT-STICK = reported filled but "
+             "the value was gone or a placeholder after settling; FAILED = the fill itself reported failure; "
+             "left = the service left it for the applicant; no-plan = scanned but not resolved.",
+             "NOTE: the probe scans EVERY frame with Playwright. The extension injects only the frames it is "
+             "allowed into, so compare TOP-frame numbers for what a user gets without all-frames support.",
+             ""]
     for ats, rec in results:
         lines.append(f"## {ats} — {rec['url'][:110]}")
         if rec.get("error"):
@@ -391,9 +465,13 @@ def summarize(results: list[dict]) -> str:
                          f"unseen interactive: {len(fr.get('unseen', []))}; resolve {fr.get('resolve_s')}s, "
                          f"fill {fr.get('fill_s')}s")
             for row in fr["fields"]:
-                if row["status"] in ("FAILED",):
-                    lines.append(f"    - FAILED [{row['tag']}/{row['type']}/{row['widget']}] {row['label']!r} "
-                                 f"<- {row.get('value')!r}: {row.get('detail')} (readback {row.get('readback')!r})")
+                if row["status"] in ("FAILED", "DIDNT-STICK"):
+                    lines.append(f"    - {row['status']} [{row['tag']}/{row['type']}/{row['widget']}] "
+                                 f"{row['label']!r} <- {row.get('value')!r}: {row.get('detail')} "
+                                 f"(after settle {row.get('readback')!r})")
+                elif row["status"] == "verified" and row.get("choice"):
+                    lines.append(f"    - chose [{row['type'] or row['tag']}] {row['label'][:70]!r} -> "
+                                 f"{row.get('readback')!r} (intended {row.get('value')!r}, {row.get('source')})")
             for u in fr.get("unseen", [])[:12]:
                 lines.append(f"    - unseen {u['tag']}[{u['type'] or u['role']}] {u['label']!r} .{u['cls']}")
         lines.append(f"- total {rec.get('total_s')}s; non-GET requests blocked: {len(rec.get('blocked_requests', []))}")
@@ -409,6 +487,8 @@ def main() -> None:
     ap.add_argument("--scanner", default=str(REPO / "extension" / "scanner.js"))
     ap.add_argument("--out", default=None)
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--sponsor-profile", action="store_true",
+                    help="use the synthetic applicant who needs sponsorship (H-1B) and has a salary set")
     args = ap.parse_args()
 
     from playwright.sync_api import sync_playwright
@@ -422,7 +502,7 @@ def main() -> None:
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="apc-live-svc-"))
     port = free_port()
-    proc, token = start_service(tmp, port)
+    proc, token = start_service(tmp, port, PROFILE_SPONSOR if args.sponsor_profile else PROFILE)
     results = []
     try:
         with sync_playwright() as p:
