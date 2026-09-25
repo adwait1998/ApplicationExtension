@@ -126,11 +126,11 @@
     margin-bottom: 18px;
   }
 
-  #status, #profileStatus, #importStatus, #smartFillStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
-  #status.ok, #profileStatus.ok, #importStatus.ok, #smartFillStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
-  #status.err, #profileStatus.err, #importStatus.err, #smartFillStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
-  #status.info, #profileStatus.info, #importStatus.info, #smartFillStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
-  #status.warn, #profileStatus.warn, #importStatus.warn, #smartFillStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+  #status, #profileStatus, #importStatus, #smartFillStatus, #answersStatus, #logStatus, #connectionAuto { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
+  #status.ok, #profileStatus.ok, #importStatus.ok, #smartFillStatus.ok, #answersStatus.ok, #logStatus.ok, #connectionAuto.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+  #status.err, #profileStatus.err, #importStatus.err, #smartFillStatus.err, #answersStatus.err, #logStatus.err, #connectionAuto.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
+  #status.info, #profileStatus.info, #importStatus.info, #smartFillStatus.info, #answersStatus.info, #logStatus.info, #connectionAuto.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
+  #status.warn, #profileStatus.warn, #importStatus.warn, #smartFillStatus.warn, #answersStatus.warn, #logStatus.warn, #connectionAuto.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
 
   .hint { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
   .hint.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 8px 10px; border-radius: 6px; }
@@ -322,6 +322,42 @@
   #profileEditor.disabled { opacity: 0.5; pointer-events: none; }
 
   .save-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+
+  /* -- skills editor (profile.skills_boundary) -------------------------- */
+  .skills-category {
+    border: 1px solid var(--border-soft); border-radius: 8px;
+    padding: 10px 12px 12px; margin-bottom: 10px; background: var(--card-2);
+  }
+  .skills-category-head { display: flex; gap: 8px; align-items: center; }
+  .skills-category-name { flex: 1; font-weight: 600; }
+  .skills-chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; min-height: 0; }
+  .skill-chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+    padding: 4px 4px 4px 10px; border-radius: 999px; background: var(--card);
+    border: 1px solid var(--border); color: var(--text);
+  }
+  .skill-chip-remove {
+    border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 999px;
+  }
+  .skill-chip-remove:hover { color: var(--err); filter: none; }
+
+  /* -- data tables (saved answers / application log) --------------------- */
+  .table-scroll { overflow-x: auto; }
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data-table th, table.data-table td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  table.data-table th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+  table.data-table tbody tr:last-child td { border-bottom: none; }
+  table.data-table td.col-actions { text-align: right; white-space: nowrap; }
+  table.data-table select { width: auto; padding: 4px 6px; }
+  .answer-text { white-space: pre-wrap; word-break: break-word; }
+  .who-badge {
+    font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: var(--card-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .who-badge.you { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-border); }
+  .log-link { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -329,6 +365,8 @@
   <p class="sub">Connect the extension to your local ApplyPilot service. It runs on this computer and your profile stays here.</p>
 
   <div class="card">
+    <div id="connectionAuto"></div>
+
     <label for="serviceUrl">Service URL</label>
     <input type="text" id="serviceUrl" placeholder="http://127.0.0.1:8787" autocomplete="off" spellcheck="false">
     <div class="hint">Printed when you run <code>applypilot serve-extension</code>. Must be on <code>127.0.0.1</code>.</div>
@@ -339,6 +377,7 @@
       <button type="button" class="secondary" id="toggleToken">Show</button>
     </div>
     <div class="hint">Also printed by <code>applypilot serve-extension</code> on first run. Stored only in this browser's local extension storage.</div>
+    <div class="hint" id="installHostHint">Run <code>applypilot extension install-host</code> once and the extension will start the service itself.</div>
 
     <div class="save-row">
       <button type="button" id="save">Save</button>
@@ -666,12 +705,48 @@
       </div>
     </details>
 
+    <details class="section" id="sectionSkills">
+      <summary><span class="section-title">Skills</span></summary>
+      <div class="section-body">
+        <div class="hint" style="margin-top:4px;">
+          Filled into Skills fields and used to pick skill tags on Workday. Remove anything that isn't yours.
+        </div>
+        <div id="skillsCategoryList"></div>
+        <button type="button" class="secondary small" id="addSkillCategoryBtn">+ Add category</button>
+      </div>
+    </details>
+
     <div class="save-row">
       <button type="button" id="saveProfile">Save profile</button>
     </div>
   </div>
 
   <div id="profileStatus"></div>
+
+  <hr class="section-divider">
+
+  <h1>Saved answers</h1>
+  <p class="sub">Reused when a form asks a question you've answered before. Your own answers are saved from the side panel's "Remember my answers"; others were reused from an earlier run.</p>
+
+  <div class="card" id="answersCard">
+    <div class="table-scroll" id="answersTableWrap"></div>
+    <div class="hint" id="answersEmpty" style="display:none;">No saved answers yet.</div>
+    <div id="answersStatus"></div>
+  </div>
+
+  <hr class="section-divider">
+
+  <h1>Application log</h1>
+  <p class="sub">Every page the Copilot filled, newest first. Status is yours to set — the extension can't know whether you actually submitted.</p>
+
+  <div class="card" id="logCard">
+    <div class="save-row" style="margin-bottom:14px;">
+      <button type="button" class="secondary" id="exportLogBtn">Export CSV</button>
+    </div>
+    <div class="table-scroll" id="logTableWrap"></div>
+    <div class="hint" id="logEmpty" style="display:none;">No applications logged yet.</div>
+    <div id="logStatus"></div>
+  </div>
 
   <template id="workHistoryRowTemplate">
     <div class="repeat-row" data-kind="work">

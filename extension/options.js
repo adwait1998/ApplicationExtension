@@ -48,16 +48,55 @@
   var saveEl = document.getElementById('save');
   var testEl = document.getElementById('test');
   var statusEl = document.getElementById('status');
+  var connectionAutoEl = document.getElementById('connectionAuto');
+  var installHostHintEl = document.getElementById('installHostHint');
 
   function setStatus(kind, text) {
     statusEl.className = kind;
     statusEl.textContent = text;
   }
 
+  // chrome.storage.local.serviceConnection = { mode: "native"|"manual", ok, error, checkedAt }
+  // is written by the background worker once it can start/reach the service on its own —
+  // it may not exist at all (older background.js, or before the first check completes), so
+  // every read of it is defensive. "native" + ok means the operator never has to see or paste
+  // a token; "native" + !ok means it tried and failed (show its own error, not a generic one);
+  // anything else (absent, or mode "manual") leaves today's manual URL/token flow exactly as
+  // it was and additionally points at the easier path.
+  function setConnectionAuto(kind, text) {
+    connectionAutoEl.className = kind;
+    connectionAutoEl.textContent = text;
+  }
+
+  function applyServiceConnection(sc) {
+    if (sc && sc.mode === 'native') {
+      installHostHintEl.style.display = 'none';
+      if (sc.ok) {
+        setConnectionAuto('ok', 'Connected automatically — no token needed.');
+      } else {
+        setConnectionAuto('err', sc.error || 'Could not connect automatically.');
+      }
+      return;
+    }
+    setConnectionAuto('', '');
+    installHostHintEl.style.display = '';
+  }
+
+  // The background worker may finish its native-host probe after this page has
+  // already rendered, so react live rather than only reading storage once at load.
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area === 'local' && changes.serviceConnection) {
+        applyServiceConnection(changes.serviceConnection.newValue);
+      }
+    });
+  }
+
   function load() {
-    chrome.storage.local.get(['serviceUrl', 'token']).then(function (data) {
+    chrome.storage.local.get(['serviceUrl', 'token', 'serviceConnection']).then(function (data) {
       serviceUrlEl.value = data.serviceUrl || DEFAULT_SERVICE_URL;
       tokenEl.value = data.token || '';
+      applyServiceConnection(data.serviceConnection);
       if (tokenEl.value) {
         refreshProfileArea();
       } else {
@@ -65,6 +104,8 @@
       }
       loadSmartFillSettings();
       loadLlmAvailability();
+      loadAnswers();
+      loadLog();
     });
   }
 
@@ -84,6 +125,8 @@
     chrome.storage.local.set({ serviceUrl: serviceUrl, token: token }).then(function () {
       setStatus('ok', 'Saved.');
       refreshProfileArea();
+      loadAnswers();
+      loadLog();
     });
   });
 
@@ -396,13 +439,19 @@
 
   function renderProfileSwitcher(data) {
     if (data.legacy) {
-      profileSwitcherEl.style.display = 'none';
+      // Nothing to switch between yet, but keep "New profile…" reachable: clicking
+      // it and trying will get the exact 409 + migrate command back from the
+      // service (see createProfileBtn below), which is the operator's actual next
+      // step — hiding the whole row here would hide that path entirely.
+      profileSwitcherEl.style.display = 'flex';
+      profileSelectEl.style.display = 'none';
       newProfileRowEl.style.display = 'none';
       legacyNoticeEl.style.display = 'block';
       return;
     }
     legacyNoticeEl.style.display = 'none';
     profileSwitcherEl.style.display = 'flex';
+    profileSelectEl.style.display = '';
     profileSelectEl.innerHTML = '';
     (data.profiles || []).forEach(function (p) {
       var opt = document.createElement('option');
@@ -471,6 +520,7 @@
 
     renderRepeatable(workHistoryListEl, workHistoryTemplate, profileData.work_history || [], 'Position');
     renderRepeatable(educationListEl, educationTemplate, profileData.education || [], 'Education');
+    renderSkills();
 
     applyProvenanceMarks();
     updateSectionMeta();
@@ -558,6 +608,155 @@
     return out;
   }
 
+  // -- skills editor (profile.skills_boundary: {category: [skill, ...]}) --------
+  //
+  // Category names are free-form (a résumé import writes things like
+  // "languages", "data_platform", or "skills") so, unlike work_history/education,
+  // this isn't a fixed template repeated per item — each category gets its own
+  // block with an editable name, a list of removable skill chips, and an
+  // add-skill input. Rendered from profileData.skills_boundary on load/switch;
+  // collectSkillsIntoProfileData() rebuilds the whole object fresh from the DOM
+  // on every input/change and on Save, the same "DOM is the source of truth at
+  // save time" pattern collectRepeatable() uses above.
+
+  var skillsCategoryListEl = document.getElementById('skillsCategoryList');
+  var addSkillCategoryBtn = document.getElementById('addSkillCategoryBtn');
+
+  function addSkillChip(chipListEl, skill) {
+    skill = String(skill == null ? '' : skill).trim();
+    if (!skill) return;
+    var exists = Array.prototype.some.call(chipListEl.querySelectorAll('.skill-chip'), function (c) {
+      return c.getAttribute('data-skill') === skill;
+    });
+    if (exists) return;
+
+    var chip = document.createElement('span');
+    chip.className = 'skill-chip';
+    chip.setAttribute('data-skill', skill);
+
+    var label = document.createElement('span');
+    label.textContent = skill;
+
+    var rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'skill-chip-remove';
+    rm.setAttribute('aria-label', 'Remove ' + skill);
+    rm.textContent = '×';
+    rm.addEventListener('click', function () {
+      chip.remove();
+      updateCompleteness();
+    });
+
+    chip.appendChild(label);
+    chip.appendChild(rm);
+    chipListEl.appendChild(chip);
+  }
+
+  function addSkillCategoryBlock(name, skills) {
+    var block = document.createElement('div');
+    block.className = 'skills-category';
+
+    var head = document.createElement('div');
+    head.className = 'skills-category-head';
+
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'skills-category-name';
+    nameInput.value = name || '';
+    nameInput.placeholder = 'category name, e.g. languages';
+    nameInput.autocomplete = 'off';
+    nameInput.spellcheck = false;
+    nameInput.setAttribute('aria-label', 'Skill category name');
+
+    var removeCatBtn = document.createElement('button');
+    removeCatBtn.type = 'button';
+    removeCatBtn.className = 'danger small';
+    removeCatBtn.textContent = 'Remove category';
+    removeCatBtn.addEventListener('click', function () {
+      block.remove();
+      updateCompleteness();
+    });
+
+    head.appendChild(nameInput);
+    head.appendChild(removeCatBtn);
+
+    var chipList = document.createElement('div');
+    chipList.className = 'skills-chip-list';
+    (skills || []).forEach(function (s) { addSkillChip(chipList, s); });
+
+    var addRow = document.createElement('div');
+    addRow.className = 'row';
+
+    var newSkillInput = document.createElement('input');
+    newSkillInput.type = 'text';
+    newSkillInput.placeholder = 'add a skill and press Enter';
+    newSkillInput.autocomplete = 'off';
+    newSkillInput.spellcheck = false;
+
+    var addSkillBtn = document.createElement('button');
+    addSkillBtn.type = 'button';
+    addSkillBtn.className = 'secondary small';
+    addSkillBtn.textContent = 'Add';
+
+    function commitNewSkill() {
+      addSkillChip(chipList, newSkillInput.value);
+      newSkillInput.value = '';
+      newSkillInput.focus();
+      updateCompleteness();
+    }
+    addSkillBtn.addEventListener('click', commitNewSkill);
+    newSkillInput.addEventListener('keydown', function (evt) {
+      if (evt.key === 'Enter') { evt.preventDefault(); commitNewSkill(); }
+    });
+
+    addRow.appendChild(newSkillInput);
+    addRow.appendChild(addSkillBtn);
+
+    block.appendChild(head);
+    block.appendChild(chipList);
+    block.appendChild(addRow);
+    skillsCategoryListEl.appendChild(block);
+  }
+
+  function renderSkills() {
+    skillsCategoryListEl.innerHTML = '';
+    var boundary = profileData.skills_boundary;
+    if (boundary && typeof boundary === 'object') {
+      Object.keys(boundary).forEach(function (cat) {
+        var v = boundary[cat];
+        addSkillCategoryBlock(cat, Array.isArray(v) ? v : []);
+      });
+    }
+  }
+
+  addSkillCategoryBtn.addEventListener('click', function () {
+    addSkillCategoryBlock('', []);
+    var names = skillsCategoryListEl.querySelectorAll('.skills-category-name');
+    var last = names[names.length - 1];
+    if (last) last.focus();
+    updateCompleteness();
+  });
+
+  function collectSkillsIntoProfileData() {
+    var out = {};
+    skillsCategoryListEl.querySelectorAll('.skills-category').forEach(function (block) {
+      var name = (block.querySelector('.skills-category-name').value || '').trim();
+      if (!name) return; // an unnamed category is dropped rather than saved as ""
+      var skills = Array.prototype.map.call(
+        block.querySelectorAll('.skill-chip'),
+        function (c) { return c.getAttribute('data-skill'); }
+      );
+      if (out[name]) {
+        // Two categories renamed to the same name: merge rather than let the
+        // second silently clobber the first.
+        skills.forEach(function (s) { if (out[name].indexOf(s) === -1) out[name].push(s); });
+      } else {
+        out[name] = skills;
+      }
+    });
+    profileData.skills_boundary = out;
+  }
+
   // -- saving -------------------------------------------------------------------
 
   function collectFormIntoProfileData() {
@@ -580,6 +779,7 @@
       workHistoryListEl, ['title', 'company', 'location', 'start', 'end', 'current', 'description']);
     profileData.education = collectRepeatable(
       educationListEl, ['school', 'degree', 'field', 'start', 'end']);
+    collectSkillsIntoProfileData();
   }
 
   saveProfileBtn.addEventListener('click', function () {
@@ -655,6 +855,14 @@
     }).then(function () {
       setProfileStatus('ok', 'Created and switched to profile "' + pid + '".');
     }).catch(function (err) {
+      if (err && err.status === 409) {
+        // The service's own detail is already a complete, actionable sentence
+        // (e.g. "legacy single-profile install — run `applypilot profile
+        // migrate` first", or "profile already exists: <id>") — show it
+        // verbatim rather than folding it into a generic wrapper.
+        setProfileStatus('err', err.message);
+        return;
+      }
       setProfileStatus('err', 'Could not create profile: ' + err.message);
     });
   });
@@ -1127,6 +1335,297 @@
       if (input) input.focus({ preventScroll: true });
     }
   }
+
+  // ===============================================================================
+  // -- Saved answers ---------------------------------------------------------------
+  // ===============================================================================
+  //
+  // GET /answers -> {answers:[{question, answer, source ("you" | "earlier run"),
+  // ts, used}]}. "you" is an answer the applicant typed on a page and explicitly
+  // chose to remember (the side panel's "Remember my answers"); anything else was
+  // reused from an earlier fill. Forgetting re-fetches the list rather than just
+  // removing the row locally, so this always reflects what the bank file actually
+  // holds even if something else changed it concurrently (e.g. the CLI).
+
+  var answersTableWrapEl = document.getElementById('answersTableWrap');
+  var answersEmptyEl = document.getElementById('answersEmpty');
+  var answersStatusEl = document.getElementById('answersStatus');
+
+  var ANSWER_TRUNCATE_LEN = 180;
+
+  function setAnswersStatus(kind, text) {
+    answersStatusEl.className = kind;
+    answersStatusEl.textContent = text;
+  }
+
+  function loadAnswers() {
+    if (!tokenEl.value) {
+      answersTableWrapEl.innerHTML = '';
+      answersEmptyEl.style.display = 'none';
+      setAnswersStatus('info', 'Set a service token above to load saved answers.');
+      return;
+    }
+    setAnswersStatus('', '');
+    apiGet('/answers').then(function (data) {
+      renderAnswersTable((data && data.answers) || []);
+    }, function (err) {
+      answersTableWrapEl.innerHTML = '';
+      answersEmptyEl.style.display = 'none';
+      setAnswersStatus('err', 'Could not load saved answers: ' + err.message);
+    });
+  }
+
+  function renderAnswersTable(list) {
+    answersTableWrapEl.innerHTML = '';
+    if (!list.length) {
+      answersEmptyEl.style.display = 'block';
+      return;
+    }
+    answersEmptyEl.style.display = 'none';
+
+    var table = document.createElement('table');
+    table.className = 'data-table';
+
+    var thead = document.createElement('thead');
+    var headRow = document.createElement('tr');
+    ['Question', 'Answer', 'Who', ''].forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    list.forEach(function (a) { tbody.appendChild(buildAnswerRow(a)); });
+    table.appendChild(tbody);
+
+    answersTableWrapEl.appendChild(table);
+  }
+
+  function buildAnswerRow(a) {
+    var tr = document.createElement('tr');
+
+    var qTd = document.createElement('td');
+    qTd.textContent = a.question || '';
+    tr.appendChild(qTd);
+
+    var aTd = document.createElement('td');
+    var answerText = a.answer == null ? '' : String(a.answer);
+    var isLong = answerText.length > ANSWER_TRUNCATE_LEN;
+    var textEl = document.createElement('span');
+    textEl.className = 'answer-text';
+    textEl.textContent = isLong ? answerText.slice(0, ANSWER_TRUNCATE_LEN) + '…' : answerText;
+    aTd.appendChild(textEl);
+    if (isLong) {
+      var expanded = false;
+      var expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.className = 'secondary small';
+      expandBtn.style.marginLeft = '6px';
+      expandBtn.textContent = 'Expand';
+      expandBtn.addEventListener('click', function () {
+        expanded = !expanded;
+        textEl.textContent = expanded ? answerText : answerText.slice(0, ANSWER_TRUNCATE_LEN) + '…';
+        expandBtn.textContent = expanded ? 'Collapse' : 'Expand';
+      });
+      aTd.appendChild(expandBtn);
+    }
+    tr.appendChild(aTd);
+
+    var whoTd = document.createElement('td');
+    var whoBadge = document.createElement('span');
+    var isYou = a.source === 'you';
+    whoBadge.className = 'who-badge' + (isYou ? ' you' : '');
+    whoBadge.textContent = a.source || 'earlier run';
+    whoTd.appendChild(whoBadge);
+    tr.appendChild(whoTd);
+
+    var actionTd = document.createElement('td');
+    actionTd.className = 'col-actions';
+    var forgetBtn = document.createElement('button');
+    forgetBtn.type = 'button';
+    forgetBtn.className = 'danger small';
+    forgetBtn.textContent = 'Forget';
+    forgetBtn.addEventListener('click', function () {
+      forgetBtn.disabled = true;
+      apiPost('/answers/forget', { question: a.question }).then(function () {
+        loadAnswers();
+      }, function (err) {
+        forgetBtn.disabled = false;
+        setAnswersStatus('err', 'Could not forget that answer: ' + err.message);
+      });
+    });
+    actionTd.appendChild(forgetBtn);
+    tr.appendChild(actionTd);
+
+    return tr;
+  }
+
+  // ===============================================================================
+  // -- Application log ---------------------------------------------------------------
+  // ===============================================================================
+  //
+  // GET /log -> {entries:[{id, url, title, company, created, updated, status,
+  // counts:{filled, drafts, needs_you, failed, unreadable}, fills}]}, already
+  // newest-first. The extension itself only ever writes "filled" (it cannot know
+  // whether the applicant went on to press the ATS's own Submit) — "applied" and
+  // "skipped" are set here, by hand. Export CSV goes through an authenticated
+  // fetch + blob download rather than a plain <a href> because the token has to
+  // travel as a header, not a query string.
+
+  var logTableWrapEl = document.getElementById('logTableWrap');
+  var logEmptyEl = document.getElementById('logEmpty');
+  var logStatusEl = document.getElementById('logStatus');
+  var exportLogBtn = document.getElementById('exportLogBtn');
+
+  var LOG_STATUSES = ['filled', 'applied', 'skipped'];
+
+  function setLogStatus(kind, text) {
+    logStatusEl.className = kind;
+    logStatusEl.textContent = text;
+  }
+
+  function loadLog() {
+    if (!tokenEl.value) {
+      logTableWrapEl.innerHTML = '';
+      logEmptyEl.style.display = 'none';
+      setLogStatus('info', 'Set a service token above to load your application log.');
+      return;
+    }
+    setLogStatus('', '');
+    apiGet('/log').then(function (data) {
+      renderLogTable((data && data.entries) || []);
+    }, function (err) {
+      logTableWrapEl.innerHTML = '';
+      logEmptyEl.style.display = 'none';
+      setLogStatus('err', 'Could not load the application log: ' + err.message);
+    });
+  }
+
+  function formatLogDate(ts) {
+    if (!ts) return '';
+    var d = new Date(ts * 1000);
+    if (isNaN(d.getTime())) return '';
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+      pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function renderLogTable(entries) {
+    logTableWrapEl.innerHTML = '';
+    if (!entries.length) {
+      logEmptyEl.style.display = 'block';
+      return;
+    }
+    logEmptyEl.style.display = 'none';
+
+    var table = document.createElement('table');
+    table.className = 'data-table';
+
+    var thead = document.createElement('thead');
+    var headRow = document.createElement('tr');
+    ['Date', 'Company', 'Title', 'Filled', 'Drafts', 'Needs you', 'Failed', 'Status'].forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    entries.forEach(function (e) { tbody.appendChild(buildLogRow(e)); });
+    table.appendChild(tbody);
+
+    logTableWrapEl.appendChild(table);
+  }
+
+  function buildLogRow(e) {
+    var tr = document.createElement('tr');
+
+    var dateTd = document.createElement('td');
+    dateTd.textContent = formatLogDate(e.created);
+    tr.appendChild(dateTd);
+
+    var companyTd = document.createElement('td');
+    companyTd.textContent = e.company || '';
+    tr.appendChild(companyTd);
+
+    var titleTd = document.createElement('td');
+    if (e.url) {
+      var link = document.createElement('a');
+      link.className = 'log-link';
+      link.href = e.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = e.title || e.url;
+      titleTd.appendChild(link);
+    } else {
+      titleTd.textContent = e.title || '';
+    }
+    tr.appendChild(titleTd);
+
+    var counts = e.counts || {};
+    [counts.filled, counts.drafts, counts.needs_you, counts.failed].forEach(function (n) {
+      var td = document.createElement('td');
+      td.textContent = n == null ? '0' : String(n);
+      tr.appendChild(td);
+    });
+
+    var statusTd = document.createElement('td');
+    var select = document.createElement('select');
+    LOG_STATUSES.forEach(function (s) {
+      var opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      if (s === e.status) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', function () {
+      var prev = e.status;
+      select.disabled = true;
+      apiPost('/log/' + encodeURIComponent(e.id) + '/status', { status: select.value }).then(function () {
+        e.status = select.value;
+        select.disabled = false;
+        setLogStatus('ok', 'Updated.');
+      }, function (err) {
+        select.disabled = false;
+        select.value = prev;
+        setLogStatus('err', 'Could not update status: ' + err.message);
+      });
+    });
+    statusTd.appendChild(select);
+    tr.appendChild(statusTd);
+
+    return tr;
+  }
+
+  exportLogBtn.addEventListener('click', function () {
+    if (!tokenEl.value) {
+      setLogStatus('err', 'Set a service token above first.');
+      return;
+    }
+    exportLogBtn.disabled = true;
+    setLogStatus('info', 'Preparing download…');
+    fetch(apiUrl('/log.csv'), { headers: apiHeaders(false) }).then(function (resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'applications.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      exportLogBtn.disabled = false;
+      setLogStatus('ok', 'Downloaded.');
+    }, function (err) {
+      exportLogBtn.disabled = false;
+      setLogStatus('err', 'Could not export CSV: ' + err.message);
+    });
+  });
 
   load();
 })();
