@@ -29,6 +29,13 @@
     return (s || '').replace(/\s+/g, ' ').trim();
   }
 
+  // Strips a trailing required-question marker ("*", "✱", possibly preceded by whitespace)
+  // off a resolved question/group label -- Greenhouse and Ashby use "*", Lever uses "✱". Only
+  // ever applied to a LABEL string, never to an option's own text.
+  function stripRequiredMarker(s) {
+    return cleanText(String(s || '').replace(/\s*[*✱]+\s*$/, ''));
+  }
+
   function cssEscape(str) {
     str = String(str);
     if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(str);
@@ -436,21 +443,35 @@
       var legend = fieldset.querySelector('legend');
       if (legend) {
         var t = cleanText(legend.textContent);
-        if (t) return t;
+        if (t) return stripRequiredMarker(t);
       }
     }
     var container = (first.closest && (first.closest('[role="radiogroup"]') || first.closest('[role="group"]'))) || null;
     if (container) {
       var ariaLabel = container.getAttribute('aria-label');
-      if (ariaLabel) return cleanText(ariaLabel);
+      if (ariaLabel) return stripRequiredMarker(cleanText(ariaLabel));
       var labelledBy = container.getAttribute('aria-labelledby');
       var doc = ownerDoc(first);
       if (labelledBy && doc) {
         var ref = doc.getElementById(labelledBy.split(/\s+/)[0]);
-        if (ref) return cleanText(ref.textContent);
+        if (ref) return stripRequiredMarker(cleanText(ref.textContent));
       }
     }
-    return getPrecedingText(first) || '';
+    // Lever: a native-<select>-free radio/checkbox group named "cards[<uuid>][fieldN]" (or a
+    // survey "surveysResponses[...]" group) has no <fieldset>/<legend> at all -- Lever doesn't
+    // use one -- and the group's own `name` is just the opaque card id, never the question
+    // text. The real question text lives in a sibling structure: the nearest ancestor
+    // ".application-question" carries the label in its own ".application-label .text" (with a
+    // "✱" required marker to strip). See docs/research/2026-09-24-ats-widget-ground-truth.md §6.4.
+    var question = first.closest ? first.closest('.application-question') : null;
+    if (question && question.querySelector) {
+      var leverLabel = question.querySelector('.application-label .text');
+      if (leverLabel) {
+        var lt = cleanText(leverLabel.textContent);
+        if (lt) return stripRequiredMarker(lt);
+      }
+    }
+    return stripRequiredMarker(getPrecedingText(first) || '');
   }
 
   // ---------------------------------------------------------------------
@@ -1314,11 +1335,26 @@
   // pick on one of these questions is a false statement on a real EEO question, so "no confident
   // match" must always win over a fuzzy guess.
 
-  function findFirstMatch(optionTexts, re) {
+  /**
+   * Like a "find the matching option" lookup, but AMBIGUITY-SAFE throughout: returns the
+   * option's index only when EXACTLY ONE option matches `re`, and -1 both when none match and
+   * when two or more do — a family match must never guess the first of several candidates any
+   * more than matchChoiceOption's plain containment tier does (e.g. value "Yes" against options
+   * "Yes, I am a U.S. citizen or permanent resident" / "Yes, I am authorized but will require
+   * sponsorship" is a materially different legal statement depending on which "Yes" is meant,
+   * so it must resolve to neither). Every existing caller below was already written as "if -1,
+   * try the next fallback (or give up)", so this keeps working with zero call-site changes.
+   */
+  function findUniqueMatch(optionTexts, re) {
+    var idx = -1;
+    var count = 0;
     for (var i = 0; i < optionTexts.length; i++) {
-      if (re.test(cleanText(optionTexts[i]))) return i;
+      if (re.test(cleanText(optionTexts[i]))) {
+        count++;
+        if (count === 1) idx = i; else return -1;
+      }
     }
-    return -1;
+    return count === 1 ? idx : -1;
   }
 
   var NEGATION_RE = /\bnot\b|n't/i;
@@ -1329,6 +1365,28 @@
   // this" is recognised by the same set of phrasings the value itself uses. No `$` anchor, so a
   // Workday-style trailing suffix ("... (United States of America)") never breaks the match.
   var DECLINE_RE = /decline|prefer not|rather not|not declared|do(n'?t| not) (wish|want)|choose not|not to (say|answer|disclose)|self[-\s]?identify/i;
+
+  // A decline-shaped OPTION can still contain decline-ish phrasing (bare "self-identify" is
+  // part of DECLINE_RE above) while actually ASSERTING a specific yes/no answer or identity
+  // claim — "I am a protected veteran, but I choose not to self-identify the classifications to
+  // which I belong" and "Yes, I self-identify as LGBTQ+" both matched DECLINE_RE, but neither is
+  // truly a decline-to-answer option: one is a veteran assertion, the other an identity
+  // disclosure. A genuine decline option never ALSO asserts one of these.
+  var DECLINE_ASSERTION_RE = /^\s*(yes|no)\b|\bI\s*am\s+an?\b|\bI\s*identify\s+as\b|\bI\s*self[-\s]?identify\s+as\b|\bI\s*have\s+an?\b/i;
+
+  /** Decline-to-answer match: reject any DECLINE_RE-matching option that also asserts a
+   * yes/no/identity claim, then require EXACTLY ONE plain decline option to remain. */
+  function findDeclineMatch(optionTexts) {
+    var idx = -1;
+    var count = 0;
+    for (var i = 0; i < optionTexts.length; i++) {
+      var ot = cleanText(optionTexts[i]);
+      if (!DECLINE_RE.test(ot) || DECLINE_ASSERTION_RE.test(ot)) continue;
+      count++;
+      if (count === 1) idx = i; else return -1;
+    }
+    return count === 1 ? idx : -1;
+  }
 
   var RACE_VALUES = [
     'american indian or alaska native', 'asian', 'black or african american',
@@ -1344,69 +1402,81 @@
    */
   function matchAnswerFamily(v, optionTexts) {
     // -- decline to answer -----------------------------------------------------------------
-    if (DECLINE_RE.test(v)) return findFirstMatch(optionTexts, DECLINE_RE);
+    if (DECLINE_RE.test(v)) return findDeclineMatch(optionTexts);
 
     // -- plain yes/no -----------------------------------------------------------------------
     if (v === 'yes' || v === 'no') {
-      return findFirstMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
+      return findUniqueMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
     }
 
     // -- gender -------------------------------------------------------------------------------
-    if (v === 'male') return findFirstMatch(optionTexts, /^(male|man)\b/i);
-    if (v === 'female') return findFirstMatch(optionTexts, /^(female|woman)\b/i);
-    if (/^non[-\s]?binary$/.test(v)) return findFirstMatch(optionTexts, /non[-\s]?binary/i);
+    if (v === 'male') return findUniqueMatch(optionTexts, /^(male|man)\b/i);
+    if (v === 'female') return findUniqueMatch(optionTexts, /^(female|woman)\b/i);
+    if (/^non[-\s]?binary$/.test(v)) return findUniqueMatch(optionTexts, /non[-\s]?binary/i);
 
     // -- veteran status -----------------------------------------------------------------------
     // Four distinct known phrasings, each with its OWN fallback chain -- deliberately NOT a
     // single shared regex, because "not a veteran" and "not a protected veteran" mean different
     // things and conflating them is exactly the kind of guess this project refuses to make.
     if (v === 'i am not a veteran') {
-      var vr = findFirstMatch(optionTexts, /\bnot a veteran\b/i);
-      if (vr === -1) vr = findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
-      if (vr === -1) vr = findFirstMatch(optionTexts, /^\s*no\b/i);
+      var vr = findUniqueMatch(optionTexts, /\bnot a veteran\b/i);
+      if (vr === -1) vr = findUniqueMatch(optionTexts, /\bnot a protected veteran\b/i);
+      if (vr === -1) vr = findUniqueMatch(optionTexts, /^\s*no\b/i);
       return vr;
     }
     if (v === 'i am a veteran, but not a protected veteran') {
-      var vr2 = findFirstMatch(optionTexts, /\bveteran\b.*\bnot a protected\b/i);
-      if (vr2 === -1) vr2 = findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
+      var vr2 = findUniqueMatch(optionTexts, /\bveteran\b.*\bnot a protected\b/i);
+      if (vr2 === -1) vr2 = findUniqueMatch(optionTexts, /\bnot a protected veteran\b/i);
       return vr2;
     }
     if (v === 'i am a protected veteran' ||
         v === 'i identify as one or more of the classifications of protected veteran') {
+      var vIdx = -1, vCount = 0;
       for (var i = 0; i < optionTexts.length; i++) {
         var ot = cleanText(optionTexts[i]);
-        if (/(protected veteran|identify as one or more)/i.test(ot) && !NEGATION_RE.test(ot)) return i;
+        if (/(protected veteran|identify as one or more)/i.test(ot) && !NEGATION_RE.test(ot)) {
+          vCount++;
+          if (vCount === 1) vIdx = i; else return -1;
+        }
       }
-      return -1;
+      return vCount === 1 ? vIdx : -1;
     }
     if (v === 'i am not a protected veteran') {
       // Legacy value, deliberately ambiguous between "not a veteran at all" and "veteran but
       // not protected" -- never guess between them.
-      return findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
+      return findUniqueMatch(optionTexts, /\bnot a protected veteran\b/i);
     }
 
     // -- disability status ----------------------------------------------------------------------
     if (/disability/.test(v) && /^no\b/.test(v)) {
+      var noIdx = -1, noCount = 0;
       for (var j = 0; j < optionTexts.length; j++) {
         var otD = cleanText(optionTexts[j]);
         var fitsNo = /^\s*no\b/i.test(otD) || /do(n'?t| not) have a disability/i.test(otD);
-        if (fitsNo && !/wish|want|answer/i.test(otD)) return j;
+        if (fitsNo && !/wish|want|answer/i.test(otD)) {
+          noCount++;
+          if (noCount === 1) noIdx = j; else return -1;
+        }
       }
-      return -1;
+      return noCount === 1 ? noIdx : -1;
     }
     if (/disability/.test(v) && /^yes\b/.test(v)) {
+      var yesIdx = -1, yesCount = 0;
       for (var k = 0; k < optionTexts.length; k++) {
         var otY = cleanText(optionTexts[k]);
         var fitsYes = /^\s*yes\b/i.test(otY) || /\bi have a disability\b/i.test(otY) || /have had one/i.test(otY);
-        if (fitsYes && !NEGATION_RE.test(otY)) return k;
+        if (fitsYes && !NEGATION_RE.test(otY)) {
+          yesCount++;
+          if (yesCount === 1) yesIdx = k; else return -1;
+        }
       }
-      return -1;
+      return yesCount === 1 ? yesIdx : -1;
     }
 
     // -- race / ethnicity -----------------------------------------------------------------------
     if (RACE_VALUES.indexOf(v) !== -1) {
       var raceRe = new RegExp('^' + escapeRegExp(v) + '\\b', 'i');
-      return findFirstMatch(optionTexts, raceRe);
+      return findUniqueMatch(optionTexts, raceRe);
     }
 
     return null; // not a recognised family -- caller falls through to generic containment
@@ -1435,6 +1505,31 @@
       if (norm(optionTexts[i]) === v) return i;
     }
 
+    // 1b. degree-level / country synonym normalisation -- e.g. a specific degree TITLE like
+    // "Bachelor of Design" against a generic Greenhouse/Ashby "Degree" combobox whose options
+    // are plain LEVELS ("Bachelor's Degree", "Master's Degree", ...); or "USA"/"US" against a
+    // spelled-out "United States of America". Previously only matchWorkdayDropdownOption ran
+    // this -- a live probe (2026-09-24) showed a Greenhouse Degree combobox fail on exactly
+    // this shape ("no confident match... among filtered options" for "Bachelor of Design"
+    // against ["High School Diploma", "Associate's Degree", "Bachelor's Degree", ...]), so it
+    // is promoted here to benefit every matchChoiceOption caller (combobox, checkbox-group,
+    // radio, native select), not only Workday's dropdown.
+    var fam = degreeFamilyOf(value);
+    if (fam) {
+      var famRe = WD_DEGREE_FAMILY_OPTION_RE[fam];
+      var famMatches = [];
+      for (i = 0; i < optionTexts.length; i++) {
+        if (famRe.test(optionTexts[i])) famMatches.push(i);
+      }
+      if (famMatches.length === 1) return famMatches[0];
+    }
+    var alias = countryAliasOf(value);
+    if (alias) {
+      for (i = 0; i < optionTexts.length; i++) {
+        if (norm(optionTexts[i]) === alias) return i;
+      }
+    }
+
     // 2. answer families -- a recognised family short-circuits here, whether it finds a
     //    fitting option (returns its index) or not (returns -1) -- see matchAnswerFamily.
     //    Family values can legitimately run long ("I am a veteran, but not a protected
@@ -1456,17 +1551,25 @@
     //    ALL options first; only if that finds nothing at all does the reverse direction (value
     //    contains option) get tried -- and only for options of >= 4 (cleaned) characters, so a
     //    short option text ("no", "ok") can never win just by coincidentally appearing inside a
-    //    longer value string.
+    //    longer value string. Either direction: if MORE THAN ONE option matches, the tier is
+    //    ambiguous and returns -1 -- NEVER the first of several ("Engineer" must not blindly
+    //    pick "Software Engineer" when "Site Engineer" also matches).
     var valueRe = new RegExp('\\b' + escapeRegExp(v) + '\\b', 'i');
+    var forwardMatches = [];
     for (i = 0; i < optionTexts.length; i++) {
       var otNorm = norm(optionTexts[i]);
-      if (otNorm && valueRe.test(otNorm)) return i;
+      if (otNorm && valueRe.test(otNorm)) forwardMatches.push(i);
     }
+    if (forwardMatches.length === 1) return forwardMatches[0];
+    if (forwardMatches.length > 1) return -1;
+
+    var reverseMatches = [];
     for (i = 0; i < optionTexts.length; i++) {
       var otNorm2 = norm(optionTexts[i]);
       if (otNorm2.length < 4) continue;
-      if (new RegExp('\\b' + escapeRegExp(otNorm2) + '\\b', 'i').test(v)) return i;
+      if (new RegExp('\\b' + escapeRegExp(otNorm2) + '\\b', 'i').test(v)) reverseMatches.push(i);
     }
+    if (reverseMatches.length === 1) return reverseMatches[0];
     return -1;
   }
 
@@ -2074,6 +2177,780 @@
   }
 
   // ---------------------------------------------------------------------
+  // Choice widgets ground truth (2026-09-24 live probe) — react-select / generic ARIA
+  // comboboxes, Ashby Yes/No button groups, checkbox groups, Lever's location type-ahead.
+  // See docs/research/2026-09-24-ats-widget-ground-truth.md §6 and
+  // docs/research/live-captures-2026-09-24/*.json for the real markup this is built from.
+  //
+  // The #1 gap on Greenhouse (~50% of the user's target jobs): EVERY dropdown-shaped question
+  // (Country, Location, "How did you hear about us?", work authorization, sponsorship, Gender,
+  // Hispanic/Latino, Veteran, Race, Degree, ...) renders as a react-select combobox --
+  // `input.select__input[role=combobox]` inside `.select__control`. Scanned as a plain text
+  // input, typing into it and reading the typed text back reports "filled" while react-select
+  // drops that text on blur -- nothing was actually selected. This section makes it its own
+  // widget kind so it is never scanned or filled as a text field again.
+  // ---------------------------------------------------------------------
+
+  /** A single, unadorned mouse event -- ground truth: react-select's flyout toggles on
+   * `mouseup`, never `click` (a bare click is preventDefault()'d by the button). */
+  function dispatchMouseEvent(el, type) {
+    var view = realmOf(el);
+    var Ctor = (view && view.MouseEvent) || (typeof MouseEvent !== 'undefined' ? MouseEvent : null);
+    if (!Ctor) return;
+    var evt;
+    try { evt = new Ctor(type, { bubbles: true, cancelable: true, view: view || undefined }); }
+    catch (e) {
+      try { evt = new Ctor(type, { bubbles: true, cancelable: true }); }
+      catch (e2) { return; }
+    }
+    el.dispatchEvent(evt);
+  }
+
+  // ---- combobox (react-select + generic ARIA) --------------------------------------------
+
+  function isComboboxInputSafe(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
+    if ((el.getAttribute && el.getAttribute('role')) !== 'combobox') return false;
+    if (el.disabled) return false;
+    if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+    if (!isVisible(el)) return false;
+    return true;
+  }
+
+  /** The react-select control widget (".select__control") standing in for `input`, if any. */
+  function comboboxControlOf(input) {
+    return input.closest ? input.closest('[class*="select__control" i], [class*="Select__control" i]') : null;
+  }
+
+  /** The bounded field wrapper a react-select menu/value chips render inside -- one level up
+   * from ".select__control", never a document-wide search (would risk another field's menu). */
+  function comboboxFieldScope(input) {
+    var control = comboboxControlOf(input);
+    return (control && control.parentElement) || input.parentElement || input;
+  }
+
+  /**
+   * The listbox/menu belonging to THIS combobox input, or null if none is open. Resolved via
+   * aria-controls/aria-owns FIRST (the generic ARIA combobox contract, and what react-select
+   * itself sets once open: `#react-select-<id>-listbox`) — only when that id is missing does
+   * this fall back to a `.select__menu`-shaped descendant of the input's own small field
+   * wrapper. Never another field's menu, however option-shaped it looks.
+   */
+  function resolveComboboxMenu(entry) {
+    var input = entry.input;
+    var doc = ownerDoc(input);
+    var controlsAttr = (input.getAttribute && (input.getAttribute('aria-controls') || input.getAttribute('aria-owns'))) || '';
+    var ids = controlsAttr.split(/\s+/).filter(Boolean);
+    for (var i = 0; i < ids.length; i++) {
+      var byId = doc && doc.getElementById ? doc.getElementById(ids[i]) : null;
+      if (byId && isVisible(byId)) return byId;
+    }
+    var scope = comboboxFieldScope(input);
+    if (scope && scope.querySelector) {
+      var menu = scope.querySelector('[class*="select__menu" i], [class*="Select__menu" i], [role="listbox"]');
+      if (menu && isVisible(menu)) return menu;
+    }
+    return null;
+  }
+
+  /**
+   * `el` must look like a real react-select/ARIA option AND live inside `menu` (the listbox
+   * THIS input controls, resolved by resolveComboboxMenu — never an arbitrary element, and
+   * never another field's menu) — the guard the project brief requires every new click path
+   * to have, re-checked at the point of action rather than trusted from scanning/matching.
+   */
+  function isComboboxOptionSafe(el, menu) {
+    if (!el || el.nodeType !== 1) return false;
+    if (!menu || !menu.contains(el)) return false;
+    var role = el.getAttribute && el.getAttribute('role');
+    var cls = (el.getAttribute && el.getAttribute('class')) || '';
+    var looksLikeOption = role === 'option' || /select__option|Select__option|Select-option/i.test(cls);
+    if (!looksLikeOption) return false;
+    var tag = el.tagName;
+    if (tag === 'BUTTON' || tag === 'A') return false;
+    var effectiveType = String(el.type || '').toLowerCase();
+    if (effectiveType === 'submit' || effectiveType === 'image') return false;
+    if (!isVisible(el)) return false;
+    if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+    if (ADD_BUTTON_DENY_RE.test(optionAccessibleText(el))) return false; // never submit/next/save-shaped
+    return true;
+  }
+
+  function comboboxOptionEls(menu) {
+    if (!menu || !menu.querySelectorAll) return [];
+    return Array.prototype.slice.call(
+      menu.querySelectorAll('[role="option"], [class*="select__option" i], [class*="Select__option" i]')
+    ).filter(isVisible);
+  }
+
+  var COMBOBOX_VALUE_CHIP_SELECTOR =
+    '[class*="select__single-value" i], [class*="Select__single-value" i], ' +
+    '[class*="select__multi-value__label" i], [class*="Select__multi-value__label" i]';
+
+  /** Every currently-committed chip's text (single-value: one; multi-value: each tag/pill). */
+  function getComboboxChipTexts(entry) {
+    var scope = comboboxFieldScope(entry.input);
+    if (!scope || !scope.querySelectorAll) return [];
+    var chips = Array.prototype.slice.call(scope.querySelectorAll(COMBOBOX_VALUE_CHIP_SELECTOR));
+    var texts = [];
+    for (var i = 0; i < chips.length; i++) {
+      var t = cleanText(chips[i].textContent);
+      if (t) texts.push(t);
+    }
+    return texts;
+  }
+
+  /** Generic ARIA combobox fallback (no react-select classes at all): aria-activedescendant
+   * naming the chosen option stands in for the chip text react-select renders. */
+  function getGenericComboboxValue(entry) {
+    var input = entry.input;
+    var doc = ownerDoc(input);
+    var activeId = input.getAttribute && input.getAttribute('aria-activedescendant');
+    if (activeId && doc && doc.getElementById) {
+      var opt = doc.getElementById(activeId);
+      if (opt) {
+        var t = cleanText(opt.textContent);
+        if (t) return t;
+      }
+    }
+    return '';
+  }
+
+  /** The field's current COMMITTED value (for getCurrentValue/undo) — never the search
+   * input's own leftover typed text (see the project brief: typed-but-not-selected is not a
+   * value). */
+  function getComboboxCommittedValue(entry) {
+    var chips = getComboboxChipTexts(entry);
+    if (chips.length) return chips.join(', ');
+    return getGenericComboboxValue(entry);
+  }
+
+  function normEqText(a, b) { return cleanText(a).toLowerCase() === cleanText(b).toLowerCase(); }
+
+  /** True only once `matchedText` shows up as a genuinely COMMITTED chip/aria-state AND the
+   * search input itself is empty — leftover search text sitting in the input is explicitly
+   * NOT a commit (react-select drops it on blur; see the project brief). */
+  function verifyComboboxSelection(entry, matchedText) {
+    if (cleanText(entry.input.value || '')) return false;
+    var chips = getComboboxChipTexts(entry);
+    if (chips.length) {
+      for (var i = 0; i < chips.length; i++) { if (normEqText(chips[i], matchedText)) return true; }
+      return false;
+    }
+    var generic = getGenericComboboxValue(entry);
+    return !!generic && normEqText(generic, matchedText);
+  }
+
+  /** True once `menu` has rendered SOMETHING to read -- at least one option, or an explicit
+   * "no options" notice -- not just once the menu container itself becomes visible. A live
+   * probe (2026-09-24, a Greenhouse "Degree" field) showed react-select can paint the menu
+   * wrapper one render pass before its option rows exist, so a wait keyed on container
+   * visibility alone can resolve against a container that is visible but still genuinely
+   * empty, reading zero options and mis-diagnosing a perfectly normal static list as needing
+   * the async type-to-filter fallback. */
+  function comboboxMenuHasContent(menu) {
+    if (!menu || !menu.querySelector) return false;
+    if (menu.querySelector('[role="option"], [class*="select__option" i], [class*="Select__option" i]')) return true;
+    return !!menu.querySelector('[class*="no-options" i], [class*="noresults" i], [class*="menu-notice" i]');
+  }
+
+  /** Opens the menu per the ground truth: mouseup on "Toggle flyout", else ArrowDown keyup on
+   * the input itself. Returns a Promise of the now-open, rendered menu, or null if it never
+   * opened / never finished rendering within budget. */
+  function openCombobox(entry, doc) {
+    var input = entry.input;
+    var scope = comboboxFieldScope(input);
+    var toggle = scope && scope.querySelector ? scope.querySelector('button[aria-label="Toggle flyout" i]') : null;
+    if (toggle && isVisible(toggle) && !toggle.disabled) {
+      dispatchMouseEvent(toggle, 'mouseup');
+    } else {
+      dispatchKeyboardEvent(input, 'keyup', 'ArrowDown', 'ArrowDown');
+    }
+    return waitFor(function () {
+      var menu = resolveComboboxMenu(entry);
+      return (menu && isVisible(menu) && comboboxMenuHasContent(menu)) ? menu : null;
+    }, 1500, doc);
+  }
+
+  /** For a "City, State" value, the part to type to filter an async catalog is just the city. */
+  function comboboxFilterQuery(target) {
+    var t = String(target || '').trim();
+    if (!t) return '';
+    var commaIdx = t.indexOf(',');
+    if (commaIdx > 0) t = t.slice(0, commaIdx).trim();
+    return t.slice(0, 60);
+  }
+
+  /**
+   * Ground truth (§6.6 step 3): "type... then poll for up to 4s, ignoring 'No options' for the
+   * first ~800ms" — an async fetch (Greenhouse's own debounce is ~300ms) may still be in
+   * flight, so an empty/no-options render in that first window is not yet a real answer. Two
+   * stages against the SAME 4s total budget rather than one flat wait, so a genuinely static
+   * list's zero-match render (which settles synchronously) is not mistaken for "still loading".
+   */
+  function waitForComboboxFilterResults(entry, doc) {
+    function poll() {
+      var menu = resolveComboboxMenu(entry);
+      var els = comboboxOptionEls(menu);
+      return els.length ? { menu: menu, els: els } : null;
+    }
+    return waitFor(poll, 800, doc).then(function (found) {
+      if (found) return found;
+      return waitFor(poll, 3200, doc);
+    });
+  }
+
+  /** Selects `els[idx]` inside `menu` through the new guard, then verifies a genuine commit. */
+  function commitComboboxOption(entry, menu, els, idx, doc) {
+    var matched = els[idx];
+    if (!isComboboxOptionSafe(matched, menu)) {
+      return { ok: false, reason: 'matched option failed the safety guard' };
+    }
+    var matchedText = optionAccessibleText(matched);
+    // Ground truth: react-select commits on mousedown (a bare click alone runs after blur and
+    // is dropped) -- mousedown, mouseup, click on the option itself.
+    dispatchPointerClickSequence(matched);
+    return waitFor(function () { return verifyComboboxSelection(entry, matchedText) ? true : null; }, 1000, doc)
+      .then(function (verified) {
+        if (!verified) {
+          return { ok: false, reason: 'selection did not commit (search text may have been dropped on blur)' };
+        }
+        return { ok: true, matchedText: matchedText };
+      });
+  }
+
+  /** Fills ONE value into a combobox: open, match the rendered options, and if nothing
+   * confident is there yet (an async/filtered catalog), type to filter and re-read once. Never
+   * picks the first option, and never trusts typed-but-unselected text as a fill. */
+  function fillComboboxOne(entry, value, doc) {
+    if (!isComboboxInputSafe(entry.input)) {
+      return Promise.resolve({ ok: false, reason: 'safety guard refused the combobox input' });
+    }
+    var target = String(value == null ? '' : value).trim();
+    if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
+
+    var already = getComboboxChipTexts(entry);
+    for (var ai = 0; ai < already.length; ai++) {
+      if (matchChoiceOption(target, [already[ai]]) === 0) return Promise.resolve({ ok: true, matchedText: already[ai] });
+    }
+
+    return openCombobox(entry, doc).then(function (menu) {
+      var els = comboboxOptionEls(menu);
+      // A live probe (2026-09-24, a Greenhouse "Degree" field) showed react-select can
+      // re-render the menu AGAIN right after the open-wait resolves (recalculating the
+      // focused/virtualized row), transiently clearing the options a tick after
+      // comboboxMenuHasContent() saw them and before this line runs. One short re-settle
+      // before concluding "genuinely empty" avoids mistaking that gap for an async catalog.
+      if (!els.length && menu) {
+        return waitFor(function () {
+          var els2 = comboboxOptionEls(menu);
+          return els2.length ? els2 : null;
+        }, 600, doc).then(function (settled) {
+          return matchAndCommitOrFilter(settled || []);
+        });
+      }
+      return matchAndCommitOrFilter(els);
+
+      function matchAndCommitOrFilter(els) {
+        var texts = els.map(optionAccessibleText);
+        var idx = matchChoiceOption(target, texts);
+        if (idx !== -1) return commitComboboxOption(entry, menu, els, idx, doc);
+
+        var query = comboboxFilterQuery(target);
+        if (!query) {
+          dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+          return { ok: false, reason: 'no confident match for "' + target + '" among combobox options' };
+        }
+        setNativeValue(entry.input, query);
+        return waitForComboboxFilterResults(entry, doc).then(function (found) {
+          if (!found) {
+            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+            setNativeValue(entry.input, '');
+            return { ok: false, reason: 'no options rendered while filtering for "' + query + '"' };
+          }
+          var texts2 = found.els.map(optionAccessibleText);
+          var idx2 = matchChoiceOption(target, texts2);
+          if (idx2 === -1) {
+            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+            setNativeValue(entry.input, '');
+            return { ok: false, reason: 'no confident match for "' + target + '" among filtered options' };
+          }
+          return commitComboboxOption(entry, found.menu, found.els, idx2, doc);
+        });
+      }
+    });
+  }
+
+  /** `value` may be a single term or an array (a multi-select combobox) — added one at a time,
+   * same discipline as fillWorkdayPromptValue: one failed/unmatched term never blocks the rest. */
+  function fillComboboxValue(entry, value, doc) {
+    if (Array.isArray(value)) {
+      var results = [];
+      function next(i) {
+        if (i >= value.length) return Promise.resolve(results);
+        return fillComboboxOne(entry, value[i], doc).then(function (r) {
+          results.push({ term: value[i], result: r });
+          return next(i + 1);
+        });
+      }
+      return next(0).then(function (all) {
+        var failedTerms = all.filter(function (r) { return !r.result.ok; }).map(function (r) { return r.term; });
+        var anyOk = all.some(function (r) { return r.result.ok; });
+        return { ok: anyOk, failedTerms: failedTerms };
+      });
+    }
+    return fillComboboxOne(entry, value, doc);
+  }
+
+  // ---- Ashby-style Yes/No (and other short) button groups ----------------------------------
+
+  // The confirmed, real Ashby marker (docs/research/live-captures-2026-09-24/structure-06/07):
+  // `<button class="..._option_1svni_32  ashby-application-form-input-yesno-option">Yes</button>`.
+  // Generalised to the "-option" class family Ashby uses for the whole input-widget line
+  // (yesno-option, checkbox-group-option, ...) in case a future Ashby release renders a
+  // same-shaped button group with more than two options.
+  var BUTTON_GROUP_OPTION_RE = /ashby-application-form-input-[a-z-]*option\b/i;
+
+  function findButtonGroupQuestionContainer(anyButton) {
+    var entry = anyButton.closest ? anyButton.closest('[data-field-path], [class*="field-entry" i]') : null;
+    if (entry) return entry;
+    var node = anyButton.parentElement;
+    for (var depth = 0; depth < 4 && node; depth++) {
+      if (node.tagName === 'FORM' || node.tagName === 'BODY') break;
+      node = node.parentElement;
+    }
+    return node || anyButton.parentElement;
+  }
+
+  function getButtonGroupLabel(group, container) {
+    var lbl = getPrecedingText(group[0]);
+    if (lbl) return stripRequiredMarker(lbl);
+    if (container) {
+      var direct = getLabel(container);
+      if (direct) return stripRequiredMarker(direct);
+    }
+    return '';
+  }
+
+  /** Finds every Ashby-style option button GROUP (2+ buttons sharing one immediate parent) in
+   * `root`. A lone button carrying the option class is left alone (not a choice between
+   * anything). */
+  function findButtonGroups(root) {
+    var buttons = Array.prototype.slice.call(root.querySelectorAll('button')).filter(function (b) {
+      var cls = (b.getAttribute && b.getAttribute('class')) || '';
+      return BUTTON_GROUP_OPTION_RE.test(cls) && isVisible(b) && !b.disabled;
+    });
+    var parents = [];
+    var byParent = [];
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      var parent = btn.parentElement;
+      var idx = parents.indexOf(parent);
+      if (idx === -1) { parents.push(parent); byParent.push([btn]); }
+      else byParent[idx].push(btn);
+    }
+    var out = [];
+    for (var g = 0; g < byParent.length; g++) {
+      var group = byParent[g];
+      if (group.length < 2) continue;
+      var container = findButtonGroupQuestionContainer(group[0]);
+      out.push({ buttons: group, container: container, label: getButtonGroupLabel(group, container) });
+    }
+    return out;
+  }
+
+  /**
+   * A NEW, independent click path (alongside isClickSafe()/safeClick() and
+   * isAddAnotherButtonSafe()/safeClickAddButton() — a bug in one guard must never widen what
+   * another allows). `el` must be a genuine `type=button` control (a bare no-type <button>
+   * defaults to type=submit — the SAME HTML trap isAddAnotherButtonSafe already guards
+   * against) INSIDE this question's own container, never nav/header/footer chrome, and its
+   * text must not read as a submit/next/save-shaped action — a decoy submit button sitting
+   * right next to the group must never be clicked.
+   */
+  /**
+   * `optionTexts` (this group's own known option texts, e.g. ["Yes", "No"]) is required ONLY
+   * to unlock the type=submit relaxation below; the type=button path never needs it, so
+   * existing callers that only care about that path may omit it.
+   */
+  function isChoiceButtonSafe(el, container, optionTexts) {
+    if (!el || el.nodeType !== 1 || el.tagName !== 'BUTTON') return false;
+    if (!container || !container.contains(el)) return false;
+    if (el.closest && el.closest('nav, header, footer')) return false;
+    if (!isVisible(el)) return false;
+    if (el.disabled) return false;
+    if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+    var text = accessibleControlText(el);
+    if (ADD_BUTTON_DENY_RE.test(text)) return false;
+
+    var effectiveType = String(el.type || '').toLowerCase();
+    if (effectiveType === 'button') return true;
+    // Real Ashby markup (live capture, 2026-09-24): every option button, including its OWN
+    // "Submit Application" button, carries NO type="" attribute at all -- which the DOM
+    // reports as the default type "submit" -- but Ashby's whole application has no <form>
+    // element whatsoever, so a click on such a button cannot submit anything natively (there
+    // is nothing for it to submit). Relaxed ONLY for that specific, structurally safe shape:
+    // no form owner, AND the button's own text is EXACTLY one of THIS group's known option
+    // texts (re-checked here independently of whatever the caller already matched, so a bug
+    // upstream still cannot turn this into "click any type-less button in the container") --
+    // a decoy "Submit Application" button never has a matching option text, so it is refused
+    // by this same check regardless of type or form ownership.
+    if (effectiveType === 'submit' && !el.form) {
+      if (!optionTexts || !optionTexts.length) return false;
+      var norm = cleanText(text).toLowerCase();
+      for (var i = 0; i < optionTexts.length; i++) {
+        if (cleanText(optionTexts[i]).toLowerCase() === norm) return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  /** Selected-state per the ground truth: aria-pressed/aria-checked, a data-state/class
+   * change (Ashby's real classes are hashed CSS-modules names, e.g. "_option_1svni_32", so
+   * this matches "selected"/"active" etc. as a bare substring rather than a whole word), or
+   * (Ashby's own real markup) a hidden checkbox mirror inside the same container. */
+  function isChoiceButtonSelected(button) {
+    if (!button) return false;
+    var ariaPressed = ((button.getAttribute && button.getAttribute('aria-pressed')) || '').toLowerCase();
+    if (ariaPressed === 'true') return true;
+    var ariaChecked = ((button.getAttribute && button.getAttribute('aria-checked')) || '').toLowerCase();
+    if (ariaChecked === 'true') return true;
+    var dataState = ((button.getAttribute && button.getAttribute('data-state')) || '').toLowerCase();
+    if (dataState === 'checked' || dataState === 'selected' || dataState === 'active' || dataState === 'on') return true;
+    var cls = String(button.className || '').toLowerCase();
+    if (/active|selected|is-checked|is-selected/.test(cls)) return true;
+    return false;
+  }
+
+  function verifyChoiceButtonSelected(button, container) {
+    if (isChoiceButtonSelected(button)) return true;
+    var hidden = container && container.querySelector ? container.querySelector('input[type="checkbox"]') : null;
+    return !!(hidden && hidden.checked);
+  }
+
+  /** Matches `value` against the group's own button texts (matchChoiceOption — never the
+   * first of several) and clicks the match through isChoiceButtonSafe. A decoy submit button
+   * beside the group is never even considered a candidate: it is not one of `entry.buttons`,
+   * and even if it were, its text would not equal a known option (see isChoiceButtonSafe). */
+  function fillButtonGroup(entry, value, doc) {
+    var target = String(value == null ? '' : value).trim();
+    if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
+    var texts = entry.buttons.map(accessibleControlText);
+    var idx = matchChoiceOption(target, texts);
+    if (idx === -1) {
+      return Promise.resolve({ ok: false, reason: 'no confident match for "' + target + '" among button options' });
+    }
+    var button = entry.buttons[idx];
+    if (!isChoiceButtonSafe(button, entry.container, texts)) {
+      return Promise.resolve({ ok: false, reason: 'matched button failed the safety guard' });
+    }
+    button.click();
+    return waitFor(function () { return verifyChoiceButtonSelected(button, entry.container) ? true : null; }, 800, doc)
+      .then(function (verified) {
+        if (!verified) return { ok: false, reason: 'button click did not register as selected' };
+        return { ok: true, matchedText: texts[idx] };
+      });
+  }
+
+  // ---- checkbox groups (several checkboxes = one question) ---------------------------------
+
+  function checkboxGroupKey(el, doc) {
+    var name = el.name || '';
+    if (!name) return null;
+    var form = el.closest ? el.closest('form') : null;
+    var formIndex = 'noform';
+    if (form && doc && doc.forms) {
+      var idx = Array.prototype.indexOf.call(doc.forms, form);
+      if (idx !== -1) formIndex = String(idx);
+    }
+    return 'checkbox:' + formIndex + ':' + name;
+  }
+
+  /**
+   * Finds every checkbox GROUP in `root` (2+ checkboxes that are really ONE question), by two
+   * independent structural signals -- never by label text similarity, which is exactly how a
+   * checkbox group could get confused with an unrelated standalone checkbox sharing a word:
+   *   1. a shared, non-empty `name` (Lever's pronouns / "cards[<uuid>][fieldN]"; Greenhouse's
+   *      "question_<id>[]" language-fluency / EEO "check all that apply" checkboxes);
+   *   2. failing that, a shared nearest-enclosing <fieldset> (Ashby's checkbox-group questions,
+   *      whose individual options each carry their OWN unique name, e.g. name="LinkedIn").
+   * A single stand-alone checkbox (no name-mate, no fieldset-mate) is left alone entirely --
+   * scanFields() then scans it exactly as it does today.
+   */
+  function findCheckboxGroups(root, doc, excludeEls) {
+    var exclusions = excludeEls || [];
+    var checkboxes = Array.prototype.slice.call(root.querySelectorAll('input[type="checkbox"]')).filter(function (cb) {
+      // Never re-group a checkbox Workday's OWN fieldset[data-automation-id$="-CheckboxGroup"]
+      // detector (findWorkdayCheckboxGroups) already claimed -- this generic fieldset-based
+      // tier below has no automation-id awareness of its own and would otherwise double-
+      // register the SAME Workday disability/self-identify group under a second, competing
+      // field id.
+      if (exclusions.indexOf(cb) !== -1) return false;
+      return isVisible(cb) && !cb.disabled;
+    });
+    var used = [];
+    var out = [];
+
+    var byName = {};
+    var nameOrder = [];
+    for (var i = 0; i < checkboxes.length; i++) {
+      var cb = checkboxes[i];
+      var key = checkboxGroupKey(cb, doc);
+      if (!key) continue;
+      if (!byName[key]) { byName[key] = []; nameOrder.push(key); }
+      byName[key].push(cb);
+    }
+    for (var o = 0; o < nameOrder.length; o++) {
+      var group = byName[nameOrder[o]];
+      if (group.length < 2) continue;
+      used = used.concat(group);
+      out.push({ elements: group, label: getGroupLabel(group) });
+    }
+
+    var fieldsets = [];
+    var byFieldset = [];
+    for (var j = 0; j < checkboxes.length; j++) {
+      var cbj = checkboxes[j];
+      if (used.indexOf(cbj) !== -1) continue;
+      var fs = cbj.closest ? cbj.closest('fieldset') : null;
+      if (!fs) continue;
+      var fidx = fieldsets.indexOf(fs);
+      if (fidx === -1) { fieldsets.push(fs); byFieldset.push([cbj]); }
+      else byFieldset[fidx].push(cbj);
+    }
+    for (var k = 0; k < byFieldset.length; k++) {
+      var group2 = byFieldset[k];
+      if (group2.length < 2) continue;
+      used = used.concat(group2);
+      out.push({ elements: group2, label: getGroupLabel(group2) });
+    }
+
+    return { groups: out, used: used };
+  }
+
+  /** Ticks the ONE option matching `target` (matchChoiceOption — decline-family, exact, or
+   * unambiguous containment; never a guess). Never unticks a box the user already ticked. */
+  function setCheckboxGroupOne(elements, target) {
+    var labels = elements.map(function (e) { return getLabel(e); });
+    var idx = matchChoiceOption(target, labels);
+    if (idx === -1) return false;
+    var el = elements[idx];
+    if (el.checked) return true;
+    return safeClick(el); // the SAME click guard already used for every other checkbox
+  }
+
+  /** `value` is a single term, or an array (several boxes to tick). One failed/unmatched term
+   * never blocks the rest; overall success is "at least one applied", same as Workday's prompt
+   * multi-value rule. */
+  function applyCheckboxGroupValue(entry, value) {
+    var elements = entry.elements;
+    if (Array.isArray(value)) {
+      var anyOk = false;
+      var failedTerms = [];
+      for (var i = 0; i < value.length; i++) {
+        if (setCheckboxGroupOne(elements, value[i])) anyOk = true; else failedTerms.push(value[i]);
+      }
+      entry._lastReason = failedTerms.length ? ('no confident match for: ' + failedTerms.join(', ')) : '';
+      return anyOk;
+    }
+    var single = String(value == null ? '' : value).trim();
+    if (!single) { entry._lastReason = 'empty value'; return false; }
+    var ok = setCheckboxGroupOne(elements, single);
+    entry._lastReason = ok ? '' : ('no confident match for "' + single + '" among checkbox options');
+    return ok;
+  }
+
+  // ---- Lever location type-ahead --------------------------------------------------------
+
+  // Ground truth (docs/research/live-captures-2026-09-24/structure-08/09-lever-f0.json, plus a
+  // live re-check of jobs.lever.co/palantir on 2026-09-24 that found the ACTUAL wrapper shape):
+  //   <label>
+  //     <div class="application-label">Current location <span class="required">✱</span></div>
+  //     <div class="application-field">
+  //       <input class="location-input" name="location" ...>
+  //       <input type="hidden" name="selectedLocation">
+  //       <div class="... dropdown-container">...results / "No location found" / loading...</div>
+  //     </div>
+  //   </label>
+  // The question text is NOT bare content directly inside the <label> (an earlier, simplified
+  // assumption had it that way) -- it lives in its own ".application-label" div, a SIBLING of
+  // the ".application-field" div holding the input and the results/status text. A naive
+  // getLabel() on the input concatenates all of that together, and so does a walk that merely
+  // stops at the first block-level child of <label> -- that first child IS the label div, whose
+  // OWN contents must be read, not skipped.
+  var LEVER_STOP_TAGS = { UL: 1, OL: 1, DIV: 1, INPUT: 1, SELECT: 1, TEXTAREA: 1, SCRIPT: 1, STYLE: 1 };
+
+  /** Prefers the wrapping <label>'s own ".application-label" child (Lever's real shape);
+   * falls back to the wrapping <label>'s leading text/inline content up to the first
+   * block-level/list/results container, for any other shape that puts the text as bare
+   * content instead. Either way, never the dropdown suggestions or status text Lever renders
+   * inside that same <label>. */
+  function getLeverLocationLabel(input) {
+    var wrap = input.closest ? input.closest('label') : null;
+    if (!wrap) return getLabel(input);
+    var labelDiv = wrap.querySelector ? wrap.querySelector('.application-label') : null;
+    if (labelDiv) {
+      var ld = cleanText(labelDiv.textContent);
+      if (ld) return stripRequiredMarker(ld);
+    }
+    var parts = [];
+    for (var node = wrap.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 3) {
+        var t = cleanText(node.textContent);
+        if (t) parts.push(t);
+        continue;
+      }
+      if (node.nodeType === 1) {
+        if (LEVER_STOP_TAGS[node.tagName]) break;
+        var t2 = cleanText(node.textContent);
+        if (t2) parts.push(t2);
+      }
+    }
+    var joined = stripRequiredMarker(parts.join(' '));
+    return joined || getLabel(input);
+  }
+
+  function findLeverLocationHidden(input) {
+    var node = input;
+    for (var depth = 0; depth < 5 && node; depth++) {
+      var parent = node.parentElement;
+      if (!parent) break;
+      var hidden = parent.querySelector ? parent.querySelector('input[type="hidden"][name="selectedLocation"]') : null;
+      if (hidden) return hidden;
+      node = parent;
+    }
+    return null;
+  }
+
+  /** Finds Lever's "Current location" type-ahead: the visible text input paired with its own
+   * `input[name=selectedLocation]` commit target -- that pairing is the real signature of this
+   * specific widget (a plain "location" text field elsewhere has no such hidden partner). */
+  function findLeverLocationFields(root) {
+    var out = [];
+    var inputs = Array.prototype.slice.call(root.querySelectorAll('input.location-input'));
+    for (var i = 0; i < inputs.length; i++) {
+      var input = inputs[i];
+      if (!isVisible(input) || input.disabled) continue;
+      var hidden = findLeverLocationHidden(input);
+      if (!hidden) continue;
+      out.push({ input: input, hidden: hidden, label: getLeverLocationLabel(input) });
+    }
+    return out;
+  }
+
+  /** A live probe (2026-09-24, jobs.lever.co) showed the service can send a location as a
+   * JSON object string (a resolved-suggestion shape: {"name": "Seattle, WA, USA", "id": "..."})
+   * rather than a plain "City, State" string. Extracts the human-readable name when present;
+   * returns the input unchanged for an ordinary plain-text value. */
+  function extractLocationName(value) {
+    var str = String(value == null ? '' : value).trim();
+    if (str.charAt(0) === '{') {
+      try {
+        var parsed = JSON.parse(str);
+        if (parsed && typeof parsed.name === 'string' && parsed.name) return parsed.name;
+      } catch (e) { /* not JSON, or no usable .name -- fall through to the raw string */ }
+    }
+    return str;
+  }
+
+  /** Splits "City, State" OR "City, State, Country" (the JSON-suggestion shape above commonly
+   * resolves to the latter) into its city and state parts, ignoring any third (country) part. */
+  function splitCityState(value) {
+    var str = extractLocationName(value);
+    var segments = str.split(',');
+    var city = (segments[0] || '').trim();
+    var state = (segments[1] || '').trim();
+    return { city: city, state: state };
+  }
+
+  function leverStateVariants(state) {
+    var s = cleanText(state).toLowerCase();
+    if (!s) return [];
+    var out = [s];
+    var code = US_STATE_NAME_TO_CODE[s];
+    var name = US_STATE_CODE_TO_NAME[s];
+    if (code) out.push(code);
+    if (name) out.push(name);
+    return out;
+  }
+
+  function isLeverLocationRowSafe(el, resultsContainer) {
+    if (!el || el.nodeType !== 1) return false;
+    if (!resultsContainer || !resultsContainer.contains(el)) return false;
+    var cls = (el.getAttribute && el.getAttribute('class')) || '';
+    if (!/dropdown-location/i.test(cls)) return false;
+    if (!isVisible(el)) return false;
+    if (ADD_BUTTON_DENY_RE.test(optionAccessibleText(el))) return false;
+    return true;
+  }
+
+  /**
+   * Types the city, waits for `.dropdown-location` suggestion rows, and picks the ONE row
+   * whose text contains BOTH the city AND the state (full name or 2-letter code, via the
+   * existing US state table) -- never a blind first/only-city match. Commits with `mousedown`
+   * (ground truth: Lever's widget clears the input on blur unless a row was chosen with
+   * mousedown) and verifies via the paired `input[name=selectedLocation]` becoming non-empty,
+   * never the search input's own typed text.
+   */
+  function fillLeverLocation(entry, value, doc) {
+    if (!isVisible(entry.input) || entry.input.disabled) {
+      return Promise.resolve({ ok: false, reason: 'safety guard refused the location input' });
+    }
+    var displayValue = extractLocationName(value);
+    var parts = splitCityState(value);
+    if (!parts.city) return Promise.resolve({ ok: false, reason: 'empty value' });
+
+    setNativeValue(entry.input, parts.city);
+    dispatchKeyboardEvent(entry.input, 'keydown', parts.city.slice(-1) || 'a');
+
+    return waitFor(function () {
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('[class*="dropdown-location" i]')).filter(isVisible);
+      return rows.length ? rows : null;
+    }, 3500, doc).then(function (rows) {
+      if (!rows) return { ok: false, reason: 'no location suggestions appeared for "' + parts.city + '"' };
+
+      var cityRe = new RegExp('\\b' + escapeRegExp(parts.city.toLowerCase()) + '\\b', 'i');
+      var variants = leverStateVariants(parts.state);
+      var matches = [];
+      for (var i = 0; i < rows.length; i++) {
+        var text = cleanText(rows[i].textContent).toLowerCase();
+        if (!cityRe.test(text)) continue;
+        if (variants.length) {
+          var stateOk = false;
+          for (var v = 0; v < variants.length; v++) {
+            if (new RegExp('\\b' + escapeRegExp(variants[v]) + '\\b', 'i').test(text)) { stateOk = true; break; }
+          }
+          if (!stateOk) continue;
+        }
+        matches.push(rows[i]);
+      }
+      if (matches.length !== 1) {
+        return {
+          ok: false,
+          reason: matches.length === 0
+            ? ('no suggestion matched city and state for "' + displayValue + '"')
+            : ('ambiguous: ' + matches.length + ' suggestions matched "' + displayValue + '", never guessing')
+        };
+      }
+
+      var row = matches[0];
+      var resultsContainer = rows[0].parentElement || doc;
+      if (!isLeverLocationRowSafe(row, resultsContainer)) {
+        return { ok: false, reason: 'matched suggestion failed the safety guard' };
+      }
+      dispatchMouseEvent(row, 'mousedown');
+
+      return waitFor(function () {
+        return cleanText(entry.hidden.value || '') ? true : null;
+      }, 1000, doc).then(function (committed) {
+        if (!committed) return { ok: false, reason: 'selectedLocation was never committed after choosing a suggestion' };
+        return { ok: true, matchedText: cleanText(row.textContent) };
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
   // scanning
   // ---------------------------------------------------------------------
 
@@ -2181,11 +3058,48 @@
       .filter(hasWorkdayHardDenyAutomationId);
     for (var hd = 0; hd < wdHardDenyInputs.length; hd++) consumedByWorkday.push(wdHardDenyInputs[hd]);
 
+    // Choice widgets (see the section above) — ALSO detected first and their elements pulled
+    // out of the ordinary loop, same discipline as the date-pair/Workday detection above: a
+    // react-select/generic-ARIA combobox's inner <input role=combobox>, a checkbox that
+    // belongs to a checkbox GROUP, and Lever's location type-ahead input would otherwise be
+    // scanned (and filled with the wrong, plain-text technique) individually.
+    var checkboxGroupScan = findCheckboxGroups(root, doc, consumedByWorkday);
+    var checkboxGroups = checkboxGroupScan.groups;
+    var consumedByCheckboxGroup = checkboxGroupScan.used;
+
+    var leverLocationFields = findLeverLocationFields(root);
+    var consumedByLeverLocation = leverLocationFields.map(function (lf) { return lf.input; });
+
+    var comboboxExclusions = consumedByWorkday.concat(consumedByLeverLocation);
+    var comboboxWidgets = (function () {
+      var inputEls = Array.prototype.slice.call(root.querySelectorAll('input[role="combobox"]'));
+      var out = [];
+      for (var ci = 0; ci < inputEls.length; ci++) {
+        var cinput = inputEls[ci];
+        if (comboboxExclusions.indexOf(cinput) !== -1) continue;
+        if (cinput.closest && (cinput.closest('[data-automation-id="multiSelectContainer"]') ||
+            cinput.closest('[data-automation-id="dateInputWrapper"]'))) continue;
+        if (cinput.disabled) continue;
+        if (!isVisible(cinput)) continue;
+        out.push({ input: cinput, label: getLabel(cinput) });
+      }
+      return out;
+    })();
+    var consumedByCombobox = comboboxWidgets.map(function (cw) { return cw.input; });
+
+    // Ashby-style option button GROUPS are <button>s, never in `candidates` (only
+    // input/select/textarea are queried above) — same as Workday's dropdown buttons, they need
+    // no exclusion from the ordinary per-element loop below.
+    var buttonGroups = findButtonGroups(root);
+
     for (var i = 0; i < candidates.length; i++) {
       var el = candidates[i];
       if (el.disabled) continue;
       if (consumedByDatePair.indexOf(el) !== -1) continue;
       if (consumedByWorkday.indexOf(el) !== -1) continue;
+      if (consumedByCheckboxGroup.indexOf(el) !== -1) continue;
+      if (consumedByCombobox.indexOf(el) !== -1) continue;
+      if (consumedByLeverLocation.indexOf(el) !== -1) continue;
 
       var tagLower = el.tagName.toLowerCase();
 
@@ -2385,18 +3299,121 @@
       });
     }
 
+    // Checkbox groups -- several checkboxes under one question become ONE field (Greenhouse
+    // "check all that apply" / language fluency, Ashby location / "how did you hear", Lever
+    // pronouns / cards[..][fieldN]).
+    for (var cg = 0; cg < checkboxGroups.length; cg++) {
+      var cgGroup = checkboxGroups[cg];
+      var cgId = 'f' + (counter++);
+      var cgOptions = [];
+      for (var cgi = 0; cgi < cgGroup.elements.length; cgi++) {
+        var cgLbl = cleanText(getLabel(cgGroup.elements[cgi]));
+        if (cgLbl) cgOptions.push(cgLbl);
+      }
+      var cgSection = getSectionContext(cgGroup.elements[0]);
+      registry[cgId] = { kind: 'checkbox-group', elements: cgGroup.elements };
+      fields.push({
+        id: cgId,
+        selector: buildSelector(cgGroup.elements[0]),
+        tag: 'input',
+        type: 'checkbox-group',
+        name: cgGroup.elements[0].name || '',
+        autocomplete: '',
+        label: cgGroup.label,
+        placeholder: '',
+        required: cgGroup.elements.some(function (e) { return e.required; }),
+        options: cgOptions,
+        section: cgSection.section,
+        section_index: cgSection.section_index,
+        widget: ''
+      });
+    }
+
+    // Ashby-style Yes/No (or other short) option button groups.
+    for (var bg = 0; bg < buttonGroups.length; bg++) {
+      var bgGroup = buttonGroups[bg];
+      var bgId = 'f' + (counter++);
+      var bgSection = getSectionContext(bgGroup.container || bgGroup.buttons[0]);
+      registry[bgId] = { kind: 'button-group', buttons: bgGroup.buttons, container: bgGroup.container };
+      fields.push({
+        id: bgId,
+        selector: buildSelector(bgGroup.buttons[0]),
+        tag: 'button',
+        type: 'text',
+        name: '',
+        autocomplete: '',
+        label: bgGroup.label,
+        placeholder: '',
+        required: false,
+        options: bgGroup.buttons.map(accessibleControlText),
+        section: bgSection.section,
+        section_index: bgSection.section_index,
+        widget: 'button-group'
+      });
+    }
+
+    // Combobox widgets (react-select / generic ARIA) -- options unknown at scan time, the
+    // menu only renders once opened.
+    for (var cb2 = 0; cb2 < comboboxWidgets.length; cb2++) {
+      var cbw = comboboxWidgets[cb2];
+      var cbId = 'f' + (counter++);
+      var cbSection = getSectionContext(cbw.input);
+      registry[cbId] = { kind: 'combobox', input: cbw.input };
+      fields.push({
+        id: cbId,
+        selector: buildSelector(cbw.input),
+        tag: 'input',
+        type: 'text',
+        name: cbw.input.name || '',
+        autocomplete: '',
+        label: cbw.label || '',
+        placeholder: cbw.input.placeholder || '',
+        required: !!cbw.input.required,
+        options: [],
+        section: cbSection.section,
+        section_index: cbSection.section_index,
+        widget: 'combobox'
+      });
+    }
+
+    // Lever location type-ahead -- verified via the paired hidden input[name=selectedLocation]
+    // the widget itself commits to, never the search input's own typed text.
+    for (var ll = 0; ll < leverLocationFields.length; ll++) {
+      var llf = leverLocationFields[ll];
+      var llId = 'f' + (counter++);
+      var llSection = getSectionContext(llf.input);
+      registry[llId] = { kind: 'lever-location', input: llf.input, hidden: llf.hidden };
+      fields.push({
+        id: llId,
+        selector: buildSelector(llf.input),
+        tag: 'input',
+        type: 'text',
+        name: llf.input.name || '',
+        autocomplete: '',
+        label: llf.label || '',
+        placeholder: llf.input.placeholder || '',
+        required: !!llf.input.required,
+        options: [],
+        section: llSection.section,
+        section_index: llSection.section_index,
+        widget: 'combobox'
+      });
+    }
+
     // Workday Self-Identify checkbox group -- disabilityStatus-CheckboxGroup and similar. Wire
     // type "checkbox-group" matches the resolver's existing single-choice handling for it (see
     // src/applypilot/extension/matcher.py) -- the SAME contract a radio group uses, just backed
-    // by independent <input type=checkbox> elements instead of a native radio group.
+    // by independent <input type=checkbox> elements instead of a native radio group. Uses its
+    // OWN registry kind ("wd-checkbox-group", not "checkbox-group") so the two independently-
+    // built detectors below can never double-register the same Workday fieldset.
     for (var wcgi = 0; wcgi < wdCheckboxGroups.length; wcgi++) {
       var cg = wdCheckboxGroups[wcgi];
-      var cgId = 'f' + (counter++);
-      var cgSection = getSectionContext(cg.fieldset);
-      var cgOptions = cg.boxes.map(getWorkdayCheckboxGroupOptionLabel);
-      registry[cgId] = { kind: 'wd-checkbox-group', boxes: cg.boxes, fieldset: cg.fieldset, container: cg.container, label: cg.label };
+      var wcgId = 'f' + (counter++);
+      var wcgSection = getSectionContext(cg.fieldset);
+      var wcgOptions = cg.boxes.map(getWorkdayCheckboxGroupOptionLabel);
+      registry[wcgId] = { kind: 'wd-checkbox-group', boxes: cg.boxes, fieldset: cg.fieldset, container: cg.container, label: cg.label };
       fields.push({
-        id: cgId,
+        id: wcgId,
         selector: buildSelector(cg.fieldset),
         tag: 'input',
         type: 'checkbox-group',
@@ -2405,9 +3422,9 @@
         label: cg.label || '',
         placeholder: '',
         required: true,
-        options: cgOptions,
-        section: cgSection.section,
-        section_index: cgSection.section_index,
+        options: wcgOptions,
+        section: wcgSection.section,
+        section_index: wcgSection.section_index,
         widget: 'wd-checkbox-group'
       });
     }
@@ -2838,14 +3855,19 @@
     if (!match) return false;
     // A native click is the most faithful simulation of a real user selecting a radio
     // button: it flips `checked`, unchecks its siblings, and fires click/input/change —
-    // exactly what React's onChange handlers listen for.
-    return safeClick(match);
+    // exactly what React's onChange handlers listen for. Read back afterwards rather than
+    // trust the click blindly — a disabled control, or a page's own handler reverting the
+    // selection, must be reported honestly instead of as a fake success.
+    if (!safeClick(match)) return false;
+    return match.checked === true;
   }
 
   function setCheckboxValue(el, boolLike) {
     var want = boolLike === true || /^(true|yes|1|on)$/i.test(String(boolLike));
     if (el.checked === want) return true;
-    return safeClick(el);
+    if (!safeClick(el)) return false;
+    // Read back rather than trust the click blindly -- see setRadioValue's identical reasoning.
+    return el.checked === want;
   }
 
   /** Reads the field's current value, in the same shape applyFill expects to receive it back. */
@@ -2858,6 +3880,15 @@
     if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y' || entry.kind === 'wd-date-mdy') return getWorkdayDateValue(entry);
     if (entry.kind === 'wd-dropdown') return cleanText(entry.button.textContent);
     if (entry.kind === 'wd-prompt') return getWorkdayPromptCurrentValue(entry);
+    if (entry.kind === 'checkbox-group') {
+      return entry.elements.filter(function (e) { return e.checked; }).map(function (e) { return getLabel(e); }).join(', ');
+    }
+    if (entry.kind === 'combobox') return getComboboxCommittedValue(entry);
+    if (entry.kind === 'button-group') {
+      var selected = entry.buttons.filter(isChoiceButtonSelected)[0];
+      return selected ? accessibleControlText(selected) : '';
+    }
+    if (entry.kind === 'lever-location') return cleanText((entry.hidden && entry.hidden.value) || '');
     if (entry.kind === 'wd-checkbox-group') {
       var checkedBox = entry.boxes.filter(function (b) { return b.checked; })[0];
       return checkedBox ? getWorkdayCheckboxGroupOptionLabel(checkedBox) : '';
@@ -2878,7 +3909,9 @@
    */
   function applyFill(entry, value) {
     if (entry.kind === 'radio-group') {
-      return setRadioValue(entry.elements, value);
+      var rgOk = setRadioValue(entry.elements, value);
+      if (!rgOk) entry._lastReason = 'no confident match for "' + value + '" among the radio options, or the selection did not stick';
+      return rgOk;
     }
     if (entry.kind === 'date-parts') return setDatePartsValue(entry, value);
     if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y' || entry.kind === 'wd-date-mdy') {
@@ -2897,6 +3930,26 @@
         return !!r.ok;
       });
     }
+    if (entry.kind === 'checkbox-group') return applyCheckboxGroupValue(entry, value);
+    if (entry.kind === 'combobox') {
+      return fillComboboxValue(entry, value, ownerDoc(entry.input)).then(function (r) {
+        entry._lastReason = r.reason ||
+          (r.failedTerms && r.failedTerms.length ? ('no confident match for: ' + r.failedTerms.join(', ')) : '');
+        return !!r.ok;
+      });
+    }
+    if (entry.kind === 'button-group') {
+      return fillButtonGroup(entry, value, ownerDoc(entry.buttons[0])).then(function (r) {
+        entry._lastReason = r.reason || '';
+        return !!r.ok;
+      });
+    }
+    if (entry.kind === 'lever-location') {
+      return fillLeverLocation(entry, value, ownerDoc(entry.input)).then(function (r) {
+        entry._lastReason = r.reason || '';
+        return !!r.ok;
+      });
+    }
     if (entry.kind === 'wd-checkbox-group') {
       var cgResult = setWorkdayCheckboxGroupValue(entry, value);
       entry._lastReason = cgResult ? '' : ('no confident match for "' + value + '" among ' + entry.label);
@@ -2904,8 +3957,43 @@
     }
     var el = entry.el;
     if (el.tagName === 'SELECT') return setSelectValue(el, value);
-    if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return setCheckboxValue(el, value);
+    if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') {
+      var cbOk = setCheckboxValue(el, value);
+      if (!cbOk) entry._lastReason = 'checkbox did not reach the intended checked state';
+      return cbOk;
+    }
     setNativeValue(el, value);
+    // Read back rather than trust the write blind (a controlled/validated input, or a
+    // type=number input given a non-numeric string, can silently discard it — see the
+    // project brief: "120000 USD" into input[type=number] must NOT report success just
+    // because setNativeValue() was called).
+    var target = String(value == null ? '' : value);
+    var stuck;
+    var elType = (el.type || '').toLowerCase();
+    if (el.tagName === 'INPUT' && elType === 'number') {
+      var actualNum = parseFloat(el.value);
+      var targetNum = parseFloat(target);
+      stuck = !isNaN(actualNum) && !isNaN(targetNum) && actualNum === targetNum;
+    } else if (el.tagName === 'INPUT' && elType === 'tel') {
+      // A live probe (2026-09-24) showed Greenhouse's intl-tel-input widget reformat
+      // "+1 206 555 0147" to "+1 206-555-0147" on commit -- a cosmetic re-punctuation, not a
+      // dropped value. Compare by DIGITS ONLY, and accept either string ending in the other's
+      // digits (>= 7 digits, a full local number) so a widget that also drops/adds a leading
+      // country code still reads back as stuck, without ever accepting a trivial short match.
+      var actualDigits = String(el.value || '').replace(/\D/g, '');
+      var targetDigits = target.replace(/\D/g, '');
+      stuck = !!actualDigits && !!targetDigits && (
+        actualDigits === targetDigits ||
+        (actualDigits.length >= 7 && targetDigits.slice(-actualDigits.length) === actualDigits) ||
+        (targetDigits.length >= 7 && actualDigits.slice(-targetDigits.length) === targetDigits)
+      );
+    } else {
+      stuck = cleanText(el.value).toLowerCase() === cleanText(target).toLowerCase();
+    }
+    if (!stuck) {
+      entry._lastReason = 'value did not stick after being set (read back ' + JSON.stringify(String(el.value)) + ')';
+      return false;
+    }
     return true;
   }
 
@@ -2918,6 +4006,10 @@
     }
     if (entry.kind === 'wd-dropdown') return [entry.button];
     if (entry.kind === 'wd-prompt') return [entry.input];
+    if (entry.kind === 'checkbox-group') return entry.elements.slice();
+    if (entry.kind === 'combobox') return [entry.input];
+    if (entry.kind === 'button-group') return entry.buttons.slice();
+    if (entry.kind === 'lever-location') return [entry.input];
     if (entry.kind === 'wd-checkbox-group') return entry.boxes.slice();
     // A hidden native <select> paired with a custom widget (see
     // findPairedWidget) highlights the visible widget, never the hidden
@@ -3277,6 +4369,27 @@
     isWorkdayCheckboxGroupOptionSafe: isWorkdayCheckboxGroupOptionSafe,
     setWorkdayCheckboxGroupValue: setWorkdayCheckboxGroupValue,
     fillWorkdayPromptValue: fillWorkdayPromptValue,
-    hasWorkdayHardDenyAutomationId: hasWorkdayHardDenyAutomationId
+    hasWorkdayHardDenyAutomationId: hasWorkdayHardDenyAutomationId,
+    // Choice widgets (combobox / button-group / checkbox-group / Lever location) — exported
+    // primarily for selftest.js; content.js only ever goes through
+    // scanFields()/applyFill()/getCurrentValue()/getHighlightTargets() above.
+    stripRequiredMarker: stripRequiredMarker,
+    isComboboxInputSafe: isComboboxInputSafe,
+    resolveComboboxMenu: resolveComboboxMenu,
+    isComboboxOptionSafe: isComboboxOptionSafe,
+    getComboboxCommittedValue: getComboboxCommittedValue,
+    verifyComboboxSelection: verifyComboboxSelection,
+    fillComboboxValue: fillComboboxValue,
+    findButtonGroups: findButtonGroups,
+    isChoiceButtonSafe: isChoiceButtonSafe,
+    isChoiceButtonSelected: isChoiceButtonSelected,
+    fillButtonGroup: fillButtonGroup,
+    findCheckboxGroups: findCheckboxGroups,
+    applyCheckboxGroupValue: applyCheckboxGroupValue,
+    findLeverLocationFields: findLeverLocationFields,
+    getLeverLocationLabel: getLeverLocationLabel,
+    extractLocationName: extractLocationName,
+    splitCityState: splitCityState,
+    fillLeverLocation: fillLeverLocation
   };
 });

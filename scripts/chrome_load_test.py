@@ -398,7 +398,11 @@ with sync_playwright() as p:
         cg = page.evaluate("""() => {
             const S = ApplyPilotScanner, $ = id => document.getElementById(id);
             const scanned = S.scanFields(document);
-            const cgField = scanned.fields.find(f => f.type === 'checkbox-group');
+            // Disambiguated by widget "wd-checkbox-group", not just type "checkbox-group" --
+            // the choice-widget driver (Greenhouse/Ashby/Lever) legitimately emits the SAME
+            // type string for its own, unrelated checkbox groups; only `widget` tells this one
+            // apart as Workday's.
+            const cgField = scanned.fields.find(f => f.widget === 'wd-checkbox-group');
             const cgEntry = cgField && scanned.registry[cgField.id];
             const agreementScanned = scanned.fields.some(f => scanned.registry[f.id] && scanned.registry[f.id].el === $('wd_agreement_checkbox'));
             const okYes = cgEntry ? S.applyFill(cgEntry, 'Yes, I have a disability, or have had one in the past') : null;

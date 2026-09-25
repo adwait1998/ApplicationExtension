@@ -740,7 +740,11 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
     !!monatField);
 
   // --- Self-Identify disability CheckboxGroup (CC-305) --------------------------------------
-  const cgField = scanned.fields.find(f => f.type === 'checkbox-group');
+  // Disambiguated by widget "wd-checkbox-group", not just type "checkbox-group" -- the choice-
+  // widget driver (Greenhouse/Ashby/Lever, see the "ats-widgets-form" fixtures) legitimately
+  // emits the SAME type string for its own, unrelated checkbox groups; only `widget` tells
+  // this one apart as Workday's.
+  const cgField = scanned.fields.find(f => f.widget === 'wd-checkbox-group');
   expect('the disabilityStatus CheckboxGroup is scanned as ONE field with type "checkbox-group"', !!cgField);
   expect('...labelled from its own <legend>', cgField && cgField.label === 'Please check one of the boxes below:');
   expect('...options are the three CC-305 option texts, in document order', cgField && JSON.stringify(cgField.options) === JSON.stringify([
@@ -1579,6 +1583,500 @@ pending.push((async () => {
     wdSubmitBtn.click();
     expect('bypassing every guard and clicking the Workday decoy submit button directly DOES fire its form\'s submit handler',
       dom.window.__WD_SUBMIT_COUNT__ === 1);
+  }
+})());
+
+// ===========================================================================================
+// Coordinator addendum -- reviewer-found gaps: matchAnswerFamily ambiguity in EVERY family
+// tier (not only plain containment), and honest read-back verification for every applyFill()
+// path that previously returned true unconditionally.
+// ===========================================================================================
+
+// --- matchChoiceOption: plain containment tier ambiguity (the fix accompanying this addendum
+//     applies everywhere, including the tier already covered above) -------------------------
+(() => {
+  const mco = Scanner.matchChoiceOption;
+  expect('containment tier: two options BOTH contain the value ("Engineer") -- ambiguous, never the first ("Software Engineer")',
+    mco('Engineer', ['Software Engineer', 'Site Engineer']) === -1);
+  expect('containment tier: with only ONE containing option, it still matches normally',
+    mco('Engineer', ['Software Engineer', 'Product Designer']) === 0);
+})();
+
+// --- matchAnswerFamily: ambiguity must hold in EVERY family tier, not only containment ------
+(() => {
+  const mco = Scanner.matchChoiceOption;
+
+  // (a) yes/no family: two "Yes, ..." options are materially different legal statements for a
+  // sponsorship-needing applicant -- must never pick the first.
+  expect('yes/no family: value "Yes" with TWO "Yes, ..." options (different legal statements) is ambiguous, never the first',
+    mco('Yes', ['Yes, I am a U.S. citizen or permanent resident', 'Yes, I am authorized but will require sponsorship', 'No']) === -1);
+  expect('yes/no family: value "Yes" with only ONE "Yes, ..." option still resolves normally',
+    mco('Yes', ['Yes, I am authorized to work', 'No']) === 0);
+
+  // (b) decline family: an option that ALSO asserts a veteran/identity claim is not a genuine
+  // decline option, even though it mentions decline-ish phrasing ("choose not", "self-identify"
+  // is literally part of DECLINE_RE).
+  expect('decline family: an option that ALSO asserts "I am a protected veteran" is rejected, not picked for "Decline to self-identify"',
+    mco('Decline to self-identify', ['I am a protected veteran, but I choose not to self-identify the classifications to which I belong']) === -1);
+  expect('decline family: an option that ALSO asserts "Yes, I self-identify as..." is rejected, not picked for "Decline to self-identify"',
+    mco('Decline to self-identify', ['Yes, I self-identify as LGBTQ+']) === -1);
+  expect('decline family: with BOTH assertion-laden decline-ish decoys present together, still refuses (never guesses between them)',
+    mco('Decline to self-identify', [
+      'I am a protected veteran, but I choose not to self-identify the classifications to which I belong',
+      'Yes, I self-identify as LGBTQ+',
+      'No'
+    ]) === -1);
+  expect('decline family: a genuine plain decline option is still picked once assertion-laden decoys are filtered out',
+    mco('Decline to self-identify', [
+      'I am a protected veteran, but I choose not to self-identify the classifications to which I belong',
+      "I don't wish to answer"
+    ]) === 1);
+  expect('decline family: two DIFFERENT plain decline phrasings together are ambiguous, never the first',
+    mco('Decline to self-identify', ["I don't wish to answer", 'Prefer not to say']) === -1);
+})();
+
+// --- applyFill: honest read-back for text/number/textarea, radio, and checkbox -------------
+(() => {
+  const doc = dom.window.document;
+
+  // Plain text field -- genuine success still reports true (the fix must not create false
+  // NEGATIVES on ordinary fields).
+  {
+    const el = doc.getElementById('full_name');
+    const entry = { kind: 'element', el };
+    const ok = Scanner.applyFill(entry, 'Jordan Quill');
+    expect('applyFill on a plain text field: genuine success still reports true and reads back the value',
+      ok === true && el.value === 'Jordan Quill');
+  }
+
+  // NEGATIVE CONTROL: a React-style input that reverts the typed value synchronously within
+  // its own 'input' listener must report FAILURE, never a blind "true".
+  {
+    const el = doc.getElementById('revert_on_input_field');
+    const entry = { kind: 'element', el };
+    const ok = Scanner.applyFill(entry, 'this will be reverted');
+    expect('applyFill on a reverting text field reports FAILURE (read-back caught the revert), not a blind true',
+      ok === false && el.value === '');
+    expect('a failed text fill records a human-readable reason', /stick/i.test(entry._lastReason || ''));
+  }
+
+  // NEGATIVE CONTROL: "120000 USD" into input[type=number] -- the browser's own number-input
+  // setter rejects the non-numeric string (value becomes ""), which must be reported honestly.
+  {
+    const el = doc.getElementById('revert_on_input_number');
+    const entry = { kind: 'element', el };
+    const ok = Scanner.applyFill(entry, '120000 USD');
+    expect('applyFill on input[type=number] with "120000 USD": the invalid string is REJECTED by the number input itself, and that is now reported as failure, not success',
+      ok === false && el.value === '');
+    const okGood = Scanner.applyFill(entry, '120000');
+    expect('applyFill on input[type=number] with a genuinely valid number still reports success',
+      okGood === true && el.value === '120000');
+  }
+
+  // Textarea -- same generic path as text/number; genuine success still reports true.
+  {
+    const el = doc.getElementById('cover_note');
+    const entry = { kind: 'element', el };
+    const ok = Scanner.applyFill(entry, 'Looking forward to this role.');
+    expect('applyFill on a textarea: genuine success reads back correctly',
+      ok === true && el.value === 'Looking forward to this role.');
+  }
+
+  // Checkbox -- genuine success still reports true, now verified via the NEW read-back.
+  {
+    const el = doc.querySelector('input[name="workExperience-1--currentlyWorkHere"]');
+    const entry = { kind: 'element', el };
+    const ok = Scanner.applyFill(entry, true);
+    expect('applyFill on a checkbox: genuine success is verified via .checked, not just a click return value',
+      ok === true && el.checked === true);
+    el.checked = false; // reset for hygiene
+  }
+
+  // NEGATIVE CONTROL: a checkbox whose own click handler reverts the check synchronously.
+  {
+    const el = doc.getElementById('revert_on_click_checkbox');
+    const entry = { kind: 'element', el };
+    const ok = Scanner.applyFill(entry, true);
+    expect('applyFill on a reverting checkbox reports FAILURE (read back .checked === false), not a blind true',
+      ok === false && el.checked === false);
+    expect('a failed checkbox fill records a human-readable reason', /checked state/i.test(entry._lastReason || ''));
+  }
+
+  // Radio group -- genuine success still reports true, now verified via .checked.
+  {
+    const scanned = Scanner.scanFields(doc);
+    const radioField = scanned.fields.find(f => f.type === 'radio');
+    const radioEntry = scanned.registry[radioField.id];
+    const ok = Scanner.applyFill(radioEntry, 'Yes');
+    expect('applyFill on a radio group: genuine success is verified via .checked, not just a click return value',
+      ok === true && radioEntry.elements.some(r => r.checked && r.value === 'yes'));
+  }
+})();
+
+// ===========================================================================================
+// Choice widgets (2026-09-24 live probe): react-select/generic-ARIA combobox, Ashby button
+// groups, checkbox groups, Lever's location type-ahead and card labels. Fixtures added to
+// test-page.html's new "ats-widgets-form" / "lever_label_fixtures" sections.
+// ===========================================================================================
+
+// --- checkbox groups: scanning shape + label resolution -------------------------------------
+(() => {
+  const doc = dom.window.document;
+  const scanned = Scanner.scanFields(doc);
+  // Excludes Workday's own "wd-checkbox-group" widget -- it legitimately shares the same
+  // type "checkbox-group" string (see src/applypilot/extension/matcher.py's is_choice_field),
+  // but is a separate detector with its own dedicated test coverage above.
+  const cgFields = scanned.fields.filter(f => f.type === 'checkbox-group' && f.widget !== 'wd-checkbox-group');
+
+  expect('checkbox groups detected: Greenhouse (shared name[]), Ashby (fieldset, no shared name), Lever (cards[..][fieldN])',
+    cgFields.length === 3);
+
+  const gh = cgFields.find(f => f.name === 'question_lang[]');
+  expect('Greenhouse checkbox group labelled from its <fieldset><legend>, required marker stripped',
+    gh && gh.label === 'What language(s) are you fluent in?');
+  expect('Greenhouse checkbox group options are each checkbox\'s own label',
+    gh && gh.options.join(',') === 'English,Spanish,French');
+  expect('the decoy standalone checkbox sharing the word "fluent" stays its OWN separate (non-group) field',
+    !!byName.fluent_decoy && byName.fluent_decoy.type === 'checkbox');
+  expect('the decoy standalone checkbox is never folded into the language group\'s options',
+    gh && !gh.options.some(o => /sign language/i.test(o)));
+
+  const lever = cgFields.find(f => f.name && f.name.indexOf('cards[92a51f92') === 0);
+  expect('Lever "cards[<uuid>][field0]" checkbox group gets its real question text from .application-question .application-label .text',
+    lever && lever.label === 'Have you previously worked at this company as an intern?');
+  expect('Lever checkbox group options are the option labels, never the raw opaque name',
+    lever && lever.options.join(',') === 'No,Yes - Intern,Yes - Full Time Employment');
+
+  const ashby = cgFields.find(f => f.name === 'Mountain View, CA');
+  expect('Ashby checkbox group (no shared name -- grouped by its <fieldset>) labelled from the preceding question title',
+    ashby && ashby.label === 'Please select your preferred working location.');
+  expect('Ashby checkbox group options are the three location labels',
+    ashby && ashby.options.join(',') === 'Mountain View, CA,San Francisco, CA,Los Angeles, CA');
+})();
+
+// --- checkbox groups: fill / verify, including decline family and ambiguous negative control -
+(() => {
+  const doc = dom.window.document;
+  const scanned = Scanner.scanFields(doc);
+  // Excludes Workday's own "wd-checkbox-group" widget -- it legitimately shares the same
+  // type "checkbox-group" string (see src/applypilot/extension/matcher.py's is_choice_field),
+  // but is a separate detector with its own dedicated test coverage above.
+  const cgFields = scanned.fields.filter(f => f.type === 'checkbox-group' && f.widget !== 'wd-checkbox-group');
+
+  const gh = cgFields.find(f => f.name === 'question_lang[]');
+  const ghEntry = scanned.registry[gh.id];
+
+  const ok1 = Scanner.applyFill(ghEntry, 'Spanish');
+  expect('checkbox-group: a single value ticks the ONE matching option',
+    ok1 === true && doc.getElementById('gh_lang_es').checked === true);
+  expect('checkbox-group: the other options in the group stay unticked',
+    doc.getElementById('gh_lang_en').checked === false && doc.getElementById('gh_lang_fr').checked === false);
+
+  const ok2 = Scanner.applyFill(ghEntry, ['English', 'French']);
+  expect('checkbox-group: a LIST value ticks each matching option',
+    ok2 === true && doc.getElementById('gh_lang_en').checked === true && doc.getElementById('gh_lang_fr').checked === true);
+  expect('checkbox-group: ticking more options NEVER unticks a box already ticked by an earlier fill',
+    doc.getElementById('gh_lang_es').checked === true);
+
+  const okBad = Scanner.applyFill(ghEntry, 'Klingon');
+  expect('checkbox-group: no confident match among the options -> false', okBad === false);
+
+  // Ambiguous negative control: "CA" contains-matches all three California cities.
+  const ashby = cgFields.find(f => f.name === 'Mountain View, CA');
+  const ashbyEntry = scanned.registry[ashby.id];
+  const okAmbiguous = Scanner.applyFill(ashbyEntry, 'CA');
+  expect('checkbox-group: a value matching MULTIPLE options ("CA" -> 3 California cities) never guesses',
+    okAmbiguous === false &&
+    !doc.getElementById('ashby_loc_mv').checked && !doc.getElementById('ashby_loc_sf').checked && !doc.getElementById('ashby_loc_la').checked);
+
+  // Decline family: reuses matchChoiceOption's existing family dispatch -- no separate
+  // detection logic needed for checkbox groups.
+  const declineWrap = doc.createElement('div');
+  const declineFieldset = doc.createElement('fieldset');
+  declineWrap.appendChild(declineFieldset);
+  doc.body.appendChild(declineWrap);
+  function mkCb(id, label) {
+    const l = doc.createElement('label');
+    const cb = doc.createElement('input');
+    cb.type = 'checkbox'; cb.id = id;
+    l.appendChild(cb);
+    l.appendChild(doc.createTextNode(label));
+    declineFieldset.appendChild(l);
+    return cb;
+  }
+  const raceAsian = mkCb('race_asian_cb', 'Asian');
+  const raceWhite = mkCb('race_white_cb', 'White');
+  const raceDecline = mkCb('race_decline_cb', "I don't wish to answer");
+  const declineGroupScan = Scanner.findCheckboxGroups(declineWrap, doc);
+  expect('synthetic race checkbox group detected via its <fieldset>', declineGroupScan.groups.length === 1);
+  const declineEntry = { kind: 'checkbox-group', elements: [raceAsian, raceWhite, raceDecline] };
+  const okDecline = Scanner.applyCheckboxGroupValue(declineEntry, 'Decline to self-identify');
+  expect('checkbox-group: a decline-shaped value picks the decline-family option, never "Asian"/"White"',
+    okDecline === true && raceDecline.checked === true && !raceAsian.checked && !raceWhite.checked);
+})();
+
+// --- Lever card labels: the RADIO-group half of the fix, via a hidden fixture tested by
+//     DIRECT function call (never through scanFields()'s whole-page scan, so it can never
+//     perturb the sitewide "radio group captured as ONE field" count above) ------------------
+(() => {
+  const doc = dom.window.document;
+  const radios = Array.from(doc.querySelectorAll('input[name="cards[d090becd-07b8-4536-ac84-dbf3bc07e03d][field0]"]'));
+  expect('Lever radio card fixture: 2 radio options found', radios.length === 2);
+  expect('Lever radio group label resolved from .application-question .application-label .text, not its own opaque "cards[...]" name',
+    Scanner.getGroupLabel(radios) === 'Role requires candidate to be based in London or Stockholm');
+})();
+
+// --- Lever location: extractLocationName / splitCityState (pure functions) -----------------
+(() => {
+  expect('extractLocationName: a plain "City, State" string passes through unchanged',
+    Scanner.extractLocationName('Seattle, Washington') === 'Seattle, Washington');
+  expect('extractLocationName: a resolved-suggestion JSON object unwraps to its "name"',
+    Scanner.extractLocationName('{"name":"Seattle, WA, USA","id":"f93b25a3"}') === 'Seattle, WA, USA');
+  expect('extractLocationName: malformed JSON-looking text falls back to the raw string, never throws',
+    Scanner.extractLocationName('{not valid json') === '{not valid json');
+
+  expect('splitCityState: plain "City, State" splits in two',
+    JSON.stringify(Scanner.splitCityState('Seattle, Washington')) === JSON.stringify({ city: 'Seattle', state: 'Washington' }));
+  expect('splitCityState: "City, State, Country" ignores the trailing country part',
+    JSON.stringify(Scanner.splitCityState('Seattle, WA, USA')) === JSON.stringify({ city: 'Seattle', state: 'WA' }));
+  expect('splitCityState: a JSON-object value is unwrapped before splitting',
+    JSON.stringify(Scanner.splitCityState('{"name":"Austin, Texas, United States"}')) === JSON.stringify({ city: 'Austin', state: 'Texas' }));
+  expect('splitCityState: a bare city with no comma has an empty state',
+    JSON.stringify(Scanner.splitCityState('Seattle')) === JSON.stringify({ city: 'Seattle', state: '' }));
+})();
+
+// --- Ashby button groups: scanning shape + isChoiceButtonSafe guard -------------------------
+(() => {
+  const doc = dom.window.document;
+  const scanned = Scanner.scanFields(doc);
+  const bgFields = scanned.fields.filter(f => f.widget === 'button-group');
+  expect('button groups detected: work-authorization, sponsorship, the decoy-adjacent relocation question, and the no-form real-shape group',
+    bgFields.length === 4);
+
+  const workauth = bgFields.find(f => /permanently authorized/i.test(f.label));
+  const sponsor = bgFields.find(f => /require sponsorship/i.test(f.label));
+  expect('work-authorization button group has options [Yes, No]', workauth && workauth.options.join(',') === 'Yes,No');
+  expect('sponsorship button group has options [Yes, No], a SEPARATE field from work-authorization',
+    sponsor && sponsor.options.join(',') === 'Yes,No' && sponsor.id !== workauth.id);
+
+  const yesBtn = doc.getElementById('ashby_workauth_yes');
+  const container = doc.getElementById('ashby_workauth_entry');
+  expect('isChoiceButtonSafe allows a real type=button option inside its own question container',
+    Scanner.isChoiceButtonSafe(yesBtn, container) === true);
+  expect('isChoiceButtonSafe REFUSES a button from a DIFFERENT question\'s container',
+    Scanner.isChoiceButtonSafe(yesBtn, doc.getElementById('ashby_sponsor_entry')) === false);
+  expect('isChoiceButtonSafe REFUSES null', Scanner.isChoiceButtonSafe(null, container) === false);
+
+  const decoySubmit = doc.getElementById('ashby_decoy_submit');
+  const decoyContainer = doc.getElementById('ashby_decoy_entry');
+  expect('the decoy submit button really is type=submit (no type="" attribute -- the same HTML trap isAddAnotherButtonSafe guards against)',
+    decoySubmit.type === 'submit');
+  expect('isChoiceButtonSafe REFUSES the decoy submit button (not type=button)',
+    Scanner.isChoiceButtonSafe(decoySubmit, decoyContainer) === false);
+  expect('the decoy submit button was never even scanned as one of the choice group\'s own options',
+    !bgFields.some(f => f.options.some(o => /submit/i.test(o))));
+
+  const submitTypeBtn = doc.createElement('button');
+  submitTypeBtn.type = 'submit';
+  submitTypeBtn.textContent = 'Yes';
+  container.appendChild(submitTypeBtn);
+  expect('isChoiceButtonSafe REFUSES a type=submit button even with matching option TEXT ("Yes")',
+    Scanner.isChoiceButtonSafe(submitTypeBtn, container) === false);
+  container.removeChild(submitTypeBtn);
+
+  // --- real Ashby shape: no <form> anywhere, every button (including the decoy) is type-less
+  //     (el.type reports "submit" by default, el.form is null) ---
+  const noFormYes = doc.getElementById('ashby_noform_yes');
+  const noFormNo = doc.getElementById('ashby_noform_no');
+  const noFormContainer = doc.getElementById('ashby_noform_entry');
+  const noFormDecoy = doc.getElementById('ashby_noform_submit');
+  expect('fixture sanity: the no-form option buttons really are type-less (type reports "submit")',
+    noFormYes.type === 'submit' && noFormNo.type === 'submit');
+  expect('fixture sanity: the no-form option buttons truly have no form owner', noFormYes.form === null);
+  expect('fixture sanity: the decoy "Submit Application" is ALSO type-less with no form owner',
+    noFormDecoy.type === 'submit' && noFormDecoy.form === null);
+
+  expect('isChoiceButtonSafe allows a type-less (submit-by-default), form-less Ashby option button whose text matches a known option',
+    Scanner.isChoiceButtonSafe(noFormYes, noFormContainer, ['Yes', 'No']) === true);
+  expect('isChoiceButtonSafe REFUSES the type-less, form-less DECOY "Submit Application" button -- its text is not a known option',
+    Scanner.isChoiceButtonSafe(noFormDecoy, noFormContainer, ['Yes', 'No']) === false);
+  expect('isChoiceButtonSafe REFUSES a type-less, form-less button when no optionTexts are supplied at all (never relaxes blind)',
+    Scanner.isChoiceButtonSafe(noFormYes, noFormContainer) === false);
+})();
+
+// --- combobox / button-group / Lever-location: async fill + verify behavior, run STRICTLY
+//     SEQUENTIALLY (same reasoning as the Workday dropdown/prompt block above: shared timers
+//     and MutationObservers on one document behave most predictably one step at a time). -----
+pending.push((async () => {
+  const doc = dom.window.document;
+  const scanned = Scanner.scanFields(doc);
+  const byId = id => doc.getElementById(id);
+  const fieldByLabel = label => scanned.fields.find(f => f.label === label);
+  const entryFor = field => scanned.registry[field.id];
+
+  // ---- combobox: static option list (Country) ----
+  {
+    const field = fieldByLabel('Country*');
+    expect('Country combobox scanned as ONE field with widget "combobox", never a plain text field',
+      !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+
+    // NEGATIVE CONTROL: typed-but-not-selected text is never read back as a committed value --
+    // react-select drops it on blur; the mock does too (see test-page.html).
+    Scanner.setNativeValue(entry.input, 'United States of America');
+    expect('typed-but-not-selected combobox text is NOT reported as a committed value',
+      Scanner.getComboboxCommittedValue(entry) === '');
+
+    const ok = await Scanner.applyFill(entry, 'United States of America');
+    expect('applyFill on a combobox resolves to a boolean', typeof ok === 'boolean');
+    expect('Country combobox filled and committed (menu opened via mouseup, option selected via mousedown+click)',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
+    expect('the search input is EMPTY after a genuine commit (never leftover search text)',
+      byId('gh_country_input').value === '');
+
+    const okBad = await Scanner.applyFill(entry, 'Atlantis');
+    expect('Country combobox: no confident match -> false, the earlier commit is untouched',
+      okBad === false && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
+  }
+
+  // ---- combobox: ambiguous negative control (two rendered options both contain "Engineer") ----
+  {
+    const field = fieldByLabel('Role*');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Engineer');
+    expect('combobox ambiguous negative control: "Engineer" matches BOTH "Software Engineer" and "Site Engineer" -> stays unfilled',
+      ok === false && Scanner.getComboboxCommittedValue(entry) === '');
+  }
+
+  // ---- combobox: async/filtered catalog (School) -- ground truth: "No options" is shown
+  // until the debounced request resolves; never blind-pick the first alphabetical row. ----
+  {
+    const field = fieldByLabel('School*');
+    const entry = entryFor(field);
+    const okBad = await Scanner.applyFill(entry, 'Underwater Basket Weaving University');
+    expect('School combobox (async catalog): no options ever match -> false, never the first alphabetical row',
+      okBad === false && Scanner.getComboboxCommittedValue(entry) === '');
+
+    const ok = await Scanner.applyFill(entry, 'University of Washington');
+    expect('School combobox (async catalog): types to filter, waits for the debounced results, and commits the exact match',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'University of Washington');
+  }
+
+  // ---- combobox: multi-select (chips) ----
+  {
+    const field = fieldByLabel('Languages spoken*');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, ['English', 'French']);
+    expect('multi-select combobox: a LIST value adds each option as its own chip',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'English, French');
+    const ok2 = await Scanner.applyFill(entry, 'Spanish');
+    expect('multi-select combobox: adding one more value keeps the earlier chips (never replaces them)',
+      ok2 === true && Scanner.getComboboxCommittedValue(entry) === 'English, French, Spanish');
+  }
+
+  // ---- generic ARIA combobox (no react-select classes at all) ----
+  {
+    const field = fieldByLabel('Preferred office');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Austin');
+    expect('generic ARIA combobox (opened via ArrowDown, no "Toggle flyout" button) filled and verified via aria-activedescendant',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'Austin');
+  }
+
+  // ---- Ashby Yes/No button groups: scoped to their OWN question ----
+  {
+    const workauthEntry = entryFor(fieldByLabel('Are you permanently authorized to work in the United States without visa sponsorship?'));
+    const sponsorEntry = entryFor(fieldByLabel('Will you now or in the future require sponsorship to work in the US?'));
+
+    const okNo = await Scanner.applyFill(workauthEntry, 'No');
+    expect('Ashby work-authorization button group: "No" clicked and verified selected',
+      okNo === true && byId('ashby_workauth_no').getAttribute('aria-pressed') === 'true');
+    const okYes = await Scanner.applyFill(sponsorEntry, 'Yes');
+    expect('Ashby sponsorship button group: "Yes" clicked and verified selected -- a SEPARATE question, unaffected by the one above',
+      okYes === true && byId('ashby_sponsor_yes').getAttribute('aria-pressed') === 'true');
+    expect('clicking the sponsorship question never touched the work-authorization question\'s own selection',
+      byId('ashby_workauth_no').getAttribute('aria-pressed') === 'true' &&
+      byId('ashby_workauth_yes').getAttribute('aria-pressed') !== 'true');
+    expect('the hidden checkbox mirror also reflects each button-group\'s own choice',
+      byId('ashby_workauth_entry').querySelector('input[type="checkbox"]').checked === false &&
+      byId('ashby_sponsor_entry').querySelector('input[type="checkbox"]').checked === true);
+  }
+
+  // ---- Ashby Yes/No decoy: the group fills correctly, the decoy submit is NEVER clicked ----
+  {
+    const decoyEntry = entryFor(fieldByLabel('Are you comfortable relocating?'));
+    const before = dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0;
+    const ok = await Scanner.applyFill(decoyEntry, 'Yes');
+    expect('button group beside a decoy submit button still fills correctly',
+      ok === true && byId('ashby_decoy_yes').getAttribute('aria-pressed') === 'true');
+    expect('the decoy submit button next to the group was NEVER clicked (zero submissions)',
+      (dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0) === before);
+  }
+
+  // ---- real Ashby shape: no <form> at all, every button (including the decoy) type-less ----
+  {
+    const field = fieldByLabel('Are you legally authorized to work in this country?');
+    expect('the no-form Ashby button group is scanned like any other button group', !!field && field.widget === 'button-group');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'No');
+    expect('real-shape (type-less, no <form>) Ashby button group: "No" clicked and verified selected via its hashed "selected" class',
+      ok === true && byId('ashby_noform_no').className.indexOf('selected') !== -1);
+    expect('the type-less DECOY "Submit Application" beside it (also no form) was NEVER clicked',
+      !dom.window.__ASHBY_NOFORM_SUBMIT_COUNT__);
+  }
+
+  // ---- Lever location type-ahead ----
+  {
+    const field = fieldByLabel('Current location');
+    expect('Lever location field scanned with a CLEAN label (no dropdown/status text pollution from the wrapping <label>)',
+      !!field);
+    const entry = entryFor(field);
+
+    const okAmbiguous = await Scanner.applyFill(entry, 'Seattle');
+    expect('Lever location: city alone matches suggestions in TWO different states -- ambiguous, never guesses',
+      okAmbiguous === false && byId('lever_selected_location').value === '');
+
+    const ok = await Scanner.applyFill(entry, 'Seattle, Washington');
+    expect('Lever location: city + full state name resolves to the ONE matching suggestion, committed via mousedown',
+      ok === true && byId('lever_selected_location').value === 'Seattle, Washington');
+
+    byId('lever_selected_location').value = '';
+    const okCode = await Scanner.applyFill(entry, 'Austin, TX');
+    expect('Lever location: city + 2-letter state CODE also resolves (via the existing US state table)',
+      okCode === true && byId('lever_selected_location').value === 'Austin, Texas');
+
+    byId('lever_selected_location').value = '';
+    const okBad = await Scanner.applyFill(entry, 'Nowhereville, Idaho');
+    expect('Lever location: no suggestion matches -> false, selectedLocation stays empty',
+      okBad === false && byId('lever_selected_location').value === '');
+
+    // A live probe (2026-09-24) showed the service can send a resolved-suggestion JSON object
+    // string instead of a plain "City, State" string -- must still resolve correctly.
+    byId('lever_selected_location').value = '';
+    const okJson = await Scanner.applyFill(entry, '{"name":"Austin, Texas, United States","id":"abc123"}');
+    expect('Lever location: a JSON-object value ({"name": "City, State, Country", ...}) is unwrapped and still resolves',
+      okJson === true && byId('lever_selected_location').value === 'Austin, Texas');
+  }
+
+  // ---- final safety check: none of the choice-widget interactions above ever submitted the
+  // ats-widgets-form (the decoy submit button check above covers the SPECIFIC decoy; this
+  // covers the whole form as one last sweep) ----
+  expect('none of the choice-widget fills above ever submitted the ats-widgets-form',
+    !(dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ > 0));
+
+  // ---- proof the decoy is a REAL trap: bypassing every guard and clicking it directly DOES
+  // submit (same convention as the pre-existing trap-form / Workday decoy fixtures) ----
+  {
+    const before = dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0;
+    byId('ashby_decoy_submit').click();
+    expect('bypassing every guard and clicking the decoy submit button directly DOES fire its form\'s submit handler',
+      (dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0) === before + 1);
+  }
+  {
+    const before = dom.window.__ASHBY_NOFORM_SUBMIT_COUNT__ || 0;
+    byId('ashby_noform_submit').click();
+    expect('bypassing every guard and clicking the type-less, form-less decoy directly DOES fire its own click handler (a genuine trap, not vacuous)',
+      (dom.window.__ASHBY_NOFORM_SUBMIT_COUNT__ || 0) === before + 1);
   }
 })());
 
