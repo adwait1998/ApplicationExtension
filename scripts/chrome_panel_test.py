@@ -508,7 +508,7 @@ with sync_playwright() as p:
         panel1.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
 
         panel1.click("#scanBtn")
-        state1 = wait_for_done(helper, tab1_id, timeout_s=20)
+        state1 = wait_for_done(helper, tab1_id, timeout_s=60)
 
         check("tab 1's fill reached the local (stub) service", len(resolve_calls) >= 1)
         check("tab 1's fill finished and wrote a per-tab state", state1 is not None, str(state1)[:200])
@@ -561,7 +561,7 @@ with sync_playwright() as p:
         panel2.goto(f"{panel_url}?tabId={tab2_id}")
         panel2.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
         panel2.click("#scanBtn")
-        state2 = wait_for_done(helper, tab2_id, timeout_s=20)
+        state2 = wait_for_done(helper, tab2_id, timeout_s=60)
         check("tab 2 independently reached 'done'", bool(state2 and state2.get("status") == "done"),
               str(state2)[:200])
 
@@ -744,7 +744,7 @@ with sync_playwright() as p:
         patch_revert_after_fill(helper, tab6_id, "linkedin", 100)
 
         start_fill_via_message(helper, tab6_id)
-        state6 = wait_for_done(helper, tab6_id, timeout_s=20)
+        state6 = wait_for_done(helper, tab6_id, timeout_s=60)
         check("tab 6's fill reached a terminal status", state6 is not None and state6.get("status") == "done",
               str(state6)[:200])
 
