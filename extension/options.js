@@ -66,6 +66,7 @@
       loadSmartFillSettings();
       loadLlmAvailability();
       loadAnswers();
+      loadLog();
     });
   }
 
@@ -86,6 +87,7 @@
       setStatus('ok', 'Saved.');
       refreshProfileArea();
       loadAnswers();
+      loadLog();
     });
   });
 
@@ -1406,6 +1408,171 @@
 
     return tr;
   }
+
+  // ===============================================================================
+  // -- Application log ---------------------------------------------------------------
+  // ===============================================================================
+  //
+  // GET /log -> {entries:[{id, url, title, company, created, updated, status,
+  // counts:{filled, drafts, needs_you, failed, unreadable}, fills}]}, already
+  // newest-first. The extension itself only ever writes "filled" (it cannot know
+  // whether the applicant went on to press the ATS's own Submit) — "applied" and
+  // "skipped" are set here, by hand. Export CSV goes through an authenticated
+  // fetch + blob download rather than a plain <a href> because the token has to
+  // travel as a header, not a query string.
+
+  var logTableWrapEl = document.getElementById('logTableWrap');
+  var logEmptyEl = document.getElementById('logEmpty');
+  var logStatusEl = document.getElementById('logStatus');
+  var exportLogBtn = document.getElementById('exportLogBtn');
+
+  var LOG_STATUSES = ['filled', 'applied', 'skipped'];
+
+  function setLogStatus(kind, text) {
+    logStatusEl.className = kind;
+    logStatusEl.textContent = text;
+  }
+
+  function loadLog() {
+    if (!tokenEl.value) {
+      logTableWrapEl.innerHTML = '';
+      logEmptyEl.style.display = 'none';
+      setLogStatus('info', 'Set a service token above to load your application log.');
+      return;
+    }
+    setLogStatus('', '');
+    apiGet('/log').then(function (data) {
+      renderLogTable((data && data.entries) || []);
+    }, function (err) {
+      logTableWrapEl.innerHTML = '';
+      logEmptyEl.style.display = 'none';
+      setLogStatus('err', 'Could not load the application log: ' + err.message);
+    });
+  }
+
+  function formatLogDate(ts) {
+    if (!ts) return '';
+    var d = new Date(ts * 1000);
+    if (isNaN(d.getTime())) return '';
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+      pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function renderLogTable(entries) {
+    logTableWrapEl.innerHTML = '';
+    if (!entries.length) {
+      logEmptyEl.style.display = 'block';
+      return;
+    }
+    logEmptyEl.style.display = 'none';
+
+    var table = document.createElement('table');
+    table.className = 'data-table';
+
+    var thead = document.createElement('thead');
+    var headRow = document.createElement('tr');
+    ['Date', 'Company', 'Title', 'Filled', 'Drafts', 'Needs you', 'Failed', 'Status'].forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    entries.forEach(function (e) { tbody.appendChild(buildLogRow(e)); });
+    table.appendChild(tbody);
+
+    logTableWrapEl.appendChild(table);
+  }
+
+  function buildLogRow(e) {
+    var tr = document.createElement('tr');
+
+    var dateTd = document.createElement('td');
+    dateTd.textContent = formatLogDate(e.created);
+    tr.appendChild(dateTd);
+
+    var companyTd = document.createElement('td');
+    companyTd.textContent = e.company || '';
+    tr.appendChild(companyTd);
+
+    var titleTd = document.createElement('td');
+    if (e.url) {
+      var link = document.createElement('a');
+      link.className = 'log-link';
+      link.href = e.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = e.title || e.url;
+      titleTd.appendChild(link);
+    } else {
+      titleTd.textContent = e.title || '';
+    }
+    tr.appendChild(titleTd);
+
+    var counts = e.counts || {};
+    [counts.filled, counts.drafts, counts.needs_you, counts.failed].forEach(function (n) {
+      var td = document.createElement('td');
+      td.textContent = n == null ? '0' : String(n);
+      tr.appendChild(td);
+    });
+
+    var statusTd = document.createElement('td');
+    var select = document.createElement('select');
+    LOG_STATUSES.forEach(function (s) {
+      var opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      if (s === e.status) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', function () {
+      var prev = e.status;
+      select.disabled = true;
+      apiPost('/log/' + encodeURIComponent(e.id) + '/status', { status: select.value }).then(function () {
+        e.status = select.value;
+        select.disabled = false;
+        setLogStatus('ok', 'Updated.');
+      }, function (err) {
+        select.disabled = false;
+        select.value = prev;
+        setLogStatus('err', 'Could not update status: ' + err.message);
+      });
+    });
+    statusTd.appendChild(select);
+    tr.appendChild(statusTd);
+
+    return tr;
+  }
+
+  exportLogBtn.addEventListener('click', function () {
+    if (!tokenEl.value) {
+      setLogStatus('err', 'Set a service token above first.');
+      return;
+    }
+    exportLogBtn.disabled = true;
+    setLogStatus('info', 'Preparing download…');
+    fetch(apiUrl('/log.csv'), { headers: apiHeaders(false) }).then(function (resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'applications.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      exportLogBtn.disabled = false;
+      setLogStatus('ok', 'Downloaded.');
+    }, function (err) {
+      exportLogBtn.disabled = false;
+      setLogStatus('err', 'Could not export CSV: ' + err.message);
+    });
+  });
 
   load();
 })();

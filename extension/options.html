@@ -126,11 +126,11 @@
     margin-bottom: 18px;
   }
 
-  #status, #profileStatus, #importStatus, #smartFillStatus, #answersStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
-  #status.ok, #profileStatus.ok, #importStatus.ok, #smartFillStatus.ok, #answersStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
-  #status.err, #profileStatus.err, #importStatus.err, #smartFillStatus.err, #answersStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
-  #status.info, #profileStatus.info, #importStatus.info, #smartFillStatus.info, #answersStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
-  #status.warn, #profileStatus.warn, #importStatus.warn, #smartFillStatus.warn, #answersStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+  #status, #profileStatus, #importStatus, #smartFillStatus, #answersStatus, #logStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
+  #status.ok, #profileStatus.ok, #importStatus.ok, #smartFillStatus.ok, #answersStatus.ok, #logStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+  #status.err, #profileStatus.err, #importStatus.err, #smartFillStatus.err, #answersStatus.err, #logStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
+  #status.info, #profileStatus.info, #importStatus.info, #smartFillStatus.info, #answersStatus.info, #logStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
+  #status.warn, #profileStatus.warn, #importStatus.warn, #smartFillStatus.warn, #answersStatus.warn, #logStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
 
   .hint { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
   .hint.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 8px 10px; border-radius: 6px; }
@@ -357,6 +357,7 @@
     white-space: nowrap;
   }
   .who-badge.you { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-border); }
+  .log-link { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -728,6 +729,20 @@
     <div class="table-scroll" id="answersTableWrap"></div>
     <div class="hint" id="answersEmpty" style="display:none;">No saved answers yet.</div>
     <div id="answersStatus"></div>
+  </div>
+
+  <hr class="section-divider">
+
+  <h1>Application log</h1>
+  <p class="sub">Every page the Copilot filled, newest first. Status is yours to set — the extension can't know whether you actually submitted.</p>
+
+  <div class="card" id="logCard">
+    <div class="save-row" style="margin-bottom:14px;">
+      <button type="button" class="secondary" id="exportLogBtn">Export CSV</button>
+    </div>
+    <div class="table-scroll" id="logTableWrap"></div>
+    <div class="hint" id="logEmpty" style="display:none;">No applications logged yet.</div>
+    <div id="logStatus"></div>
   </div>
 
   <template id="workHistoryRowTemplate">
