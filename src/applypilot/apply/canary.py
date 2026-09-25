@@ -286,6 +286,21 @@ _ASSERTS = re.compile(r"^\s*(yes|no)\b|\bi\s+am\s+(a|an)\b|\bi\s+(self[- ])?iden
                       re.I)
 
 
+# Specific visa/permit names an option may carry ("Yes, I will require H-1B
+# sponsorship" vs "Yes, TN"). Normalised so "H1B", "H-1B" and "h1-b" agree.
+_VISA_NAME_RE = re.compile(
+    r"\b(h[\s-]?1[\s-]?b|h[\s-]?4(?:\s*ead)?|f[\s-]?1|stem\s*opt|opt|cpt|l[\s-]?1[ab]?|tn|o[\s-]?1|"
+    r"e[\s-]?3|e[\s-]?2|j[\s-]?1|ead|green\s*card)\b", re.I)
+
+
+def _visa_names(text: str) -> set[str]:
+    out = set()
+    for m in _VISA_NAME_RE.finditer(text or ""):
+        tok = re.sub(r"[\s-]", "", m.group(1).lower())
+        out.add({"stemopt": "opt"}.get(tok, tok))
+    return out
+
+
 def _polarity(text: str) -> str | None:
     t = text.strip().lower()
     if re.match(r"^yes\b", t):
@@ -341,6 +356,7 @@ def choose_option(question: str, options: list[str], profile: dict) -> tuple[str
     want_pol = _polarity(answer)
     needs = _as_bool(wa.get("require_sponsorship"))
     citizen = _citizen_or_pr(wa)
+    mine = _visa_names(str(wa.get("work_permit_type") or ""))
     fits = []
     for o in opts:
         pol = _polarity(o)
@@ -353,7 +369,16 @@ def choose_option(question: str, options: list[str], profile: dict) -> tuple[str
         claim = _sponsorship_claim(o)
         if claim is not None and (needs is None or claim != needs):
             continue
+        named = _visa_names(o)
+        if named and not (named & mine):
+            continue  # names a specific visa that isn't the applicant's
         fits.append(o)
+    if len(fits) > 1 and mine:
+        # Several options fit the yes/no and sponsorship facts; the one that
+        # names the applicant's own visa ("... H-1B ...") is the answer.
+        specific = [o for o in fits if _visa_names(o) & mine]
+        if len(specific) == 1:
+            return specific[0], ""
     if len(fits) == 1:
         return fits[0], ""
     return None, ("no option matches your work-authorization facts" if not fits

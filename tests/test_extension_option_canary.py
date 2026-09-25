@@ -82,3 +82,27 @@ def test_a_yes_no_canary_still_ticks_a_single_checkbox():
     r = resolve.resolve_field(F(id="c", label="I am legally authorized to work in the United States", type="checkbox"),
                               NIDA)
     assert isinstance(r, FillResult) and r.value == "Yes"
+
+
+VISA_OPTS = ["Yes, I will require H-1B sponsorship", "Yes, I will require TN visa support",
+             "Yes, I am on F-1 OPT and will need sponsorship", "Yes, I will require L-1 transfer",
+             "No, I will not require sponsorship"]
+SQ = "Will you now or in the future require sponsorship for a visa to remain in your current location?"
+
+
+def test_the_option_naming_the_applicants_own_visa_is_chosen():
+    assert choose_option(SQ, VISA_OPTS, NIDA)[0] == "Yes, I will require H-1B sponsorship"
+
+
+def test_an_option_naming_a_different_visa_is_never_chosen():
+    other = {"work_authorization": {"legally_authorized_to_work": True, "require_sponsorship": True,
+                                    "work_permit_type": "O-1"}}
+    assert choose_option(SQ, VISA_OPTS[1:4] + VISA_OPTS[4:], other)[0] is None
+
+
+def test_no_sponsorship_needed_picks_the_no_option():
+    assert choose_option(SQ, VISA_OPTS, CITIZEN)[0] == "No, I will not require sponsorship"
+
+
+def test_generic_yes_options_that_differ_only_in_timing_stay_with_the_applicant():
+    assert choose_option(SQ, ["Yes, now", "Yes, in the future", "No"], NIDA)[0] is None
