@@ -67,7 +67,10 @@ _NAME_LABEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(portfolio|personal\s*site)\b", re.I), "personal.portfolio_url"),
     (re.compile(r"\bwebsite\b", re.I), "personal.website_url"),
     (re.compile(r"\bcity\b", re.I), "personal.city"),
-    (re.compile(r"\b(state|province)\b", re.I), "personal.province_state"),
+    # "state" the noun, not the verb: "Please state why you want to join"
+    # was filled with the applicant's state.
+    (re.compile(r"(?<!please )\b(state|province)\b(?!\s+(why|how|what|whether|which|your|the|any|if|"
+                r"briefly|in\s+detail|clearly|below|here)\b)", re.I), "personal.province_state"),
     (re.compile(r"\bcountry\b", re.I), "personal.country"),
     (re.compile(r"\bcurrent\s*(company|employer)\b", re.I), "experience.current_company"),
     (re.compile(r"\bcurrent\s*(title|role|job\s*title)\b", re.I), "experience.current_job_title"),
@@ -252,6 +255,39 @@ def _split_name(full_name: str) -> tuple[str, str]:
     return parts[0], " ".join(parts[1:])
 
 
+# Label rules map a field to ONE profile value by a keyword in its label.
+# That is only safe for a short-answer box that asks for that value: an
+# essay box whose prompt merely mentions a keyword ("Please state why...",
+# "How did you hear about us? (LinkedIn, ...)") must never get a profile
+# value, and a choice field can only take a value that is one of its
+# options (locations are the one family worth trying there).
+_LOCATION_KEYS = {"personal.city", "personal.province_state", "personal.country"}
+_URL_KEYS = {"personal.linkedin_url", "personal.github_url", "personal.portfolio_url", "personal.website_url"}
+_ESSAY_PROMPT_RE = re.compile(
+    r"\b(why|describe|explain|tell\s+us|share\s+(a|an|your)\s+(time|example|story)|how\s+did\s+you|"
+    r"hear\s+about|referr\w*|source)\b", re.I)
+_MAX_LABEL_WORDS = 14
+
+
+def _label_rules_apply(field: FieldDescriptor) -> bool:
+    ftype = (field.type or "").strip().lower()
+    tag = (field.tag or "").strip().lower()
+    if tag == "textarea" or ftype in ("textarea", "checkbox", "radio", "file"):
+        return False
+    return len((field.label or "").split()) <= _MAX_LABEL_WORDS
+
+
+def _label_rule_fits(path: str, field: FieldDescriptor, haystack: str) -> bool:
+    base = path.split("#", 1)[0]
+    is_choice = bool(field.options) or (field.tag or "").strip().lower() == "select" \
+        or (field.widget or "") == "wd-dropdown"
+    if is_choice and base not in _LOCATION_KEYS:
+        return False
+    if base in _URL_KEYS and _ESSAY_PROMPT_RE.search(field.label or ""):
+        return False
+    return True
+
+
 def _dedupe_ci(items) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -381,8 +417,13 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
                 auto_fill=False,
             )
 
+    if not _label_rules_apply(field):
+        return None
+
     for pattern, path in _NAME_LABEL_PATTERNS:
         if pattern.search(haystack):
+            if not _label_rule_fits(path, field, haystack):
+                continue
             base_path = path.split("#", 1)[0]
             value = value_for_key(path, profile)
             if value:

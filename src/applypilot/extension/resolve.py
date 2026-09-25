@@ -3,6 +3,9 @@
 0. Secret guard   personal.password and anything on the denylist — never
                    emitted, checked again at the point of emission no
                    matter which tier produced the candidate.
+0.5 Attestation  statements the applicant signs, certifies or consents to
+                   ("I certify...", "I authorize ... to verify", e-signature,
+                   terms and conditions) — always left for the applicant.
 1. Canary         applypilot.apply.canary, used verbatim. Work auth,
                    sponsorship, citizenship, salary, EEO, address, DOB,
                    clearance, export control. A canary hit NEVER falls
@@ -60,6 +63,35 @@ _SECRET_FIELD_RE = re.compile(
     r"api[_ -]?key|secret)\b",
     re.I,
 )
+
+
+# Statements the applicant signs, certifies or consents to. Ticking or
+# typing any of these is the applicant's own act, never the extension's —
+# whatever the profile says. Checked ahead of the canary tier because
+# "I certify ... and I authorize its verification" otherwise trips the
+# canary's work-auth marker (authoriz\w+) and comes back "Yes", which the
+# content script then turns into a ticked checkbox.
+_ATTESTATION_RE = re.compile(
+    r"^\W*(i|we)\s+(hereby\s+)?(certify|attest|acknowledge|agree|consent|authori[sz]e|understand|"
+    r"confirm|declare|affirm|accept|have\s+read|give\s+(my\s+)?(permission|consent)|release)\b"
+    r"|\bby\s+(checking|clicking|ticking|selecting|signing|submitting|typing)\b"
+    r"|\b(e-?signature|electronic\s+signature|digital\s+signature|signature|sign\s+here)\b"
+    r"|\btype\s+your\s+(full\s+|legal\s+)?name\s+(to|as\s+(a|your))\s+sign"
+    r"|\bauthori[sz]e\b.{0,80}\b(verif\w*|contact\w*|release\w*|obtain\w*|investigat\w*|disclos\w*)"
+    r"|\bpenalty\s+of\s+perjury\b"
+    r"|\bterms\s+(and|&)\s+conditions\b"
+    r"|^\W*(acknowledge?ment|attestation|declaration|consent)\W*$",
+    re.I,
+)
+
+
+def _attestation_skip(field: FieldDescriptor) -> SkipResult:
+    return SkipResult(
+        id=field.id,
+        source="attestation",
+        reason="a statement you sign or consent to — tick or type this yourself",
+        auto_fill=False,
+    )
 
 
 _WORK_AUTH_CONTEXT_RE = re.compile(
@@ -181,6 +213,10 @@ def resolve_field(
         if pre is not None:
             return pre
 
+    # tier 0.5: things the applicant signs — never filled, never ticked.
+    if _ATTESTATION_RE.search(label):
+        return _attestation_skip(field)
+
     # tier 1: canary — never falls through to a lower tier
     if canary.is_canary(label):
         answer = canary.resolve_canary(label, profile)
@@ -242,9 +278,11 @@ def resolve_field(
             return _secret_skip(field)
         return struct
 
-    # tier 4: laya (optional)
+    # tier 4: laya (optional). It maps a field to the same profile keys the
+    # label rules do, so it gets the same gate: never into an essay box, a
+    # checkbox/radio, or a choice field that cannot take that kind of value.
     backend = laya if laya is not None else get_backend()
-    if backend is not None:
+    if backend is not None and matcher._label_rules_apply(field):
         # Pre-ranked and capped: Laya's confidence is only calibrated up to
         # ~10 options, and the confidence gate below is the only thing
         # standing between it and a wrong value in a real application.
@@ -255,7 +293,8 @@ def resolve_field(
             result = None
         if result is not None:
             key, confidence = result
-            if confidence >= _LAYA_CONFIDENCE_THRESHOLD and not is_secret_path(key):
+            if (confidence >= _LAYA_CONFIDENCE_THRESHOLD and not is_secret_path(key)
+                    and matcher._label_rule_fits(key, field, label)):
                 value = matcher.value_for_key(key, profile)
                 if value:
                     return FillResult(

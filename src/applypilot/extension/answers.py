@@ -260,6 +260,46 @@ def _real_llm_fn(question: str, context: str) -> str:
         return ""
 
 
+# Choice fields (select, radio group, checkbox, Workday dropdown) take one
+# of a fixed set of answers. A stored answer is only usable if it IS one of
+# them, and a draft never is: prose handed to a choice field ends up as
+# whatever option the matcher can squeeze out of it ("I know relocation can
+# be hard..." -> "No", because "know" contains "no").
+_PROSE_WORDS = 6
+
+
+def is_choice_field(field: FieldDescriptor) -> bool:
+    t = (field.type or "").strip().lower()
+    return (bool(field.options) or t in ("radio", "checkbox", "select-one", "select-multiple")
+            or (field.tag or "").strip().lower() == "select"
+            or (field.widget or "") == "wd-dropdown")
+
+
+def _prefix_on_boundary(longer: str, shorter: str) -> bool:
+    return longer.startswith(shorter) and not longer[len(shorter):len(shorter) + 1].isalnum()
+
+
+def fits_choice(answer: str, field: FieldDescriptor) -> bool:
+    """Exact option (case-insensitive), or an answer that starts with an
+    option on a word boundary ("Yes, within the US" -> "Yes"), or a short
+    answer an option starts with ("Yes" -> "Yes, I am authorized"). With the
+    options unknown until the widget opens (Workday), only a short answer."""
+    a = re.sub(r"\s+", " ", str(answer or "")).strip().lower()
+    if not a:
+        return False
+    if (field.type or "").strip().lower() == "checkbox":
+        return a in ("yes", "no", "true", "false")
+    opts = [re.sub(r"\s+", " ", o).strip().lower() for o in (field.options or []) if o and o.strip()]
+    if not opts:
+        return len(a.split()) <= _PROSE_WORDS
+    for o in opts:
+        if a == o or _prefix_on_boundary(a, o):
+            return True
+        if len(a.split()) <= 3 and _prefix_on_boundary(o, a):
+            return True
+    return False
+
+
 def _refuse_llm(question: str, context: str) -> str:
     """Used whenever drafts are disabled: tier 5 alone must never invoke
     any LLM, even on a genuine bank miss -- not the real one, not an
@@ -458,6 +498,9 @@ def previously_employed_check(
             reason=reason,
         )
 
+    # The employer could not be identified, so "No" is a likely answer, not
+    # a checked fact: filled, but marked for review (draft=True renders it
+    # with the drafts, not as a green profile fact).
     return FillResult(
         id=field.id,
         value="No",
@@ -466,10 +509,11 @@ def previously_employed_check(
         confidence=0.6,
         auto_fill=True,
         reason=(
-            "answer bank default (No) — the employer being applied to could "
-            "not be identified from the page URL or the question text; "
-            "verify before submitting"
+            "likely No — the employer being applied to could not be identified "
+            "from the page URL or the question text, so this was not checked "
+            "against your work history; verify before submitting"
         ),
+        draft=True,
     )
 
 
@@ -521,8 +565,9 @@ def match(
     else:
         ac = cache if cache is not None else make_cache(profile, bank_path)
     ctx = _context_for(profile, field)
+    choice = is_choice_field(field)
 
-    if drafting:
+    if drafting and not choice:
         real_fn = llm_fn or _real_llm_fn
         b = budget if budget is not None else DraftBudget(app_dir=app_dir)
         wrapped = _budgeted(real_fn, b)
@@ -544,6 +589,8 @@ def match(
         return None
 
     if result.source in ("seed", "cache") and result.answer:
+        if choice and not fits_choice(result.answer, field):
+            return None  # a stored answer that is not one of this field's choices
         matched = f': "{result.matched_q}"' if result.matched_q else ""
         return FillResult(
             id=field.id,

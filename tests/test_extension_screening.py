@@ -38,7 +38,8 @@ def test_never_convicted_answers_plain_conviction_questions_no(q):
 ])
 def test_conviction_setting_does_not_answer_what_it_does_not_entail(q):
     r = _resolve(q, SET)
-    assert isinstance(r, SkipResult) and r.source == "screening", (q, r)
+    # "I certify..." is caught one tier earlier, as a statement to sign.
+    assert isinstance(r, SkipResult) and r.source in ("screening", "attestation"), (q, r)
 
 
 def test_a_yes_criminal_setting_is_never_auto_answered():
