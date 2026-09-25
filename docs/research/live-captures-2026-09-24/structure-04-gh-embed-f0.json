@@ -1,0 +1,1286 @@
+{
+ "kind": "applypilot-page-structure",
+ "version": 1,
+ "capturedAt": "2026-09-25T00:50:35.941Z",
+ "host": "www.avepoint.com",
+ "path": "/careers/job-detail",
+ "title": "ABX Specialist | Careers | AvePoint",
+ "nodeCount": 77,
+ "truncated": false,
+ "note": "Structure only: no field values, checked states or files are captured.",
+ "nodes": [
+  {
+   "tag": "img",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "head",
+    "html"
+   ]
+  },
+  {
+   "tag": "img",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "head",
+    "html"
+   ]
+  },
+  {
+   "tag": "img",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "head",
+    "html"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "dialog",
+   "id": "a5d30bd2-6314-45c5-a209-6bb5f0231164",
+   "cls": "osano-cm-window__dialog osano-cm-dialog osano-cm-dialog--position_bottom osano-c",
+   "aria": {
+    "label": "Cookie Consent Banner",
+    "describedby": "a5d30bd<digits>c5-a209-6bb5f0231164__label"
+   },
+   "visible": true,
+   "path": [
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": " osano-cm-dialog__close osano-cm-close ",
+   "aria": {
+    "label": "Close this consent banner"
+   },
+   "text": "Close this consent banner",
+   "visible": true,
+   "path": [
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "line",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "svg",
+    "button",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "line",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "svg",
+    "button",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "0ed350ce-9149-4681-9e1b-cb78ba0c5a03",
+   "cls": " osano-cm-window__widget osano-cm-widget osano-cm-widget--hidden osano-cm-widget",
+   "aria": {
+    "label": "Cookie Preferences"
+   },
+   "visible": false,
+   "path": [
+    "div"
+   ]
+  },
+  {
+   "tag": "svg",
+   "role": "img",
+   "aria": {
+    "labelledby": "0ed350ce-<digits>e1b-cb78ba0c5a03"
+   },
+   "visible": false,
+   "path": [
+    "button",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "dialog",
+   "id": "0be96e5e-dc1a-4bde-801e-589cb0ca9e3b",
+   "cls": " osano-cm-window__info-dialog osano-cm-info-dialog osano-cm-info-dialog--hidden ",
+   "aria": {
+    "labelledby": "0be96e5e-dc1a-4bde-801e-589cb0ca9e3b__label"
+   },
+   "visible": false,
+   "path": [
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "presentation",
+   "cls": " osano-cm-info-dialog__info osano-cm-info osano-cm-info--position_right ",
+   "visible": false,
+   "path": [
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "presentation",
+   "cls": " osano-cm-info__info-dialog-header osano-cm-info-dialog-header ",
+   "visible": false,
+   "path": [
+    "div[role=presentation]",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "p",
+   "role": "heading",
+   "id": "0be96e5e-dc1a-4bde-801e-589cb0ca9e3b__label",
+   "cls": " osano-cm-info-dialog-header__header osano-cm-header ",
+   "aria": {
+    "hidden": "true"
+   },
+   "text": "Storage Preferences",
+   "visible": false,
+   "path": [
+    "div[role=presentation]",
+    "div[role=presentation]",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": " osano-cm-info-dialog-header__close osano-cm-close ",
+   "aria": {
+    "label": "Close Cookie Preferences"
+   },
+   "visible": false,
+   "path": [
+    "div[role=presentation]",
+    "div[role=presentation]",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "line",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "svg",
+    "button",
+    "div[role=presentation]",
+    "div[role=presentation]",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "line",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "svg",
+    "button",
+    "div[role=presentation]",
+    "div[role=presentation]",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "presentation",
+   "cls": " osano-cm-info__info-views osano-cm-info-views osano-cm-info-views--hidden osano",
+   "visible": false,
+   "path": [
+    "div[role=presentation]",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "group relative text-sm text-gray-900 hover:text-primary font-medium w-full flex-",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Solutions",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "ul",
+    "div",
+    "nav",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "group relative text-sm text-gray-900 hover:text-primary font-medium w-full flex-",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Platform",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "ul",
+    "div",
+    "nav",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "group relative text-sm text-gray-900 hover:text-primary font-medium w-full flex-",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Resources",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "ul",
+    "div",
+    "nav",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "group relative text-sm text-gray-900 hover:text-primary font-medium w-full flex-",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Services",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "ul",
+    "div",
+    "nav",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "group relative text-sm text-gray-900 hover:text-primary font-medium w-full flex-",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "About",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "ul",
+    "div",
+    "nav",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "submit",
+   "cls": "flex items-center hover:text-primary hover:scale-105 hover:bg-gray-50 p-2 rounde",
+   "aria": {
+    "label": "Search"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div",
+    "header"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "p-2 flex hover:text-primary hover:scale-105 hover:bg-gray-50 lg:hidden",
+   "visible": false,
+   "path": [
+    "div",
+    "astro-island",
+    "div",
+    "div",
+    "header",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "link items-center gap-1.5 hover:text-primary hover:scale-105 hover:bg-gray-50 p-",
+   "aria": {
+    "label": "Select region",
+    "haspopup": "dialog",
+    "expanded": "false"
+   },
+   "text": "English",
+   "visible": true,
+   "path": [
+    "div",
+    "astro-island",
+    "div",
+    "div",
+    "header",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "link items-center hover:text-primary hover:scale-105 hover:bg-gray-50 p-2 rounde",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "astro-island",
+    "div",
+    "div",
+    "header",
+    "div"
+   ]
+  },
+  {
+   "tag": "h1",
+   "cls": "text-3xl sm:text-4xl font-bold tracking-tight mb-6",
+   "text": "ABX Specialist",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "main",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "!text-2xl",
+   "text": "About AvePoint",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "h3",
+   "cls": "text-lg font-semibold leading-none tracking-tight",
+   "text": "Why AvePoint?",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "button",
+   "cls": "inline-flex items-center justify-center whitespace-nowrap font-medium ring-offse",
+   "aria": {
+    "disabled": "false"
+   },
+   "text": "Life at AvePoint",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "cls": "text-lg font-semibold leading-none tracking-tight",
+   "text": "Similar Job Positions",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "text-3xl font-bold mb-4 text-white",
+   "text": "Ready to see AvePoint in action?",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "footer"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "email",
+   "cls": "w-full sm:flex-1 px-4 h-12 bg-white/10 backdrop-blur-sm\n                     bor",
+   "placeholder": "Enter your email address",
+   "label": "Enter your email address",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "inline-flex items-center justify-center w-full sm:w-auto whitespace-nowrap bg-wh",
+   "text": "Get a Demo",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_1_",
+   "cls": "group flex w-full items-center justify-between pt-4 text-sm font-bold uppercase ",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Solutions",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_9_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_1_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_6p_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Need",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_16p_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_6p_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_ap_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Industry",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_1ap_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_ap_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_ep_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Environment",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_1ep_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_ep_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_ip_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Partners",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_1ip_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_ip_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_2_",
+   "cls": "group flex w-full items-center justify-between pt-4 text-sm font-bold uppercase ",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Platform",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_a_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_2_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_6q_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "For Organizations",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_mq_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_6q_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_aq_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "For Partners",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_qq_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_aq_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_3_",
+   "cls": "group flex w-full items-center justify-between pt-4 text-sm font-bold uppercase ",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Resources",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_b_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_3_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_6r_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "By Type",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_mr_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_6r_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_ar_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "By Topic",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_qr_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_ar_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_4_",
+   "cls": "group flex w-full items-center justify-between pt-4 text-sm font-bold uppercase ",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Services",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_c_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_4_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_6s_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "AvePoint Client Services",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_es_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_6s_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_5_",
+   "cls": "group flex w-full items-center justify-between pt-4 text-sm font-bold uppercase ",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "About",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_d_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_5_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "astro-island",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r25R_6t_",
+   "cls": "group flex flex-row w-full h-full gap-3 items-center tap-highlight-transparent o",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Company",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r25R_et_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r25R_6t_"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=region]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r26R_1h_",
+   "cls": "group flex w-full items-center justify-between py-2.5 font-semibold text-[#d1d5d",
+   "aria": {
+    "expanded": "true",
+    "controls": "radix-_r26R_9h_"
+   },
+   "text": "Need",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r26R_9h_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r26R_1h_"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r26R_2h_",
+   "cls": "group flex w-full items-center justify-between py-2.5 font-semibold text-[#d1d5d",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Industry",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r26R_ah_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r26R_2h_"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r26R_3h_",
+   "cls": "group flex w-full items-center justify-between py-2.5 font-semibold text-[#d1d5d",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Environment",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r26R_bh_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r26R_3h_"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r26R_4h_",
+   "cls": "group flex w-full items-center justify-between py-2.5 font-semibold text-[#d1d5d",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "Partners",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r26R_ch_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r26R_4h_"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r26R_1i_",
+   "cls": "group flex w-full items-center justify-between py-2.5 font-semibold text-[#d1d5d",
+   "aria": {
+    "expanded": "true",
+    "controls": "radix-_r26R_5i_"
+   },
+   "text": "For Organizations",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r26R_5i_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r26R_1i_"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "radix-_r26R_2i_",
+   "cls": "group flex w-full items-center justify-between py-2.5 font-semibold text-[#d1d5d",
+   "aria": {
+    "expanded": "false"
+   },
+   "text": "For Partners",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "region",
+   "id": "radix-_r26R_6i_",
+   "cls": "overflow-hidden data-[state=closed]:h-0 data-[state=closed]:animate-slide-up dat",
+   "aria": {
+    "labelledby": "radix-_r26R_2i_"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "dd",
+    "dl",
+    "div",
+    "astro-island"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "footer-back-to-top",
+   "cls": "flex items-center gap-1.5 text-xs transition-colors hover:text-white ml-2",
+   "aria": {
+    "label": "Back to top"
+   },
+   "text": "Back to top",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "footer",
+    "div"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,8243 @@
+{
+ "kind": "applypilot-page-structure",
+ "version": 1,
+ "capturedAt": "2026-09-25T00:50:56.926Z",
+ "host": "job-boards.greenhouse.io",
+ "path": "/embed/job_app",
+ "title": "Job Application for Applications Administrator, Home Lending at SoFi",
+ "nodeCount": 453,
+ "truncated": false,
+ "note": "Structure only: no field values, checked states or files are captured.",
+ "nodes": [
+  {
+   "tag": "div",
+   "role": "separator",
+   "cls": "divider",
+   "visible": true,
+   "path": [
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "section-header font-primary",
+   "text": "Apply for this job",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn btn--pill btn--secondary",
+   "aria": {
+    "disabled": "false"
+   },
+   "text": "Autofill my application",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "first_name-label",
+   "cls": "label label",
+   "text": "First Name*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "first_name",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "First Name",
+    "describedby": "first_name-description first_name-error first_name-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "First Name*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "last_name-label",
+   "cls": "label label",
+   "text": "Last Name*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "last_name",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Last Name",
+    "describedby": "last_name-description last_name-error last_name-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Last Name*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "email-label",
+   "cls": "label label",
+   "text": "Email*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "email",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Email",
+    "describedby": "email-description email-error email-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Email*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "fieldset",
+   "cls": "phone-input",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "legend",
+   "cls": "visually-hidden",
+   "text": "Phone",
+   "visible": true,
+   "path": [
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "country-label",
+   "cls": "label select__label",
+   "text": "Country*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "fieldset",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "country",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "country-label",
+    "describedby": "country-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Country*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "phone-label",
+   "cls": "label label",
+   "text": "Phone*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "iti__selected-country",
+   "aria": {
+    "label": "Change country, selected United States (+1)",
+    "haspopup": "dialog",
+    "expanded": "false",
+    "controls": "iti-0__dropdown-content"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "fieldset"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "dialog",
+   "id": "iti-0__dropdown-content",
+   "cls": "iti__dropdown-content iti__hide ",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "fieldset"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "search",
+   "role": "combobox",
+   "id": "iti-0__search-input",
+   "cls": "iti__search-input",
+   "placeholder": "Search",
+   "aria": {
+    "label": "Search",
+    "expanded": "true",
+    "controls": "iti-0__country-listbox",
+    "autocomplete": "list"
+   },
+   "label": "Search",
+   "visible": false,
+   "path": [
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "iti__search-clear iti__hide",
+   "aria": {
+    "label": "Clear search"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "listbox",
+   "id": "iti-0__country-listbox",
+   "cls": "iti__country-list",
+   "aria": {
+    "label": "List of countries"
+   },
+   "text": "Afghanistan+93\u00c5land Islands+358Albania+355Algeria+213American Samoa+1Andorra+376Angola+244Anguilla+1Antigua & Barbuda+1A\u2026",
+   "visible": false,
+   "path": [
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-af",
+   "cls": "iti__country iti__highlight",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Afghanistan+93",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ax",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "\u00c5land Islands+358",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-al",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Albania+355",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-dz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Algeria+213",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-as",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "American Samoa+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ad",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Andorra+376",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ao",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Angola+244",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ai",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Anguilla+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ag",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Antigua & Barbuda+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ar",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Argentina+54",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-am",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Armenia+374",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-aw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Aruba+297",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ac",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Ascension Island+247",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-au",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Australia+61",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-at",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Austria+43",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-az",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Azerbaijan+994",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bs",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bahamas+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bh",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bahrain+973",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bd",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bangladesh+880",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bb",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Barbados+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-by",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Belarus+375",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-be",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Belgium+32",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Belize+501",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bj",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Benin+229",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bermuda+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bt",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bhutan+975",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bo",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bolivia+591",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ba",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bosnia & Herzegovina+387",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Botswana+267",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-br",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Brazil+55",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-io",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "British Indian Ocean Territory+246",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-vg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "British Virgin Islands+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Brunei+673",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Bulgaria+359",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bf",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Burkina Faso+226",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bi",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Burundi+257",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-kh",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cambodia+855",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cameroon+237",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ca",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Canada+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cv",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cape Verde+238",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bq",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Caribbean Netherlands+599",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ky",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cayman Islands+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cf",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Central African Republic+236",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-td",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Chad+235",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cl",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Chile+56",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "China+86",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cx",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Christmas Island+61",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cc",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cocos (Keeling) Islands+61",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-co",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Colombia+57",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-km",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Comoros+269",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Congo - Brazzaville+242",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cd",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Congo - Kinshasa+243",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ck",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cook Islands+682",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Costa Rica+506",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ci",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "C\u00f4te d\u2019Ivoire+225",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-hr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Croatia+385",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cu",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cuba+53",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cura\u00e7ao+599",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cy",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Cyprus+357",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-cz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Czechia+420",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-dk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Denmark+45",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-dj",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Djibouti+253",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-dm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Dominica+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-do",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Dominican Republic+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ec",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Ecuador+593",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-eg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Egypt+20",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sv",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "El Salvador+503",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gq",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Equatorial Guinea+240",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-er",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Eritrea+291",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ee",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Estonia+372",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Eswatini+268",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-et",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Ethiopia+251",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-fk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Falkland Islands+500",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-fo",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Faroe Islands+298",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-fj",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Fiji+679",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-fi",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Finland+358",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-fr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "France+33",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gf",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "French Guiana+594",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pf",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "French Polynesia+689",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ga",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Gabon+241",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Gambia+220",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ge",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Georgia+995",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-de",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Germany+49",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gh",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Ghana+233",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gi",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Gibraltar+350",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Greece+30",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gl",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Greenland+299",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gd",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Grenada+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gp",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Guadeloupe+590",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gu",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Guam+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gt",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Guatemala+502",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Guernsey+44",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Guinea+224",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Guinea-Bissau+245",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gy",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Guyana+592",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ht",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Haiti+509",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-hn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Honduras+504",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-hk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Hong Kong SAR China+852",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-hu",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Hungary+36",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-is",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Iceland+354",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-in",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "India+91",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-id",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Indonesia+62",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ir",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Iran+98",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-iq",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Iraq+964",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ie",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Ireland+353",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-im",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Isle of Man+44",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-il",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Israel+972",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-it",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Italy+39",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-jm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Jamaica+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-jp",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Japan+81",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-je",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Jersey+44",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-jo",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Jordan+962",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-kz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Kazakhstan+7",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ke",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Kenya+254",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ki",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Kiribati+686",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-xk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Kosovo+383",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-kw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Kuwait+965",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-kg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Kyrgyzstan+996",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-la",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Laos+856",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-lv",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Latvia+371",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-lb",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Lebanon+961",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ls",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Lesotho+266",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-lr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Liberia+231",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ly",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Libya+218",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-li",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Liechtenstein+423",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-lt",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Lithuania+370",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-lu",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Luxembourg+352",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mo",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Macao SAR China+853",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Madagascar+261",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Malawi+265",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-my",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Malaysia+60",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mv",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Maldives+960",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ml",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Mali+223",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mt",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Malta+356",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mh",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Marshall Islands+692",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mq",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Martinique+596",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Mauritania+222",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mu",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Mauritius+230",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-yt",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Mayotte+262",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mx",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Mexico+52",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-fm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Micronesia+691",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-md",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Moldova+373",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mc",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Monaco+377",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Mongolia+976",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-me",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Montenegro+382",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ms",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Montserrat+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ma",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Morocco+212",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Mozambique+258",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Myanmar (Burma)+95",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-na",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Namibia+264",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-nr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Nauru+674",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-np",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Nepal+977",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-nl",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Netherlands+31",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-nc",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "New Caledonia+687",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-nz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "New Zealand+64",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ni",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Nicaragua+505",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ne",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Niger+227",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ng",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Nigeria+234",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-nu",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Niue+683",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-nf",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Norfolk Island+672",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-kp",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "North Korea+850",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "North Macedonia+389",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mp",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Northern Mariana Islands+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-no",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Norway+47",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-om",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Oman+968",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Pakistan+92",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Palau+680",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ps",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Palestinian Territories+970",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pa",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Panama+507",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Papua New Guinea+675",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-py",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Paraguay+595",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pe",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Peru+51",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ph",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Philippines+63",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pl",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Poland+48",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pt",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Portugal+351",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Puerto Rico+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-qa",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Qatar+974",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-re",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "R\u00e9union+262",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ro",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Romania+40",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ru",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Russia+7",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-rw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Rwanda+250",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ws",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Samoa+685",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "San Marino+378",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-st",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "S\u00e3o Tom\u00e9 & Pr\u00edncipe+239",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sa",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Saudi Arabia+966",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Senegal+221",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-rs",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Serbia+381",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sc",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Seychelles+248",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sl",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Sierra Leone+232",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Singapore+65",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sx",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Sint Maarten+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Slovakia+421",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-si",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Slovenia+386",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sb",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Solomon Islands+677",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-so",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Somalia+252",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-za",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "South Africa+27",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-kr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "South Korea+82",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ss",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "South Sudan+211",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-es",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Spain+34",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-lk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Sri Lanka+94",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-bl",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "St. Barth\u00e9lemy+590",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sh",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "St. Helena+290",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-kn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "St. Kitts & Nevis+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-lc",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "St. Lucia+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-mf",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "St. Martin+590",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-pm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "St. Pierre & Miquelon+508",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-vc",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "St. Vincent & Grenadines+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sd",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Sudan+249",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Suriname+597",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sj",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Svalbard & Jan Mayen+47",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-se",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Sweden+46",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ch",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Switzerland+41",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-sy",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Syria+963",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Taiwan+886",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tj",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Tajikistan+992",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Tanzania+255",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-th",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Thailand+66",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tl",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Timor-Leste+670",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tg",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Togo+228",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tk",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Tokelau+690",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-to",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Tonga+676",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tt",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Trinidad & Tobago+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Tunisia+216",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tr",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Turkey+90",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Turkmenistan+993",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tc",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Turks & Caicos Islands+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-tv",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Tuvalu+688",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-vi",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "U.S. Virgin Islands+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ug",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Uganda+256",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ua",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Ukraine+380",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ae",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "United Arab Emirates+971",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-gb",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "United Kingdom+44",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-us",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "United States+1",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-uy",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Uruguay+598",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-uz",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Uzbekistan+998",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-vu",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Vanuatu+678",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-va",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Vatican City+39",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ve",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Venezuela+58",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-vn",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Vietnam+84",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-wf",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Wallis & Futuna+681",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-eh",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Western Sahara+212",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-ye",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Yemen+967",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-zm",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Zambia+260",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "option",
+   "id": "iti-0__item-zw",
+   "cls": "iti__country ",
+   "aria": {
+    "selected": "false"
+   },
+   "text": "Zimbabwe+263",
+   "visible": false,
+   "path": [
+    "ul[role=listbox]",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "tel",
+   "id": "phone",
+   "cls": "input input__single-line iti__tel-input",
+   "aria": {
+    "label": "Phone",
+    "describedby": "phone-description phone-error phone-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Phone*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "fieldset",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "candidate-location-label",
+   "cls": "label select__label",
+   "text": "Location (City)*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "candidate-location",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "candidate-location-label",
+    "describedby": "react-select-candidate-location-placeholder candidate-location-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Location (City)*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Location (City)*",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn--tertiary",
+   "text": "Locate me",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "group",
+   "cls": "file-upload",
+   "aria": {
+    "labelledby": "upload-label-resume",
+    "required": "true"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn btn--pill",
+   "text": "Attach",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "visually-hidden",
+   "text": "Attach",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "file",
+   "id": "resume",
+   "cls": "visually-hidden",
+   "label": "Attach",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn btn--pill",
+   "text": "Dropbox",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn btn--pill",
+   "text": "Enter manually",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "visually-hidden",
+   "text": "Enter manually",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "group",
+   "cls": "file-upload",
+   "aria": {
+    "labelledby": "upload-label-cover_letter",
+    "required": "false"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn btn--pill",
+   "text": "Attach",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "visually-hidden",
+   "text": "Attach",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "file",
+   "id": "cover_letter",
+   "cls": "visually-hidden",
+   "label": "Attach",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn btn--pill",
+   "text": "Dropbox",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "btn btn--pill",
+   "text": "Enter manually",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "visually-hidden",
+   "text": "Enter manually",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=group]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "degree--0-label",
+   "cls": "label select__label",
+   "text": "Degree*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "degree--0",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "degree--0-label",
+    "describedby": "react-select-degree--0-placeholder degree--0-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Degree*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Degree*",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "add-another-button",
+   "text": "Add another",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753276003-label",
+   "cls": "label label",
+   "text": "LinkedIn Profile",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753276003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "LinkedIn Profile",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "false",
+    "invalid": "false"
+   },
+   "label": "LinkedIn Profile",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753277003-label",
+   "cls": "label label",
+   "text": "Website",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753277003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Website",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "false",
+    "invalid": "false"
+   },
+   "label": "Website",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753278003-label",
+   "cls": "label select__label",
+   "text": "Will you now or in the future require SoFi to commence (\u201csponsor\u201d) an immigration case in order to employ you?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753278003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Will you now or in the future require SoFi to commence (\u201csponsor\u201d) an immigration case in order to employ you?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Will you now or in the future require SoFi to commence (\u201csponsor\u201d) an immigration case in order to employ you?*",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753279003-label",
+   "cls": "label select__label",
+   "text": "Have you worked at or been a consultant for SoFi or any company subsequently acquired by a SoFi entity (including Galile\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753279003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Have you worked at or been a consultant for SoFi or any company subsequently acquired by a SoFi entity (including Galile\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753280003-label",
+   "cls": "label select__label",
+   "text": "Would you like to receive marketing communications about careers at SoFi and SoFi Tech Solutions?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753280003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Would you like to receive marketing communications about careers at SoFi and SoFi Tech Solutions?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Select...",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753281003-label",
+   "cls": "label label",
+   "text": "Preferred Name (if different from legal name)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753281003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Preferred Name (if different from legal name)",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "false",
+    "invalid": "false"
+   },
+   "label": "Preferred Name (if different from legal name)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753282003-label",
+   "cls": "label select__label",
+   "text": "Are you authorized to lawfully work in the country where this role is located?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753282003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Are you authorized to lawfully work in the country where this role is located?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Are you authorized to lawfully work in the country where this role is located?*",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753283003-label",
+   "cls": "label select__label",
+   "text": "I acknowledge that by providing my phone number, I agree to receive text messages from SoFi Technologies in relation to \u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753283003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "I acknowledge that by providing my phone number, I agree to receive text messages from SoFi Technologies in relation to \u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Select...",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753284003-label",
+   "cls": "label select__label",
+   "text": "Are you currently employed with or have been employed by Deloitte? Deloitte is our external financial auditor and due di\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753284003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Are you currently employed with or have been employed by Deloitte? Deloitte is our external financial auditor and due di\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Select...",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753285003-label",
+   "cls": "label select__label",
+   "text": "Are you currently a SoFi or SoFi Tech Solutions (formerly Galileo) employee?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753285003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Are you currently a SoFi or SoFi Tech Solutions (formerly Galileo) employee?*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Select...",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753286003-label",
+   "cls": "label label",
+   "text": "Today's Date of Application (MM/DD/YY Format)*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753286003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Today's Date of Application (MM/DD/YY Format)",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Today's Date of Application (MM/DD/YY Format)*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753287003-label",
+   "cls": "label select__label",
+   "text": "Do you currently hold, or intend to hold, any FINRA licenses if employed by SoFi? (i.e., Series 7, Series 24, Series 27,\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753287003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Do you currently hold, or intend to hold, any FINRA licenses if employed by SoFi? (i.e., Series 7, Series 24, Series 27,\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Select...",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "fieldset",
+   "id": "question_32753288003[]",
+   "cls": "checkbox",
+   "aria": {
+    "required": "true"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "legend",
+   "cls": "label checkbox__description",
+   "text": "What FINRA license(s), if any, do you currently hold? *",
+   "visible": true,
+   "path": [
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842318003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "N/A",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "N/A",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842319003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 3 (S3)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 3 (S3)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842320003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 4 (S4)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 4 (S4)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842321003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 6 (S6)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 6 (S6)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842322003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 7 (S7)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 7 (S7)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842323003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 9 (S9)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 9 (S9)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842324003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 10 (S10)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 10 (S10)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842325003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 14 (S14)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 14 (S14)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842326003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 16 (S16)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 16 (S16)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842327003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 22 (S22)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 22 (S22)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842328003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 23 (S23)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 23 (S23)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842329003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 24 (S24)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 24 (S24)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842330003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 26 (S26)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 26 (S26)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842331003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 27 (S27)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 27 (S27)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842332003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 28 (S28)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 28 (S28)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842333003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 30 (S30)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 30 (S30)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842334003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 31 (S31)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 31 (S31)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842335003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 32 (S23)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 32 (S23)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842336003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 34 (S34)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 34 (S34)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842337003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 39 (S39)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 39 (S39)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842338003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 50 (S50)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 50 (S50)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842339003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 51 (S51)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 51 (S51)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842340003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 52 (S52)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 52 (S52)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842341003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 53 (S53)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 53 (S53)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842342003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 54 (S54)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 54 (S54)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842343003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 57 (S57)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 57 (S57)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842344003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 63 (S63)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 63 (S63)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842345003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 65 (S65)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 65 (S65)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842346003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 66 (S66)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 66 (S66)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842347003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 79 (S79)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 79 (S79)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842348003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 82 (S82)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 82 (S82)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842349003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 86 (S86)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 86 (S86)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842350003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 87 (S87)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 87 (S87)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "question_32753288003[]_170842351003",
+   "name": "question_32753288003[]",
+   "aria": {
+    "describedby": "question_<digits>[]-description question_<digits>[]-error",
+    "invalid": "false"
+   },
+   "label": "Series 99 (S99)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Series 99 (S99)",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753289003-label",
+   "cls": "label select__label",
+   "text": "Are you currently located within, or planning to relocate to be within, a reasonable commute of any of this job's listed\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753289003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Are you currently located within, or planning to relocate to be within, a reasonable commute of any of this job's listed\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Select...",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753290003-label",
+   "cls": "label label",
+   "text": "Home Address Line 1*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753290003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Home Address Line 1",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Home Address Line 1*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753291003-label",
+   "cls": "label label",
+   "text": "Home Address Line 2",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753291003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Home Address Line 2",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "false",
+    "invalid": "false"
+   },
+   "label": "Home Address Line 2",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753292003-label",
+   "cls": "label label",
+   "text": "Home Address City*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753292003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Home Address City",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Home Address City*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753293003-label",
+   "cls": "label label",
+   "text": "Home Address State*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753293003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Home Address State",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Home Address State*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753294003-label",
+   "cls": "label label",
+   "text": "Home Address Zip Code*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753294003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Home Address Zip Code",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "true",
+    "invalid": "false"
+   },
+   "label": "Home Address Zip Code*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753295003-label",
+   "cls": "label select__label",
+   "text": "Home Address Country*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "question_32753295003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "question_<digits>-label",
+    "describedby": "react-select-question_<digits>-placeholder question_<digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "true",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Home Address Country*",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "cls": "remix-css-1a0ro4n-requiredInput",
+   "aria": {
+    "hidden": "true"
+   },
+   "label": "Home Address Country*",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "question_32753296003-label",
+   "cls": "label label",
+   "text": "Home Address CEP (Brazil Only)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "question_32753296003",
+   "cls": "input input__single-line",
+   "aria": {
+    "label": "Home Address CEP (Brazil Only)",
+    "describedby": "question_<digits>-description question_<digits>-error question_<digits>-help",
+    "required": "false",
+    "invalid": "false"
+   },
+   "label": "Home Address CEP (Brazil Only)",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "cls": "section-header font-primary",
+   "text": "Demographics: US",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "4000546003-label",
+   "cls": "label select__label",
+   "text": "Gender",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "4000546003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "<digits>-label",
+    "describedby": "react-select-<digits>-placeholder <digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "false",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Gender",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "4000547003-label",
+   "cls": "label select__label",
+   "text": "Race: Please select the racial category with which you most closely identify with.",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "4000547003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "<digits>-label",
+    "describedby": "react-select-<digits>-placeholder <digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "false",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Race: Please select the racial category with which you most closely identify with.",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "4001018003-label",
+   "cls": "label select__label",
+   "text": "If you selected \"Two or more races\", please check all racial categories with which you identify with.",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "4001018003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "<digits>-label",
+    "describedby": "react-select-<digits>-placeholder <digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "false",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "If you selected \"Two or more races\", please check all racial categories with which you identify with.",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "id": "4001019003-label",
+   "cls": "label select__label",
+   "text": "Veteran Status",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "log",
+   "cls": "remix-css-7pg0cj-a11yText",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "form",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "role": "combobox",
+   "id": "4001019003",
+   "cls": "select__input",
+   "aria": {
+    "labelledby": "<digits>-label",
+    "describedby": "react-select-<digits>-placeholder <digits>-error",
+    "haspopup": "true",
+    "expanded": "false",
+    "autocomplete": "list",
+    "required": "false",
+    "invalid": "false",
+    "activedescendant": ""
+   },
+   "label": "Veteran Status",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "icon-button icon-button--sm",
+   "aria": {
+    "label": "Toggle flyout"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "gdpr_demographic_data_consent_given_1",
+   "name": "gdpr_demographic_data_consent_given",
+   "cls": "checkbox--full-width",
+   "aria": {
+    "describedby": "gdpr_demographic_data_consent_given-description gdpr_demographic_data_consent_given-error",
+    "required": "false",
+    "invalid": "false"
+   },
+   "label": "By checking this box, I consent to SoFi collecting, storing, and processing my responses to the demographic data surveys\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "By checking this box, I consent to SoFi collecting, storing, and processing my responses to the demographic data surveys\u2026",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "submit",
+   "cls": "btn btn--pill",
+   "aria": {
+    "disabled": "false"
+   },
+   "text": "Submit application",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "main"
+   ]
+  },
+  {
+   "tag": "iframe",
+   "role": "presentation",
+   "name": "a-rytscqt13feo",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "textarea",
+   "id": "g-recaptcha-response-100000",
+   "name": "g-recaptcha-response",
+   "cls": "g-recaptcha-response",
+   "label": "",
+   "visible": false,
+   "path": [
+    "div",
+    "div"
+   ]
+  }
+ ]
+}

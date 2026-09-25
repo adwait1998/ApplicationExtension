@@ -1,0 +1,2915 @@
+{
+ "kind": "applypilot-page-structure",
+ "version": 1,
+ "capturedAt": "2026-09-25T00:51:12.777Z",
+ "host": "jobs.lever.co",
+ "path": "/spotify/2193db3f-77c5-43b8-b030-8f92c9882bf1/apply",
+ "title": "Spotify - Android Engineer - Experience",
+ "nodeCount": 210,
+ "truncated": false,
+ "note": "Structure only: no field values, checked states or files are captured.",
+ "nodes": [
+  {
+   "tag": "div",
+   "role": "dialog",
+   "cls": "cc-window cc-banner cc-type-opt-in cc-theme-block cc-bottom ",
+   "aria": {
+    "label": "cookieconsent",
+    "describedby": "cookieconsent:desc"
+   },
+   "visible": true,
+   "path": []
+  },
+  {
+   "tag": "button",
+   "cls": "button button-sm cc-btn cc-deny",
+   "text": "Deny",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "button button-sm button-primary cc-btn cc-allow",
+   "text": "Accept",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]"
+   ]
+  },
+  {
+   "tag": "h4",
+   "cls": "text-white",
+   "text": "Privacy Notice",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div[role=dialog]"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "button button-sm cc-btn cc-deny",
+   "text": "Deny",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "button button-sm button-primary cc-btn cc-allow",
+   "text": "Accept",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]"
+   ]
+  },
+  {
+   "tag": "h2",
+   "text": "Android Engineer - Experience",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Submit your application",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "select",
+   "name": "opportunityLocationId",
+   "cls": "opportunity-location",
+   "label": "",
+   "options": [
+    "Select...",
+    "London",
+    "Stockholm"
+   ],
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "file",
+   "id": "resume-upload-input",
+   "name": "resume",
+   "cls": "application-file-input invisible-resume-upload",
+   "label": "Resume/CV \u2731ATTACH RESUME/CVCouldn't auto-read resume.Analyzing resume...Success!",
+   "visible": true,
+   "path": [
+    "a",
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "name": "name",
+   "label": "Full name\u2731",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "He/him",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "She/her",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "They/them",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "Xe/xem",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "Ze/hir",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "Ey/em",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "Hir/hir",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "Fae/faer",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "pronouns",
+   "cls": "standardPronounsOption",
+   "label": "Hu/hu",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "div",
+    "div",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "useNameOnlyPronounsOption",
+   "name": "pronouns",
+   "label": "Use name only",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "customPronounsOption",
+   "label": "Custom",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "customPronounsTextField",
+   "name": "pronouns",
+   "cls": "card-field-input",
+   "placeholder": "Write here...",
+   "label": "Write here...",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "email",
+   "name": "email",
+   "label": "Email\u2731",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "name": "phone",
+   "label": "Phone \u2731",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "location-input",
+   "name": "location",
+   "cls": "location-input",
+   "label": "Current location \u2731No location found. Try entering a different locationLoading",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "id": "selected-location",
+   "name": "selectedLocation",
+   "label": "Current location \u2731No location found. Try entering a different locationLoading",
+   "visible": false,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "name": "org",
+   "label": "Current company \u2731",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Links",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "name": "urls[LinkedIn]",
+   "label": "LinkedIn URL",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "name": "urls[GitHub]",
+   "label": "GitHub URL",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "name": "urls[Portfolio]",
+   "label": "Portfolio URL",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "form",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "name": "urls[Other]",
+   "label": "Other website",
+   "visible": true,
+   "path": [
+    "div",
+    "label",
+    "li",
+    "ul",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Previous Spotify Employment",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "cards[92a51f92-d683-4f7b-be57-e25376f60abe][baseTemplate]",
+   "label": "Previous Spotify Employment",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]",
+   "label": "No",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]",
+   "label": "Yes - Intern",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]",
+   "label": "Yes - Full Time Employment",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Role requires candidate to be based in London or Stockholm",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "cards[d090becd-07b8-4536-ac84-dbf3bc07e03d][baseTemplate]",
+   "label": "Role requires candidate to be based in London or Stockholm",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "cards[d090becd-07b8-4536-ac84-dbf3bc07e03d][field0]",
+   "label": "Yes",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "cards[d090becd-07b8-4536-ac84-dbf3bc07e03d][field0]",
+   "label": "No",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "cards[d090becd-07b8-4536-ac84-dbf3bc07e03d][field0]",
+   "label": "N/A (I\u2019m currently based in Stockholm or London)",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Years of Android Experience",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "cards[5da55f6b-ce2a-4247-b741-f1e0b0de33c2][baseTemplate]",
+   "label": "Years of Android Experience",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "cards[5da55f6b-ce2a-4247-b741-f1e0b0de33c2][field0]",
+   "label": "0-4",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "cards[5da55f6b-ce2a-4247-b741-f1e0b0de33c2][field0]",
+   "label": "4-6",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "cards[5da55f6b-ce2a-4247-b741-f1e0b0de33c2][field0]",
+   "label": "6-9",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "cards[5da55f6b-ce2a-4247-b741-f1e0b0de33c2][field0]",
+   "label": "9+",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "div",
+    "li"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Demographic Survey",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "select",
+   "cls": "candidate-location",
+   "label": "What is your location?",
+   "options": [
+    "Select...",
+    "Afghanistan",
+    "Albania",
+    "Algeria",
+    "American Samoa",
+    "Andorra",
+    "Angola",
+    "Anguilla",
+    "Antarctica",
+    "Antigua and Barbuda",
+    "Argentina",
+    "Armenia",
+    "Aruba",
+    "Australia",
+    "Austria",
+    "Azerbaijan",
+    "Bahamas",
+    "Bahrain",
+    "Bangladesh",
+    "Barbados",
+    "Belarus",
+    "Belgium",
+    "Belize",
+    "Benin",
+    "Bermuda",
+    "Bhutan",
+    "Bolivia",
+    "Bonaire, Sint Eustatius and Saba",
+    "Bosnia and Herzegovina",
+    "Botswana",
+    "Bouvet Island",
+    "Brazil",
+    "British Indian Ocean Territory",
+    "Brunei",
+    "Bulgaria",
+    "Burkina Faso",
+    "Burundi",
+    "Cambodia",
+    "Cameroon",
+    "Canada",
+    "Cape Verde",
+    "Cayman Islands",
+    "Central African Republic",
+    "Chad",
+    "Chile",
+    "China",
+    "Christmas Island",
+    "Cocos (Keeling) Islands",
+    "Colombia",
+    "Comoros",
+    "Congo",
+    "Congo, the Democratic Republic of the",
+    "Cook Islands",
+    "Costa Rica",
+    "Croatia",
+    "Cuba",
+    "Cura\u00e7ao",
+    "Cyprus",
+    "Czech Republic",
+    "Denmark"
+   ],
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "label",
+    "div",
+    "div",
+    "form"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Demographic Questions for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][baseTemplate]",
+   "label": "Demographic Questions for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][surveyId]",
+   "label": "Demographic Questions for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][candidateSelectedLocation]",
+   "label": "Demographic Questions for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field0]",
+   "label": "Woman",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field0]",
+   "label": "Man",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field0]",
+   "label": "Non-binary",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field0]",
+   "label": "I use another term",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field0]",
+   "label": "Prefer not to disclose",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "American Indian or Alaska Native",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "Asian",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "Black or African American",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "Hispanic or Latino",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "Native Hawaiian or Other Pacific Islander",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "Two or More Races",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "White (Not Hispanic or Latino)",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field1]",
+   "label": "Prefer not to disclose",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field2]",
+   "label": "Yes",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field2]",
+   "label": "No",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[cbf1b3c9-4157-4ddd-a66e-41dae0d8badb][responses][field2]",
+   "label": "Prefer not to disclose",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Demographic Question for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][baseTemplate]",
+   "label": "Demographic Question for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][surveyId]",
+   "label": "Demographic Question for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][candidateSelectedLocation]",
+   "label": "Demographic Question for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][responses][field0]",
+   "label": "Woman",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][responses][field0]",
+   "label": "Man",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][responses][field0]",
+   "label": "Non-binary",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][responses][field0]",
+   "label": "I use another term",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[380b7dba-8003-486d-b65d-28bf53a52415][responses][field0]",
+   "label": "Prefer not to disclose",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Demographic Survey for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[414f4bab-5e29-4f62-ba71-2e6d2442df59][baseTemplate]",
+   "label": "Demographic Survey for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[414f4bab-5e29-4f62-ba71-2e6d2442df59][surveyId]",
+   "label": "Demographic Survey for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[414f4bab-5e29-4f62-ba71-2e6d2442df59][candidateSelectedLocation]",
+   "label": "Demographic Survey for Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[414f4bab-5e29-4f62-ba71-2e6d2442df59][responses][field0]",
+   "label": "Woman",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[414f4bab-5e29-4f62-ba71-2e6d2442df59][responses][field0]",
+   "label": "Man",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[414f4bab-5e29-4f62-ba71-2e6d2442df59][responses][field0]",
+   "label": "Choose Not to Disclose",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "h4",
+   "text": "Demographic Questions from Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][baseTemplate]",
+   "label": "Demographic Questions from Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][surveyId]",
+   "label": "Demographic Questions from Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][candidateSelectedLocation]",
+   "label": "Demographic Questions from Spotify",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field0]",
+   "label": "Woman",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field0]",
+   "label": "Man",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field0]",
+   "label": "Non-binary",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field0]",
+   "label": "I use another term",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field0]",
+   "label": "Prefer not to disclose",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Any other ethnic group",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Arab",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Asian/Asian British: Any other Asian background",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Asian/Asian British: Bangladeshi",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Asian/Asian British: Chinese",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Asian/Asian British: Indian",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Asian/Asian British: Pakistani",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Black/Black British: African",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Black/Black British: Any other Black/ African / Caribbean background",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Black/Black British: Caribbean",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Mixed: Any other mixed background",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Mixed: White and Asian",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Mixed: White and Black African",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Mixed: White and Black Caribbean",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "Prefer not to disclose",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "White: Any other White background",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "White: English/Welsh/Scottish/Northern Irish/British",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "White: Irish",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "name": "surveysResponses[46c5c4bd-a2d2-43e8-85a4-eefa9d51dff2][responses][field1]",
+   "label": "White: Irish Traveller / Minkiers / Pavees (Previously known as Gypsy) 3",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "accountId",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "linkedInData",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "origin",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "referer",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "id": "applicant-timezone",
+   "name": "timezone",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "socialReferralKey",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "socialSource",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "resumeStorageId",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "id": "hcaptchaResponseInput",
+   "name": "h-captcha-response",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "submit",
+   "id": "hcaptchaSubmitBtn",
+   "cls": "hidden",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "source",
+   "label": "Years of Android Experience How many years of full-time, professional android engineering experience do you have?<digits\u2026",
+   "visible": false,
+   "path": [
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "hidden",
+   "name": "consent[marketing]",
+   "label": "Spotify has my consent to contact me about future job opportunities.",
+   "visible": false,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "consent[marketing]",
+   "label": "Spotify has my consent to contact me about future job opportunities.",
+   "visible": true,
+   "path": [
+    "label",
+    "li",
+    "ul",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "btn-submit",
+   "cls": "postings-btn template-btn-submit hex-color",
+   "text": "Submit application",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div"
+   ]
+  }
+ ]
+}

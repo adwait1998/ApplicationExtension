@@ -1,0 +1,3310 @@
+{
+ "kind": "applypilot-page-structure",
+ "version": 1,
+ "capturedAt": "2026-09-25T00:50:56.616Z",
+ "host": "www.sofi.com",
+ "path": "/careers/job/",
+ "title": "Looking for Fintech Jobs? | Work at SoFi",
+ "nodeCount": 206,
+ "truncated": false,
+ "note": "Structure only: no field values, checked states or files are captured.",
+ "nodes": [
+  {
+   "tag": "symbol",
+   "role": "presentation",
+   "id": "icon-chevron-green",
+   "aria": {
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "svg",
+    "div"
+   ]
+  },
+  {
+   "tag": "symbol",
+   "role": "presentation",
+   "id": "icon-circle-info",
+   "aria": {
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "svg",
+    "div"
+   ]
+  },
+  {
+   "tag": "symbol",
+   "role": "presentation",
+   "id": "play-button-berry",
+   "aria": {
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "svg",
+    "div"
+   ]
+  },
+  {
+   "tag": "header",
+   "role": "banner",
+   "cls": "sofi-gnav",
+   "visible": true,
+   "path": [
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "toggleMenu",
+   "cls": "sofi-gnav__hamburger sofi-gnav__hide-desktop",
+   "aria": {
+    "label": "Open menu",
+    "expanded": "false",
+    "controls": "gnav-drawer"
+   },
+   "visible": true,
+   "path": [
+    "nav",
+    "header[role=banner]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-0-bank",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-0-bank"
+   },
+   "text": "Bank",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "Bank categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-0-bank-cat-checkingandsavings-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-0-bank-cat-checkingandsavings-0",
+    "selected": "true"
+   },
+   "text": "Checking and Savings",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-0-bank-cat-checkingandsavings-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-0-bank-cat-checkingandsavings-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Bank",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-1-cards",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-1-cards"
+   },
+   "text": "Cards",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "Cards categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-1-cards-cat-creditcards-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-1-cards-cat-creditcards-0",
+    "selected": "true"
+   },
+   "text": "Credit Cards",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-1-cards-cat-creditcards-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-1-cards-cat-creditcards-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Cards",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-2-invest",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-2-invest"
+   },
+   "text": "Invest",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "Invest categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-2-invest-cat-investing-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-2-invest-cat-investing-0",
+    "selected": "true"
+   },
+   "text": "Investing",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-2-invest-cat-investing-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-2-invest-cat-investing-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Invest",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-3-loans",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-3-loans"
+   },
+   "text": "Loans",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "Loans categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-3-loans-cat-personalloans-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-3-loans-cat-personalloans-0",
+    "selected": "true"
+   },
+   "text": "Personal Loans",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-3-loans-cat-studentloanrefinancing-1",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-3-loans-cat-studentloanrefinancing-1",
+    "selected": "false"
+   },
+   "text": "Student Loan Refinancing",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-3-loans-cat-privatestudentloans-2",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-3-loans-cat-privatestudentloans-2",
+    "selected": "false"
+   },
+   "text": "Private Student Loans",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-3-loans-cat-homeequity-3",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-3-loans-cat-homeequity-3",
+    "selected": "false"
+   },
+   "text": "Home Equity",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-3-loans-cat-mortgageloans-4",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-3-loans-cat-mortgageloans-4",
+    "selected": "false"
+   },
+   "text": "Mortgage Loans",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-3-loans-cat-autoloanrefinance-5",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-3-loans-cat-autoloanrefinance-5",
+    "selected": "false"
+   },
+   "text": "Auto Loan Refinance",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-3-loans-cat-personalloans-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-3-loans-cat-personalloans-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Loans",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-3-loans-cat-studentloanrefinancing-1",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-3-loans-cat-studentloanrefinancing-1",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Loans",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-3-loans-cat-privatestudentloans-2",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-3-loans-cat-privatestudentloans-2",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Loans",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-3-loans-cat-homeequity-3",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-3-loans-cat-homeequity-3",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Loans",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-3-loans-cat-mortgageloans-4",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-3-loans-cat-mortgageloans-4",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Loans",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-3-loans-cat-autoloanrefinance-5",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-3-loans-cat-autoloanrefinance-5",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Loans",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-4-crypto",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-4-crypto"
+   },
+   "text": "Crypto",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "Crypto categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-4-crypto-cat-crypto-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-4-crypto-cat-crypto-0",
+    "selected": "true"
+   },
+   "text": "Crypto",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-4-crypto-cat-crypto-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-4-crypto-cat-crypto-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Crypto",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-5-coach",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-5-coach"
+   },
+   "text": "Coach",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "Coach categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-5-coach-cat-soficoach-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-5-coach-cat-soficoach-0",
+    "selected": "true"
+   },
+   "text": "SoFi Coach",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-5-coach-cat-soficoach-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-5-coach-cat-soficoach-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Coach",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-6-insurance",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-6-insurance"
+   },
+   "text": "Insurance",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "Insurance categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-6-insurance-cat-protect-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-6-insurance-cat-protect-0",
+    "selected": "true"
+   },
+   "text": "Protect",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-6-insurance-cat-protect-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-6-insurance-cat-protect-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "Insurance",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-7-sofiplus",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-7-sofiplus"
+   },
+   "text": "SoFi Plus",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "SoFi Plus categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-7-sofiplus-cat-sofiplus-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-7-sofiplus-cat-sofiplus-0",
+    "selected": "true"
+   },
+   "text": "SoFi Plus",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-7-sofiplus-cat-coremembership-1",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-7-sofiplus-cat-coremembership-1",
+    "selected": "false"
+   },
+   "text": "Core Membership",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-7-sofiplus-cat-sofiplus-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-7-sofiplus-cat-sofiplus-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "SoFi Plus",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-7-sofiplus-cat-coremembership-1",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-7-sofiplus-cat-coremembership-1",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "SoFi Plus",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "id": "gnav-l1-dropdown-personal-8-more",
+   "cls": "sofi-gnav__dropdown-control",
+   "aria": {
+    "haspopup": "true",
+    "expanded": "false",
+    "controls": "gnav-submenu-personal-8-more"
+   },
+   "text": "More",
+   "visible": false,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--l1 sofi-gnav__hide-desktop",
+   "text": "Main",
+   "visible": false,
+   "path": [
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav",
+    "header[role=banner]"
+   ]
+  },
+  {
+   "tag": "ul",
+   "role": "tablist",
+   "cls": "sofi-gnav__submenu-rail",
+   "aria": {
+    "label": "More categories"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item is-active",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-8-more-cat-resources-0",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-8-more-cat-resources-0",
+    "selected": "true"
+   },
+   "text": "Resources",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-8-more-cat-calculators-1",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-8-more-cat-calculators-1",
+    "selected": "false"
+   },
+   "text": "Calculators",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "li",
+   "role": "presentation",
+   "cls": "sofi-gnav__submenu-rail-item",
+   "visible": false,
+   "path": [
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "role": "tab",
+   "id": "gnav-cat-tab-personal-8-more-cat-atwork-2",
+   "cls": "sofi-gnav__submenu-rail-control",
+   "aria": {
+    "controls": "gnav-cat-panel-personal-8-more-cat-atwork-2",
+    "selected": "false"
+   },
+   "text": "At Work",
+   "visible": false,
+   "path": [
+    "li[role=presentation]",
+    "ul[role=tablist]",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-8-more-cat-resources-0",
+   "cls": "sofi-gnav__submenu-panel is-active",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-8-more-cat-resources-0",
+    "hidden": "false"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "More",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-8-more-cat-calculators-1",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-8-more-cat-calculators-1",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "More",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "gnav-cat-panel-personal-8-more-cat-atwork-2",
+   "cls": "sofi-gnav__submenu-panel is-hidden",
+   "aria": {
+    "labelledby": "gnav-cat-tab-personal-8-more-cat-atwork-2",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "sofi-gnav__drawer-back sofi-gnav__drawer-back--cat sofi-gnav__hide-desktop",
+   "text": "More",
+   "visible": false,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "li",
+    "ul"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "dialog",
+   "id": "m-product-category",
+   "aria": {
+    "labelledby": "product-category-title"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "modal__close m-close",
+   "aria": {
+    "label": "Close modal"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "id": "product-category-title",
+   "text": "Select a product to get started.",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "dialog",
+   "id": "m-confirmation",
+   "cls": "modal--dm-offer",
+   "aria": {
+    "labelledby": "m-confirmation-title"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "modal__close m-close btn",
+   "aria": {
+    "label": "Close modal"
+   },
+   "text": "X",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "id": "m-confirmation-title",
+   "cls": "h3",
+   "text": "Received mail from us?",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "dm-reservation-number",
+   "name": "reservation-number",
+   "cls": "dm-reservation-number-input-modal",
+   "aria": {
+    "label": "Confirmation #"
+   },
+   "label": "Confirmation #",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Confirmation #",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "dm-postal-code",
+   "name": "postal-code",
+   "cls": "dm-postal-code",
+   "aria": {
+    "label": "Zip Code"
+   },
+   "label": "Zip Code",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Zip Code",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "modal-dm-form-submit",
+   "cls": "btn u-margin-right-xs",
+   "text": "Get Started",
+   "visible": false,
+   "path": [
+    "p",
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "btn btn--transparent-punchout cancel m-close",
+   "text": "Cancel",
+   "visible": false,
+   "path": [
+    "p",
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "dialog",
+   "id": "dm-confirmation-offer-landing",
+   "cls": "modal--dm-offer",
+   "aria": {
+    "labelledby": "dm-confirmation-offer-title"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "modal__close m-close btn",
+   "aria": {
+    "label": "Close modal"
+   },
+   "text": "X",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "id": "dm-confirmation-offer-title",
+   "cls": "h3",
+   "text": "Received an offer from us?",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "dm-reservation-number-offer-landing",
+   "name": "reservation-number",
+   "cls": "dm-reservation-number-input-modal",
+   "aria": {
+    "label": "Confirmation #"
+   },
+   "label": "Confirmation #",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Confirmation #",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "dm-postal-code-offer-landing",
+   "name": "postal-code",
+   "cls": "dm-postal-code",
+   "aria": {
+    "label": "Zip Code"
+   },
+   "label": "Zip Code",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "Zip Code",
+   "visible": false,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "modal-dm-form-submit-offer-landing",
+   "cls": "btn u-margin-right-xs",
+   "text": "Get Started",
+   "visible": false,
+   "path": [
+    "p",
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "btn btn--transparent-punchout cancel m-close",
+   "text": "Cancel",
+   "visible": false,
+   "path": [
+    "p",
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "dialog",
+   "id": "m-exit-sofi",
+   "cls": "modal--exiting-sofi",
+   "aria": {
+    "labelledby": "exit-sofi-title"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "modal__close m-close",
+   "aria": {
+    "label": "Close modal"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "id": "exit-sofi-title",
+   "cls": "sr-only",
+   "text": "Leaving SoFi Website",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=dialog]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "main",
+   "id": "mainContent",
+   "visible": true,
+   "path": [
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "u-margin-bottom-none",
+   "text": "Applications Administrator, Home Lending",
+   "visible": true,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "cls": "u-margin-bottom-xs",
+   "text": "Description",
+   "visible": true,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "text": "The Role",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "text": "What You'll Do",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "text": "What You'll Need",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "text": "Nice to Have",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "u-margin-bottom-xs",
+   "text": "Apply for this position",
+   "visible": true,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "u-margin-bottom-sm",
+   "text": "No job found.",
+   "visible": false,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div[role=main]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "id": "sofi-gftr-col-products",
+   "cls": "sofi-gftr__column-heading",
+   "text": "SoFi Products",
+   "visible": true,
+   "path": [
+    "div",
+    "nav",
+    "div",
+    "footer",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "id": "sofi-gftr-col-financial-resources",
+   "cls": "sofi-gftr__column-heading",
+   "text": "Financial Resources",
+   "visible": true,
+   "path": [
+    "div",
+    "nav",
+    "div",
+    "footer",
+    "div"
+   ]
+  },
+  {
+   "tag": "h4",
+   "role": "heading",
+   "cls": "be-label",
+   "text": "Also of Interest",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "nav"
+   ]
+  },
+  {
+   "tag": "h3",
+   "id": "sofi-gftr-col-also-of-interest",
+   "cls": "sofi-gftr__column-heading",
+   "text": "Also of Interest",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "nav",
+    "div",
+    "footer",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "id": "sofi-gftr-col-about-sofi",
+   "cls": "sofi-gftr__column-heading",
+   "text": "About SoFi",
+   "visible": true,
+   "path": [
+    "div",
+    "nav",
+    "div",
+    "footer",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "id": "sofi-gftr-col-legal",
+   "cls": "sofi-gftr__column-heading",
+   "text": "Legal",
+   "visible": true,
+   "path": [
+    "div",
+    "nav",
+    "div",
+    "footer",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "gftr-back-to-top",
+   "cls": "sofi-gftr__back-to-top",
+   "aria": {
+    "label": "Back to top"
+   },
+   "text": "Back to top",
+   "visible": true,
+   "path": [
+    "div",
+    "nav",
+    "div",
+    "footer",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "email",
+   "id": "otm-email-footer",
+   "cls": "sofi-gftr__otm-input",
+   "placeholder": "Enter your email",
+   "aria": {
+    "label": "Enter your email"
+   },
+   "label": "Enter your email",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "submit",
+   "id": "gftr-otm-submit",
+   "cls": "sofi-gftr__otm-submit",
+   "aria": {
+    "label": "Subscribe"
+   },
+   "text": "\u2192",
+   "visible": true,
+   "path": [
+    "div",
+    "form",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "gftr-social-0-facebook",
+   "cls": "sofi-gftr__social-btn",
+   "aria": {
+    "label": "Facebook"
+   },
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "gftr-social-1-linkedin",
+   "cls": "sofi-gftr__social-btn",
+   "aria": {
+    "label": "LinkedIn"
+   },
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "gftr-social-2-twitter",
+   "cls": "sofi-gftr__social-btn",
+   "aria": {
+    "label": "Twitter"
+   },
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "gftr-social-3-instagram",
+   "cls": "sofi-gftr__social-btn",
+   "aria": {
+    "label": "Instagram"
+   },
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "gftr-social-4-youtube",
+   "cls": "sofi-gftr__social-btn",
+   "aria": {
+    "label": "YouTube"
+   },
+   "visible": true,
+   "path": [
+    "li",
+    "ul",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "alertdialog",
+   "aria": {
+    "label": "Privacy",
+    "describedby": "onetrust-policy-text"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "onetrust-reject-all-handler",
+   "text": "Decline all optional",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "onetrust-accept-btn-handler",
+   "text": "Accept all",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "button",
+   "id": "onetrust-close-btn-container",
+   "visible": false,
+   "path": [
+    "div[role=alertdialog]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "alertdialog",
+   "id": "onetrust-pc-sdk",
+   "cls": "otPcPanel ot-hide ot-fade-in right",
+   "aria": {
+    "label": "Privacy Preference Center",
+    "describedby": "ot-pc-desc"
+   },
+   "visible": false,
+   "path": [
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "img",
+   "cls": "ot-pc-logo",
+   "aria": {
+    "label": "Company Logo"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "close-pc-btn-handler",
+   "cls": "ot-close-icon",
+   "aria": {
+    "label": "Close preference center"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "id": "ot-pc-title",
+   "text": "Privacy Preference Center",
+   "visible": false,
+   "path": [
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "accept-recommended-btn-handler",
+   "text": "Allow All",
+   "visible": false,
+   "path": [
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "id": "ot-category-title",
+   "text": "Manage Consent Preferences",
+   "visible": false,
+   "path": [
+    "section",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "aria": {
+    "labelledby": "ot-header-id-C0001",
+    "expanded": "false",
+    "controls": "ot-desc-id-C0001"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h4",
+   "id": "ot-header-id-C0001",
+   "cls": "ot-cat-header",
+   "text": "Strictly Necessary Cookies",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "aria": {
+    "labelledby": "ot-header-id-SPD_BG",
+    "expanded": "false",
+    "controls": "ot-desc-id-SPD_BG"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h4",
+   "id": "ot-header-id-SPD_BG",
+   "cls": "ot-cat-header",
+   "text": "Optional Cookies",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "role": "switch",
+   "id": "ot-group-id-SPD_BG",
+   "name": "ot-group-id-SPD_BG",
+   "cls": "category-switch-handler",
+   "aria": {
+    "labelledby": "ot-header-id-SPD_BG"
+   },
+   "label": "Optional Cookies",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-switch",
+   "text": "Optional Cookies",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "switch",
+   "cls": "ot-switch-nob",
+   "visible": false,
+   "path": [
+    "label",
+    "div",
+    "div",
+    "div",
+    "section",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "role": "switch",
+   "id": "ot-sub-group-id-C0002",
+   "name": "switch",
+   "cls": "cookie-subgroup-handler",
+   "aria": {
+    "label": "Performance Cookies",
+    "hidden": "true"
+   },
+   "label": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-switch",
+   "text": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "switch",
+   "cls": "ot-switch-nob",
+   "visible": false,
+   "path": [
+    "label",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "status",
+   "cls": "ot-label-status",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "role": "switch",
+   "id": "ot-sub-group-id-C0004",
+   "name": "switch",
+   "cls": "cookie-subgroup-handler",
+   "aria": {
+    "label": "Targeting Cookies",
+    "hidden": "true"
+   },
+   "label": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-switch",
+   "text": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "switch",
+   "cls": "ot-switch-nob",
+   "visible": false,
+   "path": [
+    "label",
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "status",
+   "cls": "ot-label-status",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "li",
+    "ul",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "aria": {
+    "labelledby": "ot-header-id-PO2",
+    "expanded": "false",
+    "controls": "ot-desc-id-PO2"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h4",
+   "id": "ot-header-id-PO2",
+   "cls": "ot-cat-header",
+   "text": "Selling/Sharing Personal Information",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "role": "switch",
+   "id": "ot-group-id-PO2",
+   "name": "ot-group-id-PO2",
+   "cls": "category-switch-handler",
+   "aria": {
+    "labelledby": "ot-header-id-PO2"
+   },
+   "label": "Selling/Sharing Personal Information",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-switch",
+   "text": "Selling/Sharing Personal Information",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div",
+    "div[role=alertdialog]"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "switch",
+   "cls": "ot-switch-nob",
+   "visible": false,
+   "path": [
+    "label",
+    "div",
+    "div",
+    "div",
+    "section",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "ot-link-btn back-btn-handler",
+   "aria": {
+    "label": "Back"
+   },
+   "text": "Back Button",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "text": "Back",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "p",
+   "role": "status",
+   "cls": "ot-scrn-rdr",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-scrn-rdr",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "vendor-search-handler",
+   "name": "vendor-search-handler",
+   "label": "Back ButtonBack",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "filter-btn-handler",
+   "aria": {
+    "label": "Filter",
+    "haspopup": "true"
+   },
+   "text": "Filter Icon",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "svg",
+   "role": "presentation",
+   "aria": {
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "button",
+    "div",
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "clear-filters-handler",
+   "text": "Clear",
+   "visible": false,
+   "path": [
+    "div",
+    "section",
+    "div",
+    "div",
+    "section",
+    "div[role=alertdialog]"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "id": "chkbox-id",
+   "cls": "category-filter-handler",
+   "label": "checkbox label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "label",
+   "text": "checkbox label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "status",
+   "cls": "ot-label-status",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "filter-apply-handler",
+   "text": "Apply",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "id": "filter-cancel-handler",
+   "text": "Cancel",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "section",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "role": "switch",
+   "id": "select-all-hosts-groups-handler",
+   "name": "switch",
+   "label": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-switch",
+   "text": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "switch",
+   "cls": "ot-switch-nob",
+   "visible": false,
+   "path": [
+    "label",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "status",
+   "cls": "ot-label-status",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "role": "switch",
+   "id": "select-all-vendor-groups-handler",
+   "name": "switch",
+   "label": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-switch",
+   "text": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "switch",
+   "cls": "ot-switch-nob",
+   "visible": false,
+   "path": [
+    "label",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "status",
+   "cls": "ot-label-status",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "role": "switch",
+   "id": "select-all-vendor-leg-handler",
+   "name": "switch",
+   "label": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "ot-switch",
+   "text": "Switch Label",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "switch",
+   "cls": "ot-switch-nob",
+   "visible": false,
+   "path": [
+    "label",
+    "div",
+    "div",
+    "div",
+    "div",
+    "section"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "status",
+   "cls": "ot-label-status",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "section",
+    "section"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "save-preference-btn-handler onetrust-close-btn-handler",
+   "text": "Confirm My Choices",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div[role=alertdialog]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "ot-floating-button__open",
+   "aria": {
+    "label": "Open Preferences"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "type": "button",
+   "cls": "ot-floating-button__close",
+   "aria": {
+    "label": "Close Preferences",
+    "hidden": "true"
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "svg",
+   "role": "presentation",
+   "visible": false,
+   "path": [
+    "button",
+    "div",
+    "div",
+    "div"
+   ]
+  }
+ ]
+}

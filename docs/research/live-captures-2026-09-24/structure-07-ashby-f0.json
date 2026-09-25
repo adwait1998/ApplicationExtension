@@ -1,0 +1,826 @@
+{
+ "kind": "applypilot-page-structure",
+ "version": 1,
+ "capturedAt": "2026-09-25T00:51:08.715Z",
+ "host": "jobs.ashbyhq.com",
+ "path": "/betterup/05a01bf8-7a37-40cf-9791-96821ed99314/application",
+ "title": "Client Delivery Director @ BetterUp",
+ "nodeCount": 55,
+ "truncated": false,
+ "note": "Structure only: no field values, checked states or files are captured.",
+ "nodes": [
+  {
+   "tag": "h1",
+   "cls": "_title_dea4p_33 _large_dea4p_66 ashby-job-posting-heading",
+   "text": "Client Delivery Director",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "_heading_f7cvd_52 ",
+   "text": "Location",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "_heading_f7cvd_52 ",
+   "text": "Employment Type",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "_heading_f7cvd_52 ",
+   "text": "Location Type",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h2",
+   "cls": "_heading_f7cvd_52 ",
+   "text": "Department",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "nav",
+   "role": "tablist",
+   "cls": "_tabs_5yu8i_29",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "a",
+   "role": "tab",
+   "id": "job-overview",
+   "cls": "_tab_5yu8i_29",
+   "aria": {
+    "controls": "overview",
+    "selected": "false"
+   },
+   "text": "Overview",
+   "visible": true,
+   "path": [
+    "nav[role=tablist]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "a",
+   "role": "tab",
+   "id": "job-application-form",
+   "cls": "_tab_5yu8i_29 _active_5yu8i_56",
+   "aria": {
+    "controls": "form",
+    "selected": "true"
+   },
+   "text": "Application",
+   "visible": true,
+   "path": [
+    "nav[role=tablist]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "tabpanel",
+   "id": "form",
+   "aria": {
+    "labelledby": "job-application-form"
+   },
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "presentation",
+   "cls": "_root_xd2v0_1 ashby-application-form-autofill-input-root",
+   "visible": true,
+   "path": [
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "file",
+   "label": "OverviewApplication",
+   "visible": true,
+   "path": [
+    "div[role=presentation]",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "h3",
+   "cls": "_title_xd2v0_64 ashby-application-form-autofill-input-title",
+   "text": "Autofill from resume",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=presentation]",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "_button_zyh3g_28 _secondary_zyh3g_115    _ctaButton_xd2v0_94",
+   "text": "Upload file",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=presentation]",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "span",
+   "role": "progressbar",
+   "cls": "_spinner_8ul1h_9 _spinner-size-md_8ul1h_26 _spinner-speed-normal_8ul1h_42",
+   "aria": {
+    "label": "Loading..."
+   },
+   "visible": false,
+   "path": [
+    "div",
+    "div[role=presentation]",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-ques",
+   "text": "Full Name",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "_systemfield_name",
+   "name": "_systemfield_name",
+   "cls": "_input_80epu_28 _input_1e3gg_32 ashby-application-form-input-text",
+   "placeholder": "Type here...",
+   "label": "Full Name",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-ques",
+   "text": "Email",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "email",
+   "id": "_systemfield_email",
+   "name": "_systemfield_email",
+   "cls": "_input_80epu_28 _input_1e3gg_32 ashby-application-form-input-text",
+   "placeholder": "<email>...",
+   "label": "Email",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-ques",
+   "text": "Phone Number",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "tel",
+   "id": "b18258a6-49e5-4b3e-9679-5d7b5da80a30",
+   "name": "b18258a6-49e5-4b3e-9679-5d7b5da80a30",
+   "cls": "_input_80epu_28 _input_1e3gg_32 ashby-application-form-input-text",
+   "placeholder": "<digits>...",
+   "label": "Phone Number",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-ques",
+   "text": "Resume",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "presentation",
+   "cls": "_container_10xk4_70  ashby-application-form-input-file",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "file",
+   "id": "_systemfield_resume",
+   "label": "Resume",
+   "visible": true,
+   "path": [
+    "div[role=presentation]",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "_button_zyh3g_28 _secondary_zyh3g_115    _button_10xk4_106 ashby-application-for",
+   "text": "Upload File",
+   "visible": true,
+   "path": [
+    "div",
+    "div[role=presentation]",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title",
+   "text": "Cover Letter",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "div",
+   "role": "presentation",
+   "cls": "_container_10xk4_70  ashby-application-form-input-file",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "file",
+   "id": "0b40a8db-6c57-4de7-80ef-f5c20d422de0",
+   "label": "Cover Letter",
+   "visible": true,
+   "path": [
+    "div[role=presentation]",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "_button_zyh3g_28 _secondary_zyh3g_115    _button_10xk4_106 ashby-application-for",
+   "text": "Upload File",
+   "visible": true,
+   "path": [
+    "div",
+    "div[role=presentation]",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title",
+   "text": "LinkedIn Profile",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "dd98179f-54ab-49b9-95b2-1ebe94357edf",
+   "name": "dd98179f-54ab-49b9-95b2-1ebe94357edf",
+   "cls": "_input_80epu_28 _input_1e3gg_32 ashby-application-form-input-text",
+   "placeholder": "Type here...",
+   "label": "LinkedIn Profile",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title",
+   "text": "How may we pronounce your name?",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "text",
+   "id": "f9cdbf3e-9aca-443c-888b-d3e9e6483d44",
+   "name": "f9cdbf3e-9aca-443c-888b-d3e9e6483d44",
+   "cls": "_input_80epu_28 _input_1e3gg_32 ashby-application-form-input-text",
+   "placeholder": "Type here...",
+   "label": "How may we pronounce your name?",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-ques",
+   "text": "How does BetterUp's mission align with your personal or professional aspirations?",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "textarea",
+   "id": "a5f25dbe-21f6-471c-8416-4d7e494bb6ef",
+   "name": "a5f25dbe-21f6-471c-8416-4d7e494bb6ef",
+   "cls": "_input_zf0lr_28 _input_1e3gg_32  ashby-application-form-input-textarea",
+   "placeholder": "Type here...",
+   "label": "How does BetterUp's mission align with your personal or professional aspirations?",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52  _label_1e3gg_42 ashby-application-form-question-title",
+   "text": "Do you now or at a future date require visa sponsorship to work in the United States?",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option",
+   "text": "Yes",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option",
+   "text": "No",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "checkbox",
+   "name": "d1251606-124c-420e-a459-7ea66f551754",
+   "cls": "_input_1svni_78",
+   "label": "Do you now or at a future date require visa sponsorship to work in the United States?",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "fieldset",
+   "cls": "_container_1258i_28 _fieldEntry_1e3gg_28 ashby-application-form-input-radio-grou",
+   "visible": true,
+   "path": [
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-ques",
+   "text": "Are you located within 45 miles of one of the following metro areas? And can you come into the office a minimum of two d\u2026",
+   "visible": true,
+   "path": [
+    "fieldset",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]",
+    "div"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "id": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324-labeled-radio-0",
+   "name": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324",
+   "cls": "ashby-application-form-input-radio-group-option-radio",
+   "label": "Austin, TX: 3100 E 5th St, Suite 350, TX 78702",
+   "visible": true,
+   "path": [
+    "span",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_label_1258i_42  ashby-application-form-input-radio-group-option-label",
+   "text": "Austin, TX: 3100 E 5th St, Suite 350, TX 78702",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "id": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324-labeled-radio-1",
+   "name": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324",
+   "cls": "ashby-application-form-input-radio-group-option-radio",
+   "label": "San Francisco, CA: 250 Montgomery St, Suite 400, San Francisco, CA 94104",
+   "visible": true,
+   "path": [
+    "span",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_label_1258i_42  ashby-application-form-input-radio-group-option-label",
+   "text": "San Francisco, CA: 250 Montgomery St, Suite 400, San Francisco, CA 94104",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "id": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324-labeled-radio-2",
+   "name": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324",
+   "cls": "ashby-application-form-input-radio-group-option-radio",
+   "label": "Arlington, VA: 1300 17th St N, Suite 800, Arlington, VA 22209",
+   "visible": true,
+   "path": [
+    "span",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_label_1258i_42  ashby-application-form-input-radio-group-option-label",
+   "text": "Arlington, VA: 1300 17th St N, Suite 800, Arlington, VA 22209",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "id": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324-labeled-radio-3",
+   "name": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324",
+   "cls": "ashby-application-form-input-radio-group-option-radio",
+   "label": "Chicago, IL: TBD",
+   "visible": true,
+   "path": [
+    "span",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_label_1258i_42  ashby-application-form-input-radio-group-option-label",
+   "text": "Chicago, IL: TBD",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "id": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324-labeled-radio-4",
+   "name": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324",
+   "cls": "ashby-application-form-input-radio-group-option-radio",
+   "label": "New York, NY",
+   "visible": true,
+   "path": [
+    "span",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_label_1258i_42  ashby-application-form-input-radio-group-option-label",
+   "text": "New York, NY",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "input",
+   "type": "radio",
+   "id": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324-labeled-radio-5",
+   "name": "9fbaafc6-3336-432a-a4f2-d016ec21653e_2e651ffb-d3ad-4843-af39-bde6626ed324",
+   "cls": "ashby-application-form-input-radio-group-option-radio",
+   "label": "Remote (US): exception based on business need",
+   "visible": true,
+   "path": [
+    "span",
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "label",
+   "cls": "_label_1258i_42  ashby-application-form-input-radio-group-option-label",
+   "text": "Remote (US): exception based on business need",
+   "visible": true,
+   "path": [
+    "div",
+    "fieldset",
+    "div",
+    "div",
+    "div",
+    "div[role=tabpanel]"
+   ]
+  },
+  {
+   "tag": "button",
+   "cls": "_button_zyh3g_28 _primary_zyh3g_97  _greedy_zyh3g_221  _submitButton_5yu8i_411 a",
+   "text": "Submit Application",
+   "visible": true,
+   "path": [
+    "div[role=tabpanel]",
+    "div",
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "iframe",
+   "role": "presentation",
+   "name": "a-et4m747cohep",
+   "visible": false,
+   "path": [
+    "div",
+    "div",
+    "div"
+   ]
+  },
+  {
+   "tag": "textarea",
+   "id": "g-recaptcha-response-100000",
+   "name": "g-recaptcha-response",
+   "cls": "g-recaptcha-response",
+   "label": "You need to enable JavaScript to run this app.",
+   "visible": false,
+   "path": [
+    "div",
+    "div"
+   ]
+  }
+ ]
+}
