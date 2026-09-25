@@ -54,7 +54,7 @@ PROFILE = {
 @pytest.fixture
 def app_and_token(tmp_path):
     token = get_or_create_token(tmp_path)
-    app = create_app(app_dir=tmp_path, profile=PROFILE)
+    app = create_app(app_dir=tmp_path, root=tmp_path, profile=PROFILE)
     return app, token
 
 
