@@ -1195,6 +1195,102 @@
     return flashElement(targets[0]);
   }
 
+  // ---------------------------------------------------------------------
+  // MULTI-STEP CONTINUATION (item 8) — opt-in, OFF by default (see sidepanel.js's toggle). Top
+  // frame only: Workday's own "My Experience" / step-progress flows are same-document SPA
+  // navigation in the TOP document, which is exactly what lets this same long-lived content.js
+  // instance (window.__applyPilotContentLoaded already guards re-injection) keep watching across
+  // steps without ever being re-injected.
+  //
+  // Two independent, DOM-fact-based signals decide "a new step just rendered" — never a timer
+  // alone, never a guess:
+  //   1. location.href changed since the last completed step (a step that changes the URL, or a
+  //      hash-only route change a MutationObserver's childList/subtree filter might not catch).
+  //   2. "the form root re-rendered": a majority of the elements THIS extension's own last fill
+  //      actually touched are no longer connected to the document at all — the concrete, checkable
+  //      meaning of "Workday replaced the whole step's markup" rather than eyeballing a heuristic
+  //      field-count difference.
+  // Either one, after the page settles (reusing waitForDomQuiet — same "let it stop mutating"
+  // wait résumé-attach already relies on), asks background.js to run a completely normal fill for
+  // the new step: same PREPARE_AND_SCAN/APPLY_FILLS pipeline, same shield, same verification,
+  // same "never overwrite the user" rule — nothing about how a step is filled is special-cased.
+  // Never clicks Next/Submit itself — see README "The one rule that matters".
+  // ---------------------------------------------------------------------
+  var CONTINUATION_SETTLE_DEBOUNCE_MS = 600;
+  var continuation = null; // { host, lastUrl, watchedElements, observer, poll, settleTimer, checking, steps }
+
+  function currentRegistryElements() {
+    var els = [];
+    for (var id in registry) {
+      if (Object.prototype.hasOwnProperty.call(registry, id)) els = els.concat(entryElements(registry[id]));
+    }
+    return els;
+  }
+
+  function stopContinuationWatch() {
+    if (continuation) {
+      if (continuation.observer) continuation.observer.disconnect();
+      if (continuation.poll) clearInterval(continuation.poll);
+      if (continuation.settleTimer) clearTimeout(continuation.settleTimer);
+    }
+    continuation = null;
+  }
+
+  function scheduleContinuationCheck() {
+    if (!continuation || continuation.checking) return;
+    if (continuation.settleTimer) clearTimeout(continuation.settleTimer);
+    continuation.settleTimer = setTimeout(runContinuationCheck, CONTINUATION_SETTLE_DEBOUNCE_MS);
+  }
+
+  function runContinuationCheck() {
+    if (!continuation || activeRun) return; // never overlap with a fill already running in THIS frame
+    if (location.hostname !== continuation.host) {
+      // Never on a different host than the one the toggle was turned on for — a full navigation
+      // away is the one case a full-page unload wouldn't already have torn this module down for.
+      stopContinuationWatch();
+      return;
+    }
+    var urlChanged = location.href !== continuation.lastUrl;
+    var known = continuation.watchedElements;
+    var stillConnected = known.filter(function (el) { return el && el.isConnected; }).length;
+    var formReplaced = known.length > 0 && (stillConnected / known.length) < 0.5;
+    if (!urlChanged && !formReplaced) return;
+
+    continuation.checking = true;
+    continuation.lastUrl = location.href;
+    waitForDomQuiet(document, DOM_QUIET_MS, DOM_QUIET_MAX_MS).then(function () {
+      if (!continuation) return; // turned off while we were waiting for the page to settle
+      continuation.steps = (continuation.steps || 1) + 1;
+      try {
+        var p = chrome.runtime.sendMessage({ type: 'CONTINUATION_RUN_FILL' });
+        if (p && typeof p.then === 'function') p.then(function () {}, function () {});
+      } catch (e) {
+        // best-effort — same "never throw across the extension boundary" rule as sendStateUpdate()
+      }
+    }).then(function () {
+      if (continuation) {
+        continuation.watchedElements = currentRegistryElements();
+        continuation.checking = false;
+      }
+    });
+  }
+
+  function startContinuationWatch(host) {
+    stopContinuationWatch();
+    continuation = {
+      host: host, lastUrl: location.href, watchedElements: currentRegistryElements(),
+      observer: null, poll: null, settleTimer: null, checking: false, steps: 1
+    };
+    if (typeof MutationObserver !== 'undefined') {
+      continuation.observer = new MutationObserver(scheduleContinuationCheck);
+      continuation.observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    }
+    // Cheap poll alongside the observer — this feature is opt-in and off by default, so the small
+    // timer cost only exists while it's actually on — catches a route change a MutationObserver's
+    // subtree filter might not (e.g. a hash-only change with no DOM mutation at all).
+    continuation.poll = setInterval(scheduleContinuationCheck, 1000);
+  }
+
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || typeof msg !== 'object') return false;
 
@@ -1338,6 +1434,12 @@
       }
       if (msg.type === 'FLASH_FIELD') {
         sendResponse({ ok: scrollToField(msg.id) });
+        return false;
+      }
+      if (msg.type === 'SET_CONTINUATION') {
+        if (msg.enabled) startContinuationWatch(msg.host || location.hostname);
+        else stopContinuationWatch();
+        sendResponse({ ok: true });
         return false;
       }
     } catch (e) {

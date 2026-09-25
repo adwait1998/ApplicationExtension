@@ -260,6 +260,25 @@ Two commands, both rebindable at `chrome://extensions/shortcuts`:
   needs permission..." line the panel's own Fill/Report buttons show, so you grant it the normal
   way (click **Fill this page**).
 
+## Multi-step continuation (opt-in)
+
+A per-tab toggle in the panel, **off by default**: "Keep filling as I go through steps." Turning
+it on (gated the same way Fill/Report are — nothing runs until you do) arms `content.js`'s own
+watcher in the top frame for a Workday-style multi-step form. It watches for two independent,
+concrete signals that a new step just rendered — never a guess, never a timer alone:
+
+1. `location.href` changed since the last step (a step that changes the URL, or a hash-only route
+   change).
+2. The form root re-rendered: most of the elements the last fill actually touched are no longer
+   connected to the document at all.
+
+Either one, once the page settles, triggers a completely normal fill for the new step — same
+`PREPARE_AND_SCAN`/`APPLY_FILLS` pipeline, same submit shield, same post-fill verification, same
+"never overwrite the user" rule. **This never clicks Next or Submit itself** — it only reacts once
+you (or the page) have already moved to the next step. The panel shows the step count and the
+toggle stays visible so turning it off is always one click away. It's automatically treated as off
+the moment the tab navigates to a different host than the one it was turned on for.
+
 ## Fill every frame
 
 About a quarter of real job postings are a company's own careers page embedding the actual

@@ -272,6 +272,37 @@ REMEMBER_ANSWERS_PAGE_BYTES = b"""<!DOCTYPE html>
 </body></html>
 """
 
+# A tiny fixture for item 8 (multi-step continuation): step 1's field lives in #step-root;
+# window.__goToStep2()/__goToStep3() replace #step-root's own markup (standing in for a
+# Workday-style SPA step transition this test drives directly — the extension itself must never
+# click Next, see README "The one rule that matters") AND push a new URL, so both of
+# runContinuationCheck()'s signals (form root replaced, url changed) fire together.
+MULTI_STEP_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Multi-Step Fixture</title></head>
+<body>
+<div id="step-root">
+  <h2>Step 1</h2>
+  <label for="s1_name">Full Name</label>
+  <input type="text" id="s1_name" name="s1_name">
+</div>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  window.__goToStep2 = function () {
+    document.getElementById('step-root').innerHTML =
+      '<h2>Step 2</h2><label for="s2_email">Email</label>' +
+      '<input type="text" id="s2_email" name="s2_email">';
+    history.pushState({}, '', location.pathname + '#step2');
+  };
+  window.__goToStep3 = function () {
+    document.getElementById('step-root').innerHTML =
+      '<h2>Step 3</h2><label for="s3_phone">Phone</label>' +
+      '<input type="text" id="s3_phone" name="s3_phone">';
+    history.pushState({}, '', location.pathname + '#step3');
+  };
+</script>
+</body></html>
+"""
+
 
 class StubHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -318,6 +349,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path.startswith("/remember-answers-page.html"):
             body = REMEMBER_ANSWERS_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/multi-step-page.html"):
+            body = MULTI_STEP_PAGE_BYTES
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -1385,6 +1423,91 @@ with sync_playwright() as p:
         panel14.close()
 
         # =====================================================================
+        # TAB 15 — MULTI-STEP CONTINUATION (item 8), opt-in and OFF by default: turning the
+        #          panel's toggle ON (a real click, gated the same way Fill/Report are) arms
+        #          content.js's watcher; a step transition this test drives directly (standing in
+        #          for the operator clicking Workday's own "Next" — this extension never does)
+        #          triggers a brand-new fill automatically, with NO click and NO RUN_FILL message
+        #          sent by this test; the step counter advances; turning the toggle back off stops
+        #          any further automatic fills.
+        # =====================================================================
+        tab15 = ctx.new_page()
+        tab15.goto(f"{SERVICE_URL}/multi-step-page.html#t=15")
+        tab15_id = find_tab_id(helper, "#t=15")
+        check("found tab 15's chrome tab id", tab15_id is not None)
+
+        panel15 = ctx.new_page()
+        panel15.goto(f"{panel_url}?tabId={tab15_id}")
+        panel15.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+
+        check("the continuation toggle is OFF by default", panel15.eval_on_selector("#continuationToggle", "el => el.checked") is False)
+        panel15.check("#continuationToggle")
+        panel15.wait_for_function("() => document.getElementById('continuationToggle').checked === true", timeout=5000)
+
+        panel15.click("#scanBtn")
+        # Enabling continuation moments ago already wrote an 'idle' state for this tab (see
+        # background.js's SET_CONTINUATION) -- wait for THIS click's own fill to actually start
+        # (status really becomes 'running') before handing off to wait_for_done(), so it can't
+        # mistake that stale 'idle' write for this fill having already finished.
+        deadline_running = time.time() + 5
+        while time.time() < deadline_running and (get_state(helper, tab15_id) or {}).get("status") != "running":
+            time.sleep(0.05)
+        state15a = wait_for_done(helper, tab15_id, timeout_s=20)
+        check("step 1's fill (a normal, explicitly-clicked fill) completed",
+              state15a is not None and state15a.get("status") == "done", str(state15a)[:200])
+        step1_val = tab15.eval_on_selector("#s1_name", "el => el.value")
+        check("step 1's own field was filled", bool(step1_val), repr(step1_val))
+        panel15.wait_for_function(
+            "() => (document.getElementById('continuationStepLine').textContent || '').includes('Step 1')",
+            timeout=5000)
+
+        resolve_calls_before_step2 = len(resolve_calls)
+        tab15.evaluate("() => window.__goToStep2()")  # standing in for clicking Workday's own "Next"
+
+        deadline = time.time() + 15
+        while time.time() < deadline and len(resolve_calls) <= resolve_calls_before_step2:
+            time.sleep(0.1)
+        check("the step-2 transition triggered a brand-new /resolve call AUTOMATICALLY, with no "
+              "click and no RUN_FILL message sent by this test",
+              len(resolve_calls) > resolve_calls_before_step2,
+              f"before={resolve_calls_before_step2} after={len(resolve_calls)}")
+
+        state15b = None
+        deadline2 = time.time() + 15
+        while time.time() < deadline2:
+            s = get_state(helper, tab15_id)
+            if s and s.get("status") == "done" and (s.get("continuation") or {}).get("steps", 0) >= 2:
+                state15b = s
+                break
+            time.sleep(0.1)
+        check("the automatic step-2 fill completed and the step counter advanced to 2",
+              state15b is not None, json.dumps(get_state(helper, tab15_id))[:300])
+        if state15b:
+            check("step 2's own field was filled automatically (never step 1's, which is gone)",
+                  (state15b.get("counts") or {}).get("filled", 0) > 0, json.dumps(state15b.get("counts")))
+            step2_val = tab15.eval_on_selector("#s2_email", "el => el.value")
+            check("step 2's real field on the real page actually got filled",
+                  bool(step2_val), repr(step2_val))
+        panel15.wait_for_function(
+            "() => (document.getElementById('continuationStepLine').textContent || '').includes('Step 2')",
+            timeout=5000)
+        check("same guards applied to the automatic step-2 fill: no submission, no navigation",
+              tab15.evaluate("() => !window.__FORM_SUBMITTED__") is True)
+
+        # Turning it off must stop any further automatic fills.
+        panel15.uncheck("#continuationToggle")
+        panel15.wait_for_function("() => document.getElementById('continuationToggle').checked === false", timeout=5000)
+        resolve_calls_before_step3 = len(resolve_calls)
+        tab15.evaluate("() => window.__goToStep3()")
+        time.sleep(2.5)  # generous settle window (debounce + poll + DOM-quiet) — nothing should happen
+        check("turning the toggle off stops future automatic fills (no new /resolve call for step 3)",
+              len(resolve_calls) == resolve_calls_before_step3,
+              f"before={resolve_calls_before_step3} after={len(resolve_calls)}")
+        step3_val = tab15.eval_on_selector("#s3_phone", "el => el.value")
+        check("step 3's field was correctly left untouched once continuation was turned off",
+              step3_val in ("", None), repr(step3_val))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -1395,7 +1518,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))

@@ -71,6 +71,10 @@
   var logStatusTextEl = document.getElementById('logStatusText');
   var markAppliedBtn = document.getElementById('markAppliedBtn');
 
+  // -- multi-step continuation (item 8) --
+  var continuationToggle = document.getElementById('continuationToggle');
+  var continuationStepLineEl = document.getElementById('continuationStepLine');
+
   // TEST-ONLY: "?tabId=<id>" pins this panel instance to a specific tab for its whole lifetime
   // instead of following chrome.tabs.onActivated/onUpdated in its own window. This exists
   // purely so scripts/chrome_panel_test.py can point two independent panel page loads at two
@@ -455,6 +459,32 @@
       ((state.needsYou || []).length) + ((state.failed || []).length)) > 0);
     exportReportBtn.disabled = isRunning || stale || !hasRows;
 
+    // Item 8 (multi-step continuation): render whatever background.js has recorded — this file
+    // never decides on its own whether the watch is on. "Never on a different host than the one
+    // the toggle was turned on for" is enforced on the WATCHING side too (content.js self-disarms
+    // on an in-page navigation to a different host — see runContinuationCheck()), but a full page
+    // reload/navigation tears down that content.js instance entirely without a chance to report
+    // back, so this is the other half: if the tab's CURRENT host no longer matches the host the
+    // toggle was armed for, treat it as off here and tell background.js to clean up the stale
+    // record, rather than showing a toggle that looks on but has nothing left watching.
+    var cont = state && state.continuation;
+    if (cont && cont.enabled && scriptable) {
+      var currentHost = null;
+      try { currentHost = new URL(tab.url).hostname; } catch (e) { /* ignore */ }
+      if (currentHost && cont.host && currentHost !== cont.host) {
+        chrome.runtime.sendMessage({ type: 'SET_CONTINUATION', tabId: tabId, enabled: false }).catch(function () {});
+        cont = null;
+      }
+    }
+    continuationToggle.checked = !!(cont && cont.enabled);
+    continuationToggle.disabled = !scriptable || isRunning;
+    if (cont && cont.enabled && cont.steps > 0) {
+      continuationStepLineEl.hidden = false;
+      continuationStepLineEl.textContent = 'Step ' + cont.steps;
+    } else {
+      continuationStepLineEl.hidden = true;
+    }
+
     renderProgress(isRunning ? state.progress : null);
 
     if (!scriptable) {
@@ -645,6 +675,45 @@
     } finally {
       await renderForTab(activeTabId);
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // MULTI-STEP CONTINUATION (item 8) toggle. OFF by default. Turning it ON is gated on the SAME
+  // synchronous permission-then-inject pattern Fill/Report use (content.js must already be
+  // listening in the top frame for SET_CONTINUATION to reach it) — nothing here runs on a page
+  // until this click. Turning it OFF never touches permissions or injection at all.
+  // ---------------------------------------------------------------------
+  continuationToggle.addEventListener('change', function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    var wantOn = continuationToggle.checked;
+    if (!wantOn) {
+      chrome.runtime.sendMessage({ type: 'SET_CONTINUATION', tabId: tabId, enabled: false }).catch(function () {});
+      return;
+    }
+    var gate = gatePermissions(tabId); // synchronous, no await before this — see gatePermissions()
+    gate.promise.then(async function (granted) {
+      if (!granted) {
+        continuationToggle.checked = false;
+        setStatus('ApplyPilot needs permission to keep filling on ' +
+          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', true);
+        return;
+      }
+      var tab = await safeGetTab(tabId);
+      if (!tab || !canScript(tab.url)) { continuationToggle.checked = false; return; }
+      try {
+        await ensureInjected(tabId); // top frame only — content.js must be listening for this
+        var resp = await chrome.runtime.sendMessage({ type: 'SET_CONTINUATION', tabId: tabId, enabled: true, tabUrl: tab.url });
+        if (!resp || !resp.ok) {
+          continuationToggle.checked = false;
+          setStatus((resp && resp.error) || 'Could not enable step continuation.', true);
+        }
+        await renderForTab(tabId);
+      } catch (e) {
+        continuationToggle.checked = false;
+        setStatus('Could not enable step continuation: ' + (e && e.message ? e.message : e), true);
+      }
+    });
   });
 
   undoBtn.addEventListener('click', async function () {

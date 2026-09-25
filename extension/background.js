@@ -713,6 +713,7 @@ function initialCombinedState(frameIds) {
     couldNotRead: 0,
     logEntry: null,
     permissionNeeded: null,
+    continuation: null,
     _frameStates: {},
     _expectedFrameIds: (frameIds || []).slice()
   };
@@ -828,7 +829,16 @@ function runFillForTab(tabId, opts) {
     var usedWebNavigation = frameInfo.usedWebNavigation;
     var frameIds = frames.map(function (f) { return f.frameId; });
 
-    return updateStoredState(tabId, function () { return initialCombinedState(frameIds); })
+    return updateStoredState(tabId, function (existing) {
+      var fresh = initialCombinedState(frameIds);
+      // Item 8 (multi-step continuation): a fresh fill run resets everything about the PREVIOUS
+      // fill's own results, but the operator's own toggle state must survive it — this is exactly
+      // what makes step 2's own fill (triggered by this same function, from
+      // CONTINUATION_RUN_FILL below) keep the watch armed instead of silently turning it off the
+      // moment the first new-step fill starts.
+      fresh.continuation = (existing && existing.continuation) || null;
+      return fresh;
+    })
       .then(function () {
         return Promise.all(frames.map(function (f) {
           return chrome.tabs.sendMessage(tabId, { type: 'PREPARE_AND_SCAN' }, { frameId: f.frameId })
@@ -1156,11 +1166,69 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       .then(sendResponse, function (e) { sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }); });
     return true;
   }
+  if (msg.type === 'SET_CONTINUATION') {
+    // Item 8: the panel toggle. tabId/enabled come from sidepanel.js's click handler, which has
+    // already gated this on the same permission check Fill/Report use and injected content.js
+    // into the top frame — see there. Recorded into this tab's own state (so the panel can
+    // render it, and so a later fill this file itself starts for step 2+ knows to keep it armed
+    // — see runFillForTab()'s own preservation of `existing.continuation`), and forwarded to the
+    // top frame so it can actually start/stop watching.
+    var contTabId = msg.tabId;
+    Promise.resolve().then(function () {
+      if (!msg.enabled) {
+        return updateStoredState(contTabId, function (existing) {
+          var combined = existing || initialCombinedState([]);
+          // See openPanelWithPermissionNotice()'s own comment: initialCombinedState() defaults
+          // to 'running', which would otherwise misrender as "Filling…" (and disable Fill/etc.)
+          // forever on a tab nothing has ever actually run a fill on yet.
+          if (!existing) combined.status = 'idle';
+          combined.continuation = { enabled: false, host: null, steps: 0 };
+          return combined;
+        }).then(function () {
+          return chrome.tabs.sendMessage(contTabId, { type: 'SET_CONTINUATION', enabled: false }, { frameId: 0 }).catch(function () {});
+        });
+      }
+      var host = frameOrigin(msg.tabUrl) ? new URL(msg.tabUrl).hostname : null;
+      if (!host) return { ok: false, error: 'no scriptable page in this tab' };
+      return updateStoredState(contTabId, function (existing) {
+        var combined = existing || initialCombinedState([]);
+        if (!existing) combined.status = 'idle';
+        combined.continuation = { enabled: true, host: host, steps: 1 };
+        return combined;
+      }).then(function () {
+        return chrome.tabs.sendMessage(contTabId, { type: 'SET_CONTINUATION', enabled: true, host: host }, { frameId: 0 });
+      });
+    }).then(function () { sendResponse({ ok: true }); },
+            function (e) { sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }); });
+    return true;
+  }
+  if (msg.type === 'CONTINUATION_RUN_FILL') {
+    // Only ever sent by content.js's own top-frame watcher (see runContinuationCheck() there) —
+    // re-checks the toggle is STILL on for this tab (it may have been turned off in the moment
+    // between that frame noticing a step change and this message arriving) before doing anything.
+    if (!sender || !sender.tab || typeof sender.tab.id !== 'number') { sendResponse({ ok: false }); return false; }
+    var stepTabId = sender.tab.id;
+    chrome.storage.session.get(tabStateKey(stepTabId)).then(function (stored) {
+      var existing = stored[tabStateKey(stepTabId)];
+      if (!existing || !existing.continuation || !existing.continuation.enabled) return; // turned off meanwhile
+      return updateStoredState(stepTabId, function (existing2) {
+        if (existing2 && existing2.continuation) existing2.continuation.steps = (existing2.continuation.steps || 1) + 1;
+        return existing2;
+      }).then(function () {
+        return chrome.tabs.get(stepTabId);
+      }).then(function (tab) {
+        return runFillForTab(stepTabId, { url: tab.url });
+      });
+    }).catch(function () {});
+    sendResponse({ ok: true }); // fire-and-forget, same contract as RUN_FILL's own ack
+    return false;
+  }
   if (msg.type === 'LOG_STATUS') {
     callLogStatus(msg.id, msg.status).then(function (resp) {
       if (!resp || !resp.ok) { sendResponse(resp); return; }
       updateStoredState(msg.tabId, function (existing) {
         var combined = existing || initialCombinedState([]);
+        if (!existing) combined.status = 'idle'; // defensive — see openPanelWithPermissionNotice()'s comment
         if (combined.logEntry && combined.logEntry.id === msg.id) combined.logEntry.status = msg.status;
         return combined;
       }).then(function () { sendResponse(resp); }, function () { sendResponse(resp); });

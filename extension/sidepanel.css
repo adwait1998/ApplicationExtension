@@ -325,6 +325,30 @@ button.secondary.cancel:hover { background: var(--err-bg); }
 .remember-row.saved { background: var(--ok-bg); border: 1px solid var(--ok-border); }
 .remember-row.skipped { background: var(--warn-bg); border: 1px solid var(--warn-border); }
 
+/* -- multi-step continuation (item 8) -- */
+.continuation-row {
+  margin: 8px 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.continuation-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.continuation-toggle input { margin: 0; }
+.continuation-step-line {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* -- application log (item 4) -- */
 .log-line {
   margin: 0 12px 8px;

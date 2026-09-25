@@ -33,6 +33,15 @@
     <button id="scanBtn" class="primary">Fill this page</button>
     <button id="cancelBtn" class="secondary cancel" hidden>Cancel</button>
   </div>
+
+  <div class="continuation-row">
+    <label class="continuation-toggle">
+      <input type="checkbox" id="continuationToggle">
+      <span>Keep filling as I go through steps</span>
+    </label>
+    <span id="continuationStepLine" class="continuation-step-line" hidden></span>
+  </div>
+
   <div class="actions">
     <button id="undoBtn" class="secondary" disabled>Undo</button>
     <button id="reportBtn" class="secondary" title="Save this page's form structure (no values) to diagnose a bad fill">Report page</button>
