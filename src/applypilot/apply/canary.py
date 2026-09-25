@@ -299,6 +299,11 @@ _VISA_NAME_RE = re.compile(
     r"e[\s-]?3|e[\s-]?2|j[\s-]?1|ead|green\s*card)\b", re.I)
 
 
+_CATCH_ALL_RE = re.compile(r"\b(not one of|none of|not listed|other)\b.{0,30}\b(visas?|listed|above|options?)\b"
+                           r"|\b(another|other)\s+(visa|permit|type)\b", re.I)
+_SPECIFIC_PERMIT_RE = re.compile(r"\b(visa|card|permit|program|pass)\b", re.I)
+
+
 def _visa_names(text: str) -> set[str]:
     out = set()
     for m in _VISA_NAME_RE.finditer(text or ""):
@@ -416,6 +421,15 @@ def choose_option(question: str, options: list[str], profile: dict) -> tuple[str
         specific = [o for o in fits if _visa_names(o) & mine]
         if len(specific) == 1:
             return specific[0], ""
+    if len(fits) > 1 and mine:
+        # Every other fitting option names some OTHER specific visa or permit
+        # ("Yes, EU Blue Card", "Yes, Ireland Highly Skilled Worker Visa") and
+        # one is the catch-all ("Yes, but not one of the visas listed here"):
+        # for a visa the list doesn't name, the catch-all is the true answer.
+        catch_all = [o for o in fits if _CATCH_ALL_RE.search(o)]
+        named_other = [o for o in fits if o not in catch_all and _SPECIFIC_PERMIT_RE.search(o)]
+        if len(catch_all) == 1 and len(named_other) == len(fits) - 1:
+            return catch_all[0], ""
     if len(fits) == 1:
         return fits[0], ""
     return None, ("no option matches your work-authorization facts" if not fits

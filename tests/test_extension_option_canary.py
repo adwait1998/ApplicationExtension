@@ -138,3 +138,25 @@ def test_permanent_resident_vs_citizen_are_different_claims():
 def test_a_negated_status_is_not_a_claim():
     opts = ["Yes, but I am not a U.S. citizen and will need sponsorship", "No"]
     assert choose_option(WQ, opts, NIDA)[0] == opts[0]
+
+
+GITLAB_SPONSOR_OPTS = ["Yes, Netherlands Highly Skilled Migrant Visa", "Yes, Ireland Highly Skilled Worker Visa",
+                       "Yes, EU Blue Card", "Yes, USMCA Professional (TN) Visa (USA)", "Yes, F-1 Visa OPT (USA)",
+                       "Yes, but not one of the visas listed here", "No"]
+GITLAB_Q = "Will you now or in the future require sponsorship for a visa to remain in your current location?"
+
+
+def test_catch_all_option_for_a_visa_the_list_does_not_name():
+    # Live GitLab options: an H-1B holder's true answer is the catch-all.
+    assert choose_option(GITLAB_Q, GITLAB_SPONSOR_OPTS, NIDA)[0] == "Yes, but not one of the visas listed here"
+
+
+def test_catch_all_is_not_used_when_the_applicants_visa_is_listed():
+    tn = {"work_authorization": {"legally_authorized_to_work": True, "require_sponsorship": True,
+                                 "work_permit_type": "TN"}}
+    assert choose_option(GITLAB_Q, GITLAB_SPONSOR_OPTS, tn)[0] == "Yes, USMCA Professional (TN) Visa (USA)"
+
+
+def test_catch_all_needs_every_other_yes_to_name_a_specific_permit():
+    opts = ["Yes, now", "Yes, but not one of the visas listed here", "No"]
+    assert choose_option(GITLAB_Q, opts, NIDA)[0] is None
