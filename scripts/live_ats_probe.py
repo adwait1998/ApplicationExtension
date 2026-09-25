@@ -279,6 +279,31 @@ UNSEEN_JS = """(ids) => {
   return out.slice(0, 60);
 }"""
 
+# Fields revealed after filling: re-scan and keep only fields none of whose
+# elements were in the previous registry (element identity, not positional
+# ids). The new registry replaces the old one so the next fills resolve.
+RESCAN_JS = r"""() => {
+  const isEl = (x) => x && typeof x === 'object' && x.nodeType === 1;
+  const elsOf = (e) => {
+    const out = [];
+    for (const v of Object.values(e || {})) {
+      if (isEl(v)) out.push(v);
+      else if (Array.isArray(v)) v.forEach(x => { if (isEl(x)) out.push(x); });
+    }
+    return out;
+  };
+  const prev = new Set();
+  for (const k in (window.__AP_REG || {})) elsOf(window.__AP_REG[k]).forEach(x => prev.add(x));
+  const res = ApplyPilotScanner.scanAll(document);
+  window.__AP_REG = res.registry;
+  const fresh = res.fields.filter(f => {
+    const els = elsOf(res.registry[f.id]);
+    return els.length && !els.some(x => prev.has(x));
+  });
+  return { fields: fresh };
+}"""
+
+
 # After every fill in a frame: blur, let the page settle, and read EVERYTHING
 # back. A value that reverted (React re-render, a combobox clearing typed text
 # on blur) is "didn't stick", never "filled".
@@ -392,54 +417,66 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
             continue
         frec = {"frame": furl[:120], "top": frame == page.main_frame, "n_fields": len(fields),
                 "skipped_cross_origin_frames": scan.get("skippedFrames", 0), "fields": []}
-        t1 = time.time()
-        try:
-            plan = resolve(port, token, page.url, fields)
-        except Exception as e:
-            frec["error"] = f"resolve: {str(e)[:160]}"
-            rec["frames"].append(frec)
-            continue
-        frec["resolve_s"] = round(time.time() - t1, 2)
-        by_id = {f["id"]: f for f in fields}
-        results = {}
-        t2 = time.time()
-        for fill in plan.get("fills", []):
-            if not fill.get("auto_fill"):
-                continue
+        # Pass 1 = the scanned fields; passes 2-3 = fields REVEALED by earlier
+        # answers (e.g. Lever's EEO survey after "location"), exactly as the
+        # extension's content.js re-scans after its verify sweep.
+        pass_fields = fields
+        for pass_no in (1, 2, 3):
+            if not pass_fields:
+                break
+            t1 = time.time()
             try:
-                r = frame.evaluate(FILL_JS, [fill["id"], fill["value"], fill.get("values") or []])
+                plan = resolve(port, token, page.url, pass_fields)
             except Exception as e:
-                r = {"ok": False, "detail": f"evaluate: {str(e)[:120]}", "readback": ""}
-            results[fill["id"]] = (fill, r)
-        frec["fill_s"] = round(time.time() - t2, 1)
-        try:
-            settled = frame.evaluate(REREAD_JS, [fid for fid, (_f, r) in results.items() if r.get("ok")])
-        except Exception:
-            settled = {}
-        skipped = {s["id"]: s for s in plan.get("skipped", [])}
-        for f in fields:
-            row = {"label": (f.get("label") or f.get("name") or "")[:90], "tag": f.get("tag"),
-                   "type": f.get("type"), "widget": f.get("widget") or "",
-                   "n_options": len(f.get("options") or []), "required": f.get("required", False)}
-            if f["id"] in results:
-                fill, r = results[f["id"]]
-                settled_val = settled.get(f["id"], "")
-                if not r.get("ok"):
-                    status = "FAILED"
-                elif _stuck(fill["value"], settled_val, f):
-                    status = "verified"
+                frec["error"] = f"resolve: {str(e)[:160]}"
+                break
+            frec.setdefault("resolve_s", round(time.time() - t1, 2))
+            results = {}
+            t2 = time.time()
+            for fill in plan.get("fills", []):
+                if not fill.get("auto_fill"):
+                    continue
+                try:
+                    r = frame.evaluate(FILL_JS, [fill["id"], fill["value"], fill.get("values") or []])
+                except Exception as e:
+                    r = {"ok": False, "detail": f"evaluate: {str(e)[:120]}", "readback": ""}
+                results[fill["id"]] = (fill, r)
+            frec["fill_s"] = round(frec.get("fill_s", 0) + time.time() - t2, 1)
+            try:
+                settled = frame.evaluate(REREAD_JS, [fid for fid, (_f, r) in results.items() if r.get("ok")])
+            except Exception:
+                settled = {}
+            skipped = {s_["id"]: s_ for s_ in plan.get("skipped", [])}
+            for f in pass_fields:
+                row = {"label": (f.get("label") or f.get("name") or "")[:90], "tag": f.get("tag"),
+                       "type": f.get("type"), "widget": f.get("widget") or "", "pass": pass_no,
+                       "n_options": len(f.get("options") or []), "required": f.get("required", False)}
+                if f["id"] in results:
+                    fill, r = results[f["id"]]
+                    settled_val = settled.get(f["id"], "")
+                    if not r.get("ok"):
+                        status = "FAILED"
+                    elif _stuck(fill["value"], settled_val, f):
+                        status = "verified"
+                    else:
+                        status = "DIDNT-STICK"
+                    row.update(status=status, source=fill["source"],
+                               value=str(fill["value"])[:80], readback=settled_val[:80],
+                               detail=r.get("detail"), draft=fill.get("draft", False),
+                               choice=_is_choice(f))
+                elif f["id"] in skipped:
+                    s_ = skipped[f["id"]]
+                    row.update(status="left", source=s_.get("source"), detail=s_.get("reason", "")[:140])
                 else:
-                    status = "DIDNT-STICK"
-                row.update(status=status, source=fill["source"],
-                           value=str(fill["value"])[:80], readback=settled_val[:80],
-                           detail=r.get("detail"), draft=fill.get("draft", False),
-                           choice=_is_choice(f))
-            elif f["id"] in skipped:
-                s = skipped[f["id"]]
-                row.update(status="left", source=s.get("source"), detail=s.get("reason", "")[:140])
-            else:
-                row.update(status="no-plan")
-            frec["fields"].append(row)
+                    row.update(status="no-plan")
+                frec["fields"].append(row)
+            if pass_no == 3:
+                break
+            try:
+                pass_fields = frame.evaluate(RESCAN_JS)["fields"]
+            except Exception:
+                pass_fields = []
+        frec["n_fields"] = len(frec["fields"])
         try:
             frec["unseen"] = frame.evaluate(UNSEEN_JS, [])
             frec["shield_blocked"] = frame.evaluate("() => window.__AP_SHIELD_BLOCKED || 0")
@@ -487,6 +524,9 @@ def summarize(results: list[dict]) -> str:
             st = {}
             for row in fr["fields"]:
                 st[row["status"]] = st.get(row["status"], 0) + 1
+            revealed = sum(1 for row in fr["fields"] if row.get("pass", 1) > 1)
+            if revealed:
+                st["revealed-by-answers"] = revealed
             lines.append(f"- frame {'TOP' if fr['top'] else fr['frame']}: {fr['n_fields']} fields {st}; "
                          f"unseen interactive: {len(fr.get('unseen', []))}; resolve {fr.get('resolve_s')}s, "
                          f"fill {fr.get('fill_s')}s")
