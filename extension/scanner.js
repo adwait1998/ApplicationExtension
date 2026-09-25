@@ -3041,7 +3041,14 @@
       var t = cleanText(nameEls[i].textContent);
       if (t) return t;
     }
-    return '';
+    // S4 also accepts a bare file-upload-item (no -item-name rendered yet -- e.g. mid-upload)
+    // as evidence something is already there; the old check missed this window entirely.
+    var items = doc.querySelectorAll('[data-automation-id="file-upload-item"]');
+    for (var j = 0; j < items.length; j++) {
+      var it = cleanText(items[j].textContent);
+      if (it) return it;
+    }
+    return items.length ? '(attachment present)' : '';
   }
 
   /**
@@ -3132,59 +3139,66 @@
       }
       fireEvents(el, ['input', 'change']);
 
-      // NOTE: no drop event is dispatched here yet, on purpose — see the single, ONE-channel
-      // fallback below this. Some dropzone widgets (react-dropzone and similar) read
-      // e.dataTransfer.files from the drop event itself rather than the input's change event,
-      // but firing it unconditionally, before even checking whether change already worked, is
-      // exactly the double-upload bug the project brief documents.
       var attached = el.files && el.files[0];
       if (attached && attached.name === file.name) {
         return Promise.resolve({ attempted: true, attached: true, filename: attached.name });
       }
 
-      // ONE upload channel only past this point. input.files came back empty -- on a real
-      // Workday tenant that is the EXPECTED outcome (it consumes the File right after the
-      // change event above), not evidence the change event failed, so this must never re-fire
-      // the same delivery a second time. The project brief's "two upload channels" bug was
-      // exactly that: an earlier version of this function dispatched a synthetic 'drop' on the
-      // dropzone UNCONDITIONALLY whenever the target looked drop-zone-shaped, regardless of
-      // whether the change event had already been accepted -- on a tenant whose drop handler
-      // also honours a native 'drop' event, that produced a second, duplicate upload from a
-      // single attach() call. This dispatches 'drop' AT MOST once, and only because change
-      // alone didn't leave a file behind.
-      try {
-        var dzEl = target.isDropzone ? findDropzoneContainer(el) : null;
-        var wdDropzone = doc.querySelector && doc.querySelector('[data-automation-id="file-upload-drop-zone"]');
-        var dropTarget = dzEl || wdDropzone;
-        if (dropTarget) {
-          var EventCtor2 = (view && (view.DragEvent || view.Event)) || (typeof Event !== 'undefined' ? Event : null);
-          if (EventCtor2) {
-            var dropEvt2 = new EventCtor2('drop', { bubbles: true, cancelable: true });
-            try { Object.defineProperty(dropEvt2, 'dataTransfer', { value: dt }); } catch (eDef2) { /* best effort */ }
-            dropTarget.dispatchEvent(dropEvt2);
+      // ONE upload channel, gated correctly. `el.files` coming back empty here is Workday's
+      // NORMAL, SUCCESSFUL outcome (it consumes the File as part of accepting it via `change` --
+      // see the module comment above) -- it is NOT itself evidence that `change` failed, so it
+      // must never be used to decide whether to also try `drop`. The project brief's "two
+      // upload channels" bug was exactly that mistake: firing a synthetic `drop` whenever
+      // `input.files` looked empty re-delivered the SAME file a second time on every successful
+      // Workday upload. The correct signal (S4's own recipe) is whether ANYTHING indicating an
+      // upload appeared at all within a few seconds of `change` alone -- only if genuinely
+      // NOTHING did, try `drop` once, as a fallback for a widget that only reads
+      // e.dataTransfer.files from the drop event itself rather than the input's change event.
+      return waitFor(function () {
+        return (doc.querySelector && (
+          doc.querySelector('[data-automation-id="file-upload-item"]') ||
+          doc.querySelector('[data-automation-id="file-upload-successful"]')
+        )) ? true : false;
+      }, 3000, doc).then(function (sawUploadIndicator) {
+        if (!sawUploadIndicator) {
+          try {
+            var dzEl = target.isDropzone ? findDropzoneContainer(el) : null;
+            var wdDropzone = doc.querySelector && doc.querySelector('[data-automation-id="file-upload-drop-zone"]');
+            var dropTarget = dzEl || wdDropzone;
+            if (dropTarget) {
+              var EventCtor2 = (view && (view.DragEvent || view.Event)) || (typeof Event !== 'undefined' ? Event : null);
+              if (EventCtor2) {
+                var dropEvt2 = new EventCtor2('drop', { bubbles: true, cancelable: true });
+                try { Object.defineProperty(dropEvt2, 'dataTransfer', { value: dt }); } catch (eDef2) { /* best effort */ }
+                dropTarget.dispatchEvent(dropEvt2);
+              }
+            }
+          } catch (eWdDrop) {
+            // best effort only
           }
         }
-      } catch (eWdDrop) {
-        // best effort only
-      }
 
-      // Up to ~20s (S4 polls for ~21s; S9 sleeps 10s) -- longer than any other wait in this
-      // module on purpose: Workday's own upload confirmation is genuinely the slowest thing
-      // this extension ever waits on, and the previous 5s budget was shorter than every source
-      // examined.
-      return waitForWorkdayUploadSuccess(doc, file.name, 20000).then(function (found) {
-        if (found) {
-          return { attempted: true, attached: true, filename: findWorkdayUploadedFilename(doc) || file.name };
-        }
-        var again = el.files && el.files[0];
-        if (again && again.name === file.name) {
-          return { attempted: true, attached: true, filename: again.name };
-        }
-        return {
-          attempted: true,
-          attached: false,
-          reason: 'Assigned the file but could not confirm it stuck (input.files was empty and no upload confirmation appeared).'
-        };
+        // A further wait of up to ~20s for the actual success marker (S4 polls for ~21s; S9
+        // sleeps 10s) -- on top of the up-to-3s wait above, per the brief's own steps (wait for
+        // ANY indicator, maybe try drop, THEN wait for success specifically). Longer than any
+        // other wait in this module on purpose: Workday's own upload confirmation is genuinely
+        // the slowest thing this extension ever waits on, and the previous 5s budget was
+        // shorter than every source examined. This resolves immediately if `sawUploadIndicator`
+        // already WAS the success marker itself.
+        return waitForWorkdayUploadSuccess(doc, file.name, 20000).then(function (found) {
+          if (found) {
+            return { attempted: true, attached: true, filename: findWorkdayUploadedFilename(doc) || file.name };
+          }
+          var again = el.files && el.files[0];
+          if (again && again.name === file.name) {
+            return { attempted: true, attached: true, filename: again.name };
+          }
+          return {
+            attempted: true,
+            attached: false,
+            reason: 'Assigned the file but could not confirm it stuck (input.files was empty and no upload confirmation appeared).'
+          };
+        });
       });
     } catch (e) {
       return Promise.resolve({ attempted: true, attached: false, reason: 'Error while attaching résumé: ' + (e && e.message ? e.message : String(e)) });

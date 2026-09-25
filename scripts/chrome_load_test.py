@@ -11,7 +11,12 @@ import pathlib
 import sys
 import tempfile
 
-EXT = pathlib.Path(r"E:\auto-apply-pipeline\extension")
+# Resolved relative to this script's own location (not hardcoded to the main checkout) so this
+# loads whichever extension/ this script itself lives next to -- the main checkout when run
+# there, or a git worktree's own copy when run from inside one, which is where this most often
+# actually runs from (each worktree needs to prove ITS OWN scanner.js/test-page.html changes,
+# never a stale copy elsewhere on disk).
+EXT = pathlib.Path(__file__).resolve().parent.parent / "extension"
 PAGE = (EXT / "test-page.html").as_uri()
 
 from playwright.sync_api import sync_playwright  # noqa: E402 — after EXT/PAGE consts
@@ -280,7 +285,7 @@ with sync_playwright() as p:
         #     negative controls below prove the mock can tell right from wrong.
         page.evaluate("() => { window.__WD_SUBMIT_COUNT__ = 0; window.__FORM_SUBMITTED__ = false; }")
 
-        wd_dates = page.evaluate("""() => {
+        wd_dates = page.evaluate("""async () => {
             const S = ApplyPilotScanner, $ = id => document.getElementById(id);
             // Negative control: the OLD technique (value + input/change) must be REVERTED.
             S.setNativeValue($('wd_start_month'), '6');
@@ -288,19 +293,46 @@ with sync_playwright() as p:
             const w = S.findWorkdayDateWrappers(document);
             const my = w.find(x => x.shape === 'my' && x.monthEl && x.monthEl.id === 'wd_start_month');
             const y = w.find(x => x.shape === 'y' && x.yearEl && x.yearEl.id === 'wd_edu_from_year');
-            const okMy = S.setWorkdayDateValue(Object.assign({kind: 'wd-date-my'}, my), '06/2023');
-            const okY = S.setWorkdayDateValue(Object.assign({kind: 'wd-date-y'}, y), '08/2021');
-            return { oldTechnique, found: w.length, okMy, okY,
+            const mdy = w.find(x => x.shape === 'mdy');
+            // setWorkdaySpinnerValue/setWorkdayDateValue are now asynchronous (a real yield is
+            // the fix for the "hangs on dates" report -- see the project brief), so these must
+            // be awaited like the dropdown/prompt widgets below.
+            const okMy = await S.setWorkdayDateValue(Object.assign({kind: 'wd-date-my'}, my), '06/2023');
+            const okY = await S.setWorkdayDateValue(Object.assign({kind: 'wd-date-y'}, y), '08/2021');
+            const okMdy = await S.setWorkdayDateValue(Object.assign({kind: 'wd-date-mdy'}, mdy), '07/04/2026');
+            return { oldTechnique, found: w.length, okMy, okY, okMdy,
                      month: $('wd_start_month').value, year: $('wd_start_year').value,
-                     eduYear: $('wd_edu_from_year').value };
+                     eduYear: $('wd_edu_from_year').value,
+                     monthDisplay: $('wd_start_month-display').textContent,
+                     yearDisplay: $('wd_start_year-display').textContent,
+                     selfid: S.getWorkdayDateValue(Object.assign({kind: 'wd-date-mdy'}, mdy)) };
         }""")
         check("NEGATIVE CONTROL: the old value+input/change technique is reverted by the mock",
               wd_dates["oldTechnique"] in ("", None), json.dumps(wd_dates))
-        check("Workday MM/YYYY spinner commits 06/2023 via the ArrowUp technique",
+        check("Workday MM/YYYY spinner commits 06/2023 via the async set-then-ArrowUp technique",
               wd_dates["okMy"] is True and str(int(wd_dates["month"] or 0)) == "6"
               and wd_dates["year"] == "2023", json.dumps(wd_dates))
+        check("the \"-display\" divs show the committed values, never left showing the placeholder",
+              wd_dates["monthDisplay"] == "06" and wd_dates["yearDisplay"] == "2023", json.dumps(wd_dates))
         check("Workday year-only spinner commits 2021 (variant needing TWO ArrowUps)",
               wd_dates["okY"] is True and wd_dates["eduYear"] == "2021", json.dumps(wd_dates))
+        check("Workday Month+Day+Year (Self-Identify shape) commits all three parts, Day is never dropped",
+              wd_dates["okMdy"] is True and wd_dates["selfid"] == "07/04/2026", json.dumps(wd_dates))
+
+        # A dateInputWrapper whose spinbutton input is genuinely invisible (visibility:hidden)
+        # behind its own visible "-display" div must still fill -- gating on the input's own
+        # visibility (the old bug) refuses this; gating on the wrapper's visibility does not.
+        wd_hidden = page.evaluate("""async () => {
+            const S = ApplyPilotScanner, $ = id => document.getElementById(id);
+            const hiddenVisible = S.isVisible($('wd_hidden_month'));
+            const w = S.findWorkdayDateWrappers(document).find(x => x.monthEl && x.monthEl.id === 'wd_hidden_month');
+            const ok = await S.setWorkdayDateValue(Object.assign({kind: 'wd-date-my'}, w), '04/2018');
+            return { hiddenVisible, ok, value: S.getWorkdayDateValue(Object.assign({kind: 'wd-date-my'}, w)) };
+        }""")
+        check("the hidden spinbutton input is genuinely invisible in a REAL layout engine",
+              wd_hidden["hiddenVisible"] is False, json.dumps(wd_hidden))
+        check("a fill still succeeds when the input is invisible but its wrapper is visible (real browser)",
+              wd_hidden["ok"] is True and wd_hidden["value"] == "04/2018", json.dumps(wd_hidden))
 
         def dropdown(button_id, value):
             return page.evaluate("""async ([bid, v]) => {
@@ -358,6 +390,40 @@ with sync_playwright() as p:
         check("Workday's real submit button is refused by every new guard",
               guard["hardDeny"] is True and guard["opener"] is False and guard["option"] is False,
               json.dumps(guard))
+
+        # 5f. Self-Identify disability CheckboxGroup (CC-305): a single-choice question backed
+        #     by independent checkboxes, "requires exactly one selection". Also proves
+        #     agreementCheckbox (terms/consent) is never offered as fillable and is refused by
+        #     its own guard even if targeted directly -- a real layout engine, not jsdom.
+        cg = page.evaluate("""() => {
+            const S = ApplyPilotScanner, $ = id => document.getElementById(id);
+            const scanned = S.scanFields(document);
+            const cgField = scanned.fields.find(f => f.type === 'checkbox-group');
+            const cgEntry = cgField && scanned.registry[cgField.id];
+            const agreementScanned = scanned.fields.some(f => scanned.registry[f.id] && scanned.registry[f.id].el === $('wd_agreement_checkbox'));
+            const okYes = cgEntry ? S.applyFill(cgEntry, 'Yes, I have a disability, or have had one in the past') : null;
+            const yesChecked = $('wd_disability_yes').checked, noChecked = $('wd_disability_no').checked;
+            const okDecline = cgEntry ? S.applyFill(cgEntry, 'Decline to self-identify') : null;
+            return {
+                found: !!cgField, options: cgField && cgField.options, label: cgField && cgField.label,
+                agreementScanned, okYes, yesChecked, noChecked,
+                okDecline, declineChecked: $('wd_disability_decline').checked,
+                yesStillCheckedAfterSwitch: $('wd_disability_yes').checked,
+                agreementGuard: S.isWorkdayCheckboxGroupOptionSafe($('wd_agreement_checkbox'), $('wd_disability_group')),
+                agreementStillUnchecked: $('wd_agreement_checkbox').checked === false
+            };
+        }""")
+        check("the disabilityStatus CheckboxGroup is scanned as one type=checkbox-group field with the 3 CC-305 options",
+              cg["found"] is True and len(cg["options"] or []) == 3, json.dumps(cg))
+        check("agreementCheckbox (terms/consent) is never scanned as a fillable field at all, in a real browser",
+              cg["agreementScanned"] is False, json.dumps(cg))
+        check("checkbox-group: exact CC-305 text checks exactly that box",
+              cg["okYes"] is True and cg["yesChecked"] is True and cg["noChecked"] is False, json.dumps(cg))
+        check("checkbox-group: the decline answer-family matches, and switching answers unchecks the previous one",
+              cg["okDecline"] is True and cg["declineChecked"] is True and cg["yesStillCheckedAfterSwitch"] is False,
+              json.dumps(cg))
+        check("agreementCheckbox is refused by the checkbox-group guard even targeted directly, and was never ticked",
+              cg["agreementGuard"] is False and cg["agreementStillUnchecked"] is True, json.dumps(cg))
 
         # 5b. Résumé attachment. jsdom has no DataTransfer/DragEvent at all, so
         #     this mechanism is entirely unverified until it runs here. The
@@ -423,6 +489,42 @@ with sync_playwright() as p:
               wd_up["again"].get("attached") is not True
               and "already" in json.dumps(wd_up["again"]).lower(), json.dumps(wd_up["again"]))
         check("still exactly one uploaded-file card", wd_up["cards"] == 1, json.dumps(wd_up))
+
+        # NEGATIVE CONTROL (project brief §5, "two upload channels"): this dropzone answers
+        # BOTH a native 'drop' (see test-page.html) and 'change', each independently adding a
+        # card -- exactly the shape that produced a duplicate attachment before the fix. Cleans
+        # up the cards the tests above already created so this exercises one fresh attach() end
+        # to end, through the real code path (unlike the "again" duplicate-prevention check
+        # above, which short-circuits before ever reaching the drop-fallback logic at all).
+        wd_double = page.evaluate("""async () => {
+            const S = ApplyPilotScanner;
+            document.getElementById('wd_resume_uploaded_area').innerHTML = '';
+            document.getElementById('wd_resume_input').value = '';
+            // Isolate the Workday dropzone as the ONLY résumé-eligible candidate on this shared
+            // page: findResumeFileTarget() would otherwise rank gh_resume_input above it (the
+            // earlier "5b" check already used gh_resume_input and left a file sitting in it),
+            // which would silently test the wrong input entirely -- a plain file input has no
+            // Workday mock behaviour at all, so that would report "success" without ever
+            // exercising attachResumeFile()'s drop-fallback logic this control exists to prove.
+            const others = ['cover_letter_upload', 'attach_upload', 'gh_resume_input'].map(id => document.getElementById(id));
+            const removed = others.map(el => ({ el, parent: el.parentElement, next: el.nextSibling }));
+            removed.forEach(({ el, parent }) => parent.removeChild(el));
+            try {
+                const file = new File([new Uint8Array([37, 80, 68, 70])], 'no-duplicate.pdf', { type: 'application/pdf' });
+                const target = S.findResumeFileTarget(document);
+                const res = await S.attachResumeFile(document, file);
+                const cards = document.querySelectorAll('[data-automation-id="file-upload-item"]').length;
+                return { targetId: target && target.el.id, res, cards };
+            } finally {
+                removed.forEach(({ el, parent, next }) => parent.insertBefore(el, next));
+            }
+        }""")
+        check("this negative control genuinely targets the Workday dropzone (not some other file input)",
+              wd_double.get("targetId") == "wd_resume_input", json.dumps(wd_double))
+        check("attachResumeFile() on a widget answering BOTH change and drop still reports success",
+              (wd_double.get("res") or {}).get("attached") is True, json.dumps(wd_double))
+        check("NEGATIVE CONTROL: exactly ONE uploaded-file card results, never two, from a single attachResumeFile() call",
+              wd_double["cards"] == 1, json.dumps(wd_double))
 
         # The cover-letter input must still be empty — attaching to the wrong
         # field would send the résumé as a cover letter.
