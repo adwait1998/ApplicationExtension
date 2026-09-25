@@ -380,6 +380,11 @@ def _location_for_options(field: FieldDescriptor, profile: dict, prefer: str) ->
              "personal.country": per.get("country")}
     if not field.options:
         key = "personal.city" if prefer == "personal.location" else prefer
+        if key == "personal.city" and (field.widget or "") == "combobox" and parts.get("personal.city")                 and parts.get("personal.province_state"):
+            # A city type-ahead (Greenhouse "Location (City)", geocoded options
+            # like "Seattle, Washington, United States"): the state lets the
+            # driver pick THE Seattle instead of refusing several.
+            return f"{parts['personal.city']}, {parts['personal.province_state']}"
         return parts.get(key) or None
     order = ["personal.city", "personal.province_state", "personal.country"]
     if prefer in order:

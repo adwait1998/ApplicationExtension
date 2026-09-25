@@ -134,3 +134,9 @@ def test_greenhouse_education_run_fills_split_dates():
     got = {r.id: r.value for r in plan.fills}
     assert got["sm"] == "September" and got["sy"] == "2015" and got["em"] == "June" and got["ey"] == "2019"
     assert "y" not in got   # the run ended at LinkedIn; a later bare "Start date" is not education
+
+
+def test_city_typeahead_gets_city_and_state_for_disambiguation():
+    fd = F(id="c", label="Location (City)*", type="text", widget="combobox")
+    assert _v(fd) == "Seattle, Washington"
+    assert _v(F(id="t", label="Location (City)*", type="text")) == "Seattle"   # a plain text box: city only
