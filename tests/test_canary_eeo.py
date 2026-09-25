@@ -72,3 +72,26 @@ def test_pronouns_come_from_profile_or_stay_unresolved():
 ])
 def test_non_eeo_lookalikes_are_not_canary(q):
     assert not is_canary(q)
+
+
+NIDA_WA = {"work_authorization": {"legally_authorized_to_work": True, "require_sponsorship": True}}
+CITIZEN_WA = {"work_authorization": {"legally_authorized_to_work": True, "require_sponsorship": False}}
+
+
+@pytest.mark.parametrize("q", [
+    "Can you work in the US without restrictions?",
+    "Do you have unrestricted work rights in the US?",
+    "Are you able to work without an employer visa?",
+])
+def test_unrestricted_work_is_not_the_same_as_authorized(q):
+    # A visa holder IS authorized but NOT unrestricted.
+    assert resolve_canary(q, NIDA_WA) == "No"
+    assert resolve_canary(q, CITIZEN_WA) == "Yes"
+
+
+def test_right_to_work_is_authorization():
+    assert resolve_canary("Do you have the right to work in the United States?", NIDA_WA) == "Yes"
+
+
+def test_without_restrictions_outside_work_is_not_a_canary():
+    assert not is_canary("Describe a project delivered without restrictions on scope")

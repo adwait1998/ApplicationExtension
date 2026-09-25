@@ -224,7 +224,7 @@ def resolve_field(
         answer = canary.resolve_canary(label, profile)
         category = _canary_category(label)
         options = [o for o in (field.options or []) if o and o.strip()]
-        if answer and options and (category in ("workauth", "sponsorship")
+        if answer and options and (category in ("workauth", "workauth_unrestricted", "sponsorship")
                                    or answer == canary._EEO_DECLINE):
             # The options may bundle facts ("Yes, I am a U.S. citizen or
             # permanent resident" vs "Yes, ... will require sponsorship"):

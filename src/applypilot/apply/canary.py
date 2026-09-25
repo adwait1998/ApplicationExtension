@@ -16,7 +16,16 @@ from __future__ import annotations
 import re
 
 _MARKERS = {
-    "workauth": re.compile(r"\b(authoriz\w+|eligible to work|legally able|work permit)\b", re.I),
+    "workauth": re.compile(r"\b(authoriz\w+|eligible to work|legally able|work permit|right to work|work rights)\b",
+                           re.I),
+    # "Can you work in the US without restrictions?" is a different question
+    # from "are you authorized?": a visa holder IS authorized but NOT
+    # unrestricted. Answered as authorized AND not needing sponsorship.
+    "workauth_unrestricted": re.compile(
+        r"^(?=.*\b(?:work|employ\w*)\b).*?"
+        r"\b(?:without\s+(?:any\s+)?(?:restrictions?|limitations?|an?\s+employer[-\s]?(?:sponsored\s+)?visa)"
+        r"|unrestricted)\b",
+        re.I),
     "sponsorship": re.compile(r"\b(sponsor\w*|visa)\b", re.I),
     "citizenship": re.compile(r"\b(citizen\w*|us person|green card|permanent resident)\b", re.I),
     "salary": re.compile(r"\b(salary|compensation|pay expectation|expected (pay|comp))\b", re.I),
@@ -216,6 +225,12 @@ def resolve_canary(question: str, profile: dict) -> str | None:
         if not re.search(r"\b(require|need|without|now or in the future|will you|can you|are you able)\b", q, re.I):
             return None
         return _yn(not requires) if negated else _yn(requires)
+    if _MARKERS["workauth_unrestricted"].search(q):
+        authorized = _as_bool(wa.get("legally_authorized_to_work"))
+        requires = _as_bool(wa.get("require_sponsorship"))
+        if authorized is None or requires is None:
+            return None  # can't state an unrestricted right to work from partial facts
+        return _yn(authorized and not requires)
     if _MARKERS["workauth"].search(q):
         authorized = _as_bool(wa.get("legally_authorized_to_work"))
         if authorized is None:
