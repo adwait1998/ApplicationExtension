@@ -274,6 +274,12 @@ def resolve_canary(question: str, profile: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 _CITIZEN_CLAIM = re.compile(r"\b(citizen|permanent\s+resident|green\s*card|lawful\s+permanent)\b", re.I)
+_CITIZEN_WORD = re.compile(r"\bcitizen(ship)?\b", re.I)
+_PR_WORD = re.compile(r"\b(permanent\s+resident|green\s*card|lawful\s+permanent)\b", re.I)
+# "not a U.S. citizen", "non-citizen", "neither a citizen nor ..." — the claim
+# itself negated.
+_STATUS_NEGATED = re.compile(
+    r"\b(not|non|neither)[-\s]+(a\s+|an\s+)?(u\.?\s?s\.?\s+)?(citizen|permanent\s+resident|green\s*card)", re.I)
 _NEG_NEAR = re.compile(r"\b(not|no|never|without|don'?t|do\s+not|will\s+not|won'?t)\b", re.I)
 _SPONSOR_WORD = re.compile(r"\bsponsor\w*\b|\bvisa\b", re.I)
 _NEED_WORD = re.compile(r"\b(require|requires|required|need|needs|will\s+need)\b", re.I)
@@ -308,6 +314,37 @@ def _polarity(text: str) -> str | None:
     if re.match(r"^no\b", t):
         return "no"
     return None
+
+
+def _status(wa: dict) -> str | None:
+    """'citizen', 'pr' (permanent resident / green card), 'visa', or None."""
+    kind = str(wa.get("work_permit_type") or wa.get("citizenship") or "").strip()
+    if not kind:
+        return None
+    if re.search(r"\bcitizen", kind, re.I):
+        return "citizen"
+    if _PR_WORD.search(kind) or re.search(r"\blpr\b", kind, re.I):
+        return "pr"
+    if _VISA_TYPES.search(kind):
+        return "visa"
+    return None
+
+
+def _status_claim_ok(option: str, status: str | None) -> bool:
+    """An option that asserts citizenship or permanent residency is only
+    consistent with a profile that states it: "citizen" needs a citizen,
+    "permanent resident / green card" needs a PR, "citizen or permanent
+    resident" needs either. A negated claim ("not a U.S. citizen") asserts
+    nothing about being one."""
+    if _STATUS_NEGATED.search(option):
+        return True
+    says_citizen = bool(_CITIZEN_WORD.search(option))
+    says_pr = bool(_PR_WORD.search(option))
+    if not (says_citizen or says_pr):
+        return True
+    if says_citizen and says_pr:
+        return status in ("citizen", "pr")
+    return status == ("citizen" if says_citizen else "pr")
 
 
 def _citizen_or_pr(wa: dict) -> bool | None:
@@ -355,7 +392,7 @@ def choose_option(question: str, options: list[str], profile: dict) -> tuple[str
         return (exact[0], "") if len(exact) == 1 else (None, "no exact option")
     want_pol = _polarity(answer)
     needs = _as_bool(wa.get("require_sponsorship"))
-    citizen = _citizen_or_pr(wa)
+    status = _status(wa)
     mine = _visa_names(str(wa.get("work_permit_type") or ""))
     fits = []
     for o in opts:
@@ -364,7 +401,7 @@ def choose_option(question: str, options: list[str], profile: dict) -> tuple[str
             continue
         if want_pol and not pol and not _SPONSOR_WORD.search(o) and not _CITIZEN_CLAIM.search(o):
             continue  # an option with no yes/no and no facts says nothing we can check
-        if _CITIZEN_CLAIM.search(o) and not _NEG_NEAR.search(o) and citizen is not True:
+        if not _status_claim_ok(o, status):
             continue  # never claim citizenship/permanent residency the profile doesn't state
         claim = _sponsorship_claim(o)
         if claim is not None and (needs is None or claim != needs):

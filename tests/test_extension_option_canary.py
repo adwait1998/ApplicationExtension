@@ -106,3 +106,35 @@ def test_no_sponsorship_needed_picks_the_no_option():
 
 def test_generic_yes_options_that_differ_only_in_timing_stay_with_the_applicant():
     assert choose_option(SQ, ["Yes, now", "Yes, in the future", "No"], NIDA)[0] is None
+
+
+GREEN_CARD = {"work_authorization": {"legally_authorized_to_work": True, "require_sponsorship": False,
+                                     "work_permit_type": "Green Card"}}
+WQ = "Are you legally authorized to work in the United States?"
+
+
+@pytest.mark.parametrize("opts", [
+    ["Yes, I am a U.S. citizen or permanent resident", "No, I will require sponsorship"],
+    ["Yes, I am a U.S. citizen", "No"],
+])
+def test_visa_holder_never_gets_a_citizenship_option_even_when_it_is_the_only_yes(opts):
+    assert choose_option(WQ, opts, NIDA)[0] is None
+
+
+def test_a_leading_no_does_not_hide_a_citizenship_claim():
+    # "No, I am a U.S. citizen" CLAIMS citizenship; a green-card holder is not a citizen.
+    opts = ["Yes, I will require sponsorship", "No, I am a U.S. citizen"]
+    assert choose_option("Will you now or in the future require sponsorship?", opts, GREEN_CARD)[0] is None
+
+
+def test_permanent_resident_vs_citizen_are_different_claims():
+    either = ["Yes, I am a U.S. citizen or permanent resident", "Yes, I need sponsorship", "No"]
+    citizen_only = ["Yes, I am a U.S. citizen", "Yes, I need sponsorship", "No"]
+    assert choose_option(WQ, either, GREEN_CARD)[0] == either[0]
+    assert choose_option(WQ, citizen_only, GREEN_CARD)[0] is None
+    assert choose_option(WQ, citizen_only, CITIZEN)[0] == citizen_only[0]
+
+
+def test_a_negated_status_is_not_a_claim():
+    opts = ["Yes, but I am not a U.S. citizen and will need sponsorship", "No"]
+    assert choose_option(WQ, opts, NIDA)[0] == opts[0]
