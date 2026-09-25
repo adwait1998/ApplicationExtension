@@ -223,6 +223,43 @@ def fixtures_promote(
 # belongs to a separate task and lands as its own command on this sub-app.
 # ---------------------------------------------------------------------------
 
+extension_app = typer.Typer(help="The Copilot Chrome extension's local plumbing.")
+app.add_typer(extension_app, name="extension")
+
+
+@extension_app.command("install-host")
+def extension_install_host() -> None:
+    """Let the extension start the local service itself: no terminal, no token to paste.
+
+    Registers a Chrome native-messaging host for this user (HKCU, no admin),
+    pins the unpacked extension's ID with a manifest "key", and writes a
+    launcher that uses this install's data directory. Reload the extension in
+    chrome://extensions afterwards. Undo with `applypilot extension uninstall-host`.
+    """
+    from pathlib import Path
+
+    from applypilot import config
+    from applypilot.extension import native_install
+
+    repo_ext = Path(__file__).resolve().parents[2] / "extension"
+    result = native_install.install(repo_ext, Path(config.APP_DIR))
+    console.print(f"[green]Native host installed.[/green] Extension ID: {result['extension_id']}")
+    console.print(f"Host manifest: {result['manifest']}")
+    console.print("Reload the extension in chrome://extensions (its ID is now pinned).")
+
+
+@extension_app.command("uninstall-host")
+def extension_uninstall_host() -> None:
+    """Remove the native-messaging host registration and launcher."""
+    from pathlib import Path
+
+    from applypilot import config
+    from applypilot.extension import native_install
+
+    native_install.uninstall(Path(config.APP_DIR))
+    console.print("Native host removed.")
+
+
 profile_app = typer.Typer(help="Manage the people ApplyPilot applies for.")
 app.add_typer(profile_app, name="profile")
 
