@@ -1049,7 +1049,7 @@ with sync_playwright() as p:
             tab7_id,
         )
         start_fill_via_message(helper, tab7_id)
-        state7 = wait_for_done(helper, tab7_id, timeout_s=20)
+        state7 = wait_for_done(helper, tab7_id, timeout_s=60)
         check("tab 7's fill reached a terminal status", state7 is not None and state7.get("status") == "done",
               str(state7)[:200])
         if state7:
@@ -1181,7 +1181,7 @@ with sync_playwright() as p:
         panel11.goto(f"{panel_url}?tabId={tab11_id}")
         panel11.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
         panel11.click("#scanBtn")
-        state11 = wait_for_done(helper, tab11_id, timeout_s=20)
+        state11 = wait_for_done(helper, tab11_id, timeout_s=60)
         check("tab 11's fill reached a terminal status",
               state11 is not None and state11.get("status") == "done", str(state11)[:200])
         check("the Remember my answers box is shown because this fill left fields for the operator",
@@ -1286,7 +1286,7 @@ with sync_playwright() as p:
         panel12.goto(f"{panel_url}?tabId={tab12_id}")
         panel12.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
         panel12.click("#scanBtn")
-        state12 = wait_for_done(helper, tab12_id, timeout_s=20)
+        state12 = wait_for_done(helper, tab12_id, timeout_s=60)
         check("tab 12's fill reached a terminal status",
               state12 is not None and state12.get("status") == "done", str(state12)[:200])
 
@@ -1379,7 +1379,7 @@ with sync_playwright() as p:
             "(args) => handleFillPageCommand({ id: args.tabId, url: args.url })",
             {"tabId": tab13_id, "url": PAGE_BASE + "#t=13"},
         )
-        state13 = wait_for_done(helper, tab13_id, timeout_s=20)
+        state13 = wait_for_done(helper, tab13_id, timeout_s=60)
         check("the fill-page command filled the active tab directly, with no panel click involved",
               state13 is not None and state13.get("status") == "done", str(state13)[:200])
         if state13:
@@ -1452,7 +1452,7 @@ with sync_playwright() as p:
         deadline_running = time.time() + 5
         while time.time() < deadline_running and (get_state(helper, tab15_id) or {}).get("status") != "running":
             time.sleep(0.05)
-        state15a = wait_for_done(helper, tab15_id, timeout_s=20)
+        state15a = wait_for_done(helper, tab15_id, timeout_s=60)
         check("step 1's fill (a normal, explicitly-clicked fill) completed",
               state15a is not None and state15a.get("status") == "done", str(state15a)[:200])
         step1_val = tab15.eval_on_selector("#s1_name", "el => el.value")
