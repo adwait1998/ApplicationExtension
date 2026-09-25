@@ -214,11 +214,21 @@ Disclosures → Self Identify, exporting a fill report at each step. Pass if: ev
 field of study and skill shows **verified**; exactly one résumé file card; EEO answers show your
 values or a decline; the agreement checkbox is untouched; on the disability form the right box is
 ticked and the signature is left for you; the extension never pressed Next or Submit; Undo on My
-Experience puts back three fields you spot-check.
+Experience puts back three fields you spot-check. Rows marked **kept your value** on My Experience
+are usually Workday's own résumé parse from an earlier step — compare them with your profile and
+use **Replace kept values with my profile** where Workday got it wrong. If Workday sends you to a
+sign-in or SSO page, "Keep filling as I go" must stop there (it never follows a change of site).
 
 **D. Your real profile (10 min).** One Greenhouse job-boards posting and one Ashby posting: the
 work-authorization and sponsorship answers match your situation (for a visa holder: authorized,
-needs sponsorship — never a citizenship option). Export the fill reports.
+needs sponsorship — never a citizenship option); any EEO answers you set (not just declines), the
+salary, the phone Country and the Location (City) come out right. Export the fill reports.
+
+**E. Privacy (3 min).** In Settings → Smart fill, with "Allow AI features to use a model that isn't
+on this computer" OFF, the AI-model line names your provider and says whether it runs on this
+computer. Draft cover letter and Tailor my résumé either run on the local model or refuse with the
+gate message — nothing is sent anywhere else. (Cover letters and tailoring fetch the PUBLIC job
+posting from the ATS's public API; no personal data goes with it.)
 
 ## 1. TL;DR daily flow
 
