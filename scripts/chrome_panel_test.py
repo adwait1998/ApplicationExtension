@@ -23,15 +23,24 @@ chrome.scripting.executeScript's own `func` form targeting the SAME tab/frame wi
 isolated world — which is the same world content.js already runs in, so this patches the exact
 function content.js calls, without editing a single line of scanner.js or test-page.html.
 """
+import base64
+import hashlib
 import json
 import pathlib
+import socket
 import sys
 import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EXT = pathlib.Path(r"E:\auto-apply-pipeline\extension")
+# Resolved relative to this script's own location (repo_root/scripts/.. -> repo_root/extension)
+# rather than a hardcoded absolute path: this repo is worked on from multiple git worktrees at
+# once, each with its own extension/ copy, and this test must exercise WHICHEVER copy sits next
+# to it (i.e. the worktree it's actually run from) so it proves out that worktree's own changes
+# instead of some other checkout's — and so two worktrees running this concurrently never race
+# on the same files.
+EXT = pathlib.Path(__file__).resolve().parent.parent / "extension"
 MANIFEST_PATH = EXT / "manifest.json"
 TEST_PAGE_BYTES = (EXT / "test-page.html").read_bytes()
 
@@ -70,11 +79,43 @@ check("manifest requests the webNavigation permission (needed to enumerate a tab
 check("minimum_chrome_version bumped to 116 (chrome.sidePanel.setPanelBehavior needs it)",
       manifest.get("minimum_chrome_version") == "116", manifest.get("minimum_chrome_version"))
 
+# --- item 1: auto-connect via native messaging ---
+check("manifest requests the nativeMessaging permission (auto-connect)",
+      "nativeMessaging" in (manifest.get("permissions") or []))
+
+
+def _chrome_extension_id_from_key(b64_key: str) -> str:
+    """Same algorithm as applypilot.extension.native_install.extension_id_from_key, duplicated
+    here (stdlib only, no dependency on the applypilot package being importable from wherever
+    this script runs) so this file can prove manifest.json's pinned "key" really does derive to
+    the id the native host's allowed_origins names, independently."""
+    digest = hashlib.sha256(base64.b64decode(b64_key)).hexdigest()[:32]
+    return "".join(chr(ord("a") + int(c, 16)) for c in digest)
+
+
+EXPECTED_EXTENSION_ID = "noooclaijfiejnfgabkemnpabcbdnaac"
+check("manifest has a pinned \"key\" that derives to the native host's allowed extension id",
+      bool(manifest.get("key")) and _chrome_extension_id_from_key(manifest["key"]) == EXPECTED_EXTENSION_ID,
+      (manifest.get("key") or "")[:40] + "...")
+
+# --- item 7: keyboard shortcuts ---
+commands = manifest.get("commands") or {}
+check("manifest declares _execute_action with the Alt+Shift+F suggested key (opens the panel)",
+      (commands.get("_execute_action") or {}).get("suggested_key", {}).get("default") == "Alt+Shift+F",
+      json.dumps(commands.get("_execute_action")))
+check("manifest declares a fill-page command with the Alt+Shift+G suggested key",
+      (commands.get("fill-page") or {}).get("suggested_key", {}).get("default") == "Alt+Shift+G",
+      json.dumps(commands.get("fill-page")))
+
 
 # ---------------------------------------------------------------------------
 # 1. a tiny stub of the local ApplyPilot service — stdlib only, ephemeral port.
 # ---------------------------------------------------------------------------
 resolve_calls = []  # (url, [field names requested]) — lets a check below prove RESOLVE ran
+cover_letter_calls = []  # every /cover-letter request body — item 2
+answers_learn_calls = []  # every /answers/learn request's `items` list — item 3
+log_calls = []  # every /log request body — item 4
+log_status_calls = []  # every (entry_id, status) POSTed to /log/{id}/status — item 4
 
 
 def value_for_field(f):
@@ -97,11 +138,18 @@ def build_fills(fields):
     for f in fields:
         widget = f.get("widget") or ""
         ftype = (f.get("type") or "").lower()
+        name = f.get("name") or ""
         # Keep the stub's own logic trivial: leave Workday's own popup/prompt widgets and
         # anything unfillable to the "needs you" pile. The timeout/cancel tabs below control
         # timing by patching applyFill() directly, not by relying on any particular widget's
-        # real timing, so nothing here needs to touch wd-dropdown/wd-prompt at all.
-        if widget in ("wd-prompt", "wd-dropdown") or ftype in ("hidden", "file", "submit", "button", "image", "reset"):
+        # real timing, so nothing here needs to touch wd-dropdown/wd-prompt at all. "password" is
+        # skipped the same way file/hidden/etc. always were (matches content.js's own "remember my
+        # answers" exclusion — see item 3). Anything named "remember_test_*" is ALSO always left
+        # for the human regardless of type — the REMEMBER MY ANSWERS fixture below relies on this
+        # to get plain text fields into the "needs you" pile on demand.
+        if (widget in ("wd-prompt", "wd-dropdown")
+                or ftype in ("hidden", "file", "submit", "button", "image", "reset", "password")
+                or name.startswith("remember_test_")):
             skipped.append({"id": f["id"], "reason": "test stub: left for you"})
             continue
         fills.append({
@@ -172,6 +220,89 @@ WRAPPER_HTML_BYTES = f"""<!DOCTYPE html>
 </body></html>
 """.encode("utf-8")
 
+# A tiny fixture for item 2 (Draft cover letter): visible job-posting-shaped copy (proves the
+# extracted page text excludes form-field text and includes real body copy) plus one
+# textarea whose label says "cover letter" (proves the panel's Insert button/flow). Which
+# /cover-letter response the stub below returns is picked by a marker in the URL's OWN hash
+# fragment (never sent over the wire by the browser, but still part of the JSON `urls` this
+# test's own JS sends as DATA) — see StubHandler.do_POST — so this one page can drive the
+# success AND the 403/422 paths without extra fixture files.
+COVER_LETTER_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Great Company Careers</title></head>
+<body>
+<h1>Great Company Careers</h1>
+<p>We are looking for a fantastic engineer to join our team and build great things every day.</p>
+<form id="cl-form">
+  <label for="cl">Cover Letter (optional)</label>
+  <textarea id="cl" name="cover_letter"></textarea>
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('cl-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+</script>
+</body></html>
+"""
+
+# A tiny fixture for item 3 (Remember my answers): three fields the stub's build_fills() always
+# leaves as "needs you" (name prefix "remember_test_", plus the password field via its real
+# type) regardless of what's typed into them — so this test can simulate the operator answering
+# a fill's leftover questions themselves, then click "Remember my answers", without depending on
+# any particular widget being left unfilled for real reasons elsewhere on test-page.html.
+REMEMBER_ANSWERS_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Remember Answers Fixture</title></head>
+<body>
+<form id="ra-form">
+  <label for="notice_period">What is your notice period?</label>
+  <input type="text" id="notice_period" name="remember_test_skip_notice">
+  <label for="salary_expect">Desired salary</label>
+  <input type="text" id="salary_expect" name="remember_test_skip_salary" required>
+  <label for="fake_password">Set a password for this portal (optional)</label>
+  <input type="password" id="fake_password" name="fake_password">
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('ra-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+</script>
+</body></html>
+"""
+
+# A tiny fixture for item 8 (multi-step continuation): step 1's field lives in #step-root;
+# window.__goToStep2()/__goToStep3() replace #step-root's own markup (standing in for a
+# Workday-style SPA step transition this test drives directly — the extension itself must never
+# click Next, see README "The one rule that matters") AND push a new URL, so both of
+# runContinuationCheck()'s signals (form root replaced, url changed) fire together.
+MULTI_STEP_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Multi-Step Fixture</title></head>
+<body>
+<div id="step-root">
+  <h2>Step 1</h2>
+  <label for="s1_name">Full Name</label>
+  <input type="text" id="s1_name" name="s1_name">
+</div>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  window.__goToStep2 = function () {
+    document.getElementById('step-root').innerHTML =
+      '<h2>Step 2</h2><label for="s2_email">Email</label>' +
+      '<input type="text" id="s2_email" name="s2_email">';
+    history.pushState({}, '', location.pathname + '#step2');
+  };
+  window.__goToStep3 = function () {
+    document.getElementById('step-root').innerHTML =
+      '<h2>Step 3</h2><label for="s3_phone">Phone</label>' +
+      '<input type="text" id="s3_phone" name="s3_phone">';
+    history.pushState({}, '', location.pathname + '#step3');
+  };
+</script>
+</body></html>
+"""
+
 
 class StubHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -209,6 +340,27 @@ class StubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/cover-letter-page.html"):
+            body = COVER_LETTER_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/remember-answers-page.html"):
+            body = REMEMBER_ANSWERS_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/multi-step-page.html"):
+            body = MULTI_STEP_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/health":
             self._json(200, {"tiers_available": ["test-stub"]})
         elif self.path == "/profile/counts":
@@ -227,6 +379,59 @@ class StubHandler(BaseHTTPRequestHandler):
             resolve_calls.append((body.get("url"), [f.get("name") for f in fields]))
             fills, skipped = build_fills(fields)
             self._json(200, {"fills": fills, "skipped": skipped})
+        elif self.path == "/cover-letter":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            cover_letter_calls.append(body)
+            # Which response to give is picked by a marker in the first url's OWN hash fragment
+            # (see COVER_LETTER_PAGE_BYTES's comment above) rather than needing separate fixture
+            # pages for the success/403/422 paths.
+            first_url = (body.get("urls") or [""])[0]
+            if "cl403" in first_url:
+                self._json(403, {"detail": "cloud model not allowed on this computer yet"})
+            elif "cl422" in first_url:
+                self._json(422, {"detail": "couldn't find this job's description to write a letter against"})
+            else:
+                self._json(200, {
+                    "text": "Dear Hiring Manager,\n\nI am excited to apply.\n\nSincerely,\nTest Applicant",
+                    "warnings": ["mentions a specific salary figure"],
+                    "draft": True,
+                    "provider": "test-stub-llm",
+                    "job": {"title": "Test Engineer", "company": "Great Company", "source": "page text"},
+                })
+        elif self.path == "/answers/learn":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            items = body.get("items") or []
+            answers_learn_calls.append(items)
+            # Trivial stand-in for the real canary/screening rules (see answer_memory.py) —
+            # just enough to prove BOTH a saved and a skipped item render distinctly, with the
+            # skipped one's reason shown. Real classification is that Python module's job, not
+            # this stub's — see docs/... / tests/test_extension_answer_memory.py for that.
+            saved, skipped = [], []
+            for it in items:
+                q = it.get("question", "")
+                if "salary" in q.lower():
+                    skipped.append({"question": q, "reason": "test stub: comes from your profile"})
+                else:
+                    saved.append(q)
+            self._json(200, {"saved": saved, "skipped": skipped})
+        elif self.path == "/log":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            log_calls.append(body)
+            entry_id = f"log-{len(log_calls)}"
+            self._json(200, {
+                "id": entry_id, "url": body.get("url"), "title": body.get("title"),
+                "company": body.get("company"), "status": "filled",
+                "counts": body.get("counts"), "fills": 1,
+            })
+        elif self.path.startswith("/log/") and self.path.endswith("/status"):
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            entry_id = self.path.split("/")[2]
+            log_status_calls.append((entry_id, body.get("status")))
+            self._json(200, {"ok": True})
         else:
             self._json(404, {"detail": "not found"})
 
@@ -470,6 +675,58 @@ with sync_playwright() as p:
                   "#scanBtn, #cancelBtn, #undoBtn, #reportBtn", "els => els.length") == 4)
         check("panel title is ApplyPilot Copilot", helper.title() == "ApplyPilot Copilot", helper.title())
 
+        # =====================================================================
+        # AUTO-CONNECT (item 1), cold start: nothing configured yet, and no
+        # `applypilot extension install-host` native host is registered on this machine for
+        # com.applypilot.copilot. That second fact was confirmed by hand against the real Windows
+        # registry before this test was written (HKCU\...\NativeMessagingHosts\com.applypilot.copilot
+        # is absent by default), so chrome.runtime.sendNativeMessage below gives Chrome's REAL
+        # "native messaging host not found" answer — this proves the fallback path end to end
+        # rather than mocking chrome.runtime.sendNativeMessage. serviceUrl is pointed at a port
+        # nothing is listening on (grabbed, then immediately closed) instead of the default 8787,
+        # so this can never accidentally reach a real `applypilot serve-extension` a developer
+        # happens to have running on this machine.
+        # =====================================================================
+        def _unused_local_port():
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+            s.close()
+            return port
+
+        UNREACHABLE_URL = f"http://127.0.0.1:{_unused_local_port()}"
+        helper.evaluate(
+            "(cfg) => chrome.storage.local.set(cfg).then(() => "
+            "chrome.storage.local.remove(['token', 'serviceConnection']))",
+            {"serviceUrl": UNREACHABLE_URL},
+        )
+
+        panel0 = ctx.new_page()
+        panel0.goto(panel_url)
+        panel0.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        try:
+            panel0.wait_for_function(
+                "() => (document.getElementById('tiersLine').textContent || "
+                "'').toLowerCase().includes('install-host')",
+                timeout=8000)
+            tip_shown = True
+        except Exception:
+            tip_shown = False
+        tip_text = panel0.eval_on_selector("#tiersLine", "el => el.textContent")
+        check("the panel shows the install-host tip when nothing is configured and the native "
+              "host is missing", tip_shown, repr(tip_text))
+
+        conn = helper.evaluate("() => chrome.storage.local.get('serviceConnection')")
+        conn_val = (conn or {}).get("serviceConnection") or {}
+        check("a missing native host is recorded honestly (mode manual, ok false) in "
+              "chrome.storage.local.serviceConnection",
+              conn_val.get("mode") == "manual" and conn_val.get("ok") is False, json.dumps(conn_val))
+        check("the recorded error names Chrome's own native-messaging-host-not-found failure",
+              "native messaging host" in (conn_val.get("error") or "").lower(), json.dumps(conn_val))
+        panel0.close()
+
+        # Real config for every test below this point — auto-connect never runs again once a
+        # token is already stored and calls keep succeeding (see requestWithAutoConnect).
         helper.evaluate(
             "(cfg) => chrome.storage.local.set(cfg)",
             {"serviceUrl": SERVICE_URL, "token": "test-token"},
@@ -811,6 +1068,446 @@ with sync_playwright() as p:
                   inner7_val in ("", None), repr(inner7_val))
 
         # =====================================================================
+        # TAB 8 — DRAFT COVER LETTER (item 2), success path through the REAL panel button: page
+        #         text extraction (excludes form fields, includes real visible copy), the
+        #         DRAFT box, Copy/Download availability, the Insert button appearing only because
+        #         this fixture has a cover-letter-labelled textarea, insertion through the normal
+        #         guarded fill path (highlighted 'draft', reported in state, undoable).
+        # =====================================================================
+        tab8 = ctx.new_page()
+        tab8.goto(f"{SERVICE_URL}/cover-letter-page.html#t=8")
+        tab8_id = find_tab_id(helper, "#t=8")
+        check("found tab 8's chrome tab id", tab8_id is not None)
+
+        panel8b = ctx.new_page()
+        panel8b.goto(f"{panel_url}?tabId={tab8_id}")
+        panel8b.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+
+        panel8b.click("#coverLetterBtn")
+        panel8b.wait_for_function("() => !document.getElementById('coverLetterBox').hidden", timeout=10000)
+        draft_text = panel8b.eval_on_selector("#coverLetterText", "el => el.value")
+        check("the draft box shows the service's returned draft text",
+              "excited to apply" in (draft_text or ""), repr(draft_text))
+        job_line = panel8b.eval_on_selector("#coverLetterJob", "el => el.textContent")
+        check("the draft box names the job/company the service identified",
+              "Test Engineer" in (job_line or "") and "Great Company" in (job_line or ""), repr(job_line))
+        check("a non-empty warnings list from the service is shown, not hidden",
+              panel8b.eval_on_selector("#coverLetterWarnings", "el => el.hidden") is False)
+        check("the Insert button appears because this fixture has a cover-letter-labelled textarea",
+              panel8b.eval_on_selector("#coverLetterInsertBtn", "el => el.hidden") is False)
+
+        check("exactly one /cover-letter call was made, naming this tab's URL",
+              len(cover_letter_calls) == 1 and "cover-letter-page.html" in (cover_letter_calls[0].get("urls") or [""])[0],
+              json.dumps(cover_letter_calls[-1]) if cover_letter_calls else "none")
+        sent_text = cover_letter_calls[0].get("page_text", "") if cover_letter_calls else ""
+        check("the extracted page text includes the page's own visible copy",
+              "fantastic engineer" in sent_text, sent_text[:200])
+        check("the extracted page text excludes form-field content (e.g. the textarea's own name/id)",
+              "cover_letter" not in sent_text, sent_text[:200])
+
+        panel8b.click("#coverLetterInsertBtn")
+        panel8b.wait_for_function(
+            "() => (document.getElementById('coverLetterStatus').textContent || "
+            "'').toLowerCase().includes('inserted')", timeout=5000)
+        inserted_value = tab8.eval_on_selector("#cl", "el => el.value")
+        check("Insert wrote the draft text into the page's own cover-letter textarea",
+              inserted_value == draft_text and bool(inserted_value), repr(inserted_value)[:200])
+        highlight_kind = tab8.eval_on_selector("#cl", "el => el.getAttribute('data-applypilot-highlighted')")
+        check("the inserted field is highlighted as a DRAFT (blue), never a plain fact-fill (green)",
+              highlight_kind == "draft", repr(highlight_kind))
+
+        state8 = get_state(helper, tab8_id)
+        check("inserting the cover letter is reported through the normal per-tab state "
+              "(counts.drafts, undoAvailable) — same shape a fill's own drafts use",
+              bool(state8) and (state8.get("counts") or {}).get("drafts", 0) >= 1 and state8.get("undoAvailable") is True,
+              json.dumps(state8))
+
+        undo8 = helper.evaluate("(tabId) => chrome.runtime.sendMessage({ type: 'UNDO_TAB', tabId })", tab8_id)
+        check("UNDO_TAB restores an inserted cover-letter draft exactly like any other filled field",
+              bool(undo8 and undo8.get("restored", 0) >= 1), json.dumps(undo8))
+        after_undo8 = tab8.eval_on_selector("#cl", "el => el.value")
+        check("after Undo, the cover-letter textarea is back to empty", after_undo8 == "", repr(after_undo8))
+        panel8b.close()
+
+        # =====================================================================
+        # TAB 9 / 10 — 403 and 422 from /cover-letter are shown to the operator VERBATIM (the
+        #              service's own `.detail` text), never a generic failure message, and no
+        #              draft box is shown.
+        # =====================================================================
+        for marker, code, detail in (
+            ("cl403", 403, "cloud model not allowed on this computer yet"),
+            ("cl422", 422, "couldn't find this job's description to write a letter against"),
+        ):
+            tab_err = ctx.new_page()
+            tab_err.goto(f"{SERVICE_URL}/cover-letter-page.html#t={marker}")
+            tab_err_id = find_tab_id(helper, f"#t={marker}")
+            check(f"found the {code} cover-letter test tab's chrome tab id", tab_err_id is not None)
+            panel_err = ctx.new_page()
+            panel_err.goto(f"{panel_url}?tabId={tab_err_id}")
+            panel_err.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+            panel_err.click("#coverLetterBtn")
+            # Waits for the DETAIL text specifically (not just "any non-empty status"), since the
+            # transient "Drafting…" status is ALSO non-empty and would otherwise race this check.
+            try:
+                panel_err.wait_for_function(
+                    "(needle) => (document.getElementById('coverLetterStatus').textContent || "
+                    "'').includes(needle)",
+                    arg=detail, timeout=10000)
+            except Exception:
+                pass
+            status_text = panel_err.eval_on_selector("#coverLetterStatus", "el => el.textContent")
+            check(f"a {code} from /cover-letter is shown to the operator VERBATIM (the service's own detail)",
+                  detail in (status_text or ""), repr(status_text))
+            check(f"no draft box is shown after a {code} error",
+                  panel_err.eval_on_selector("#coverLetterBox", "el => el.hidden") is True)
+            panel_err.close()
+            tab_err.close()
+
+        # =====================================================================
+        # TAB 11 — REMEMBER MY ANSWERS (item 3): the box only appears once a fill left something
+        #          for the operator; clicking it before typing anything reports nothing to
+        #          remember (and makes no service call); after typing real answers, exactly one
+        #          /answers/learn call carries the CURRENT values keyed by each field's own
+        #          label, a password field is NEVER included even though it was also left as
+        #          "needs you", and the panel shows both a saved and a skipped result (with its
+        #          reason) distinctly.
+        # =====================================================================
+        tab11 = ctx.new_page()
+        tab11.goto(f"{SERVICE_URL}/remember-answers-page.html#t=11")
+        tab11_id = find_tab_id(helper, "#t=11")
+        check("found tab 11's chrome tab id", tab11_id is not None)
+
+        panel11 = ctx.new_page()
+        panel11.goto(f"{panel_url}?tabId={tab11_id}")
+        panel11.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel11.click("#scanBtn")
+        state11 = wait_for_done(helper, tab11_id, timeout_s=20)
+        check("tab 11's fill reached a terminal status",
+              state11 is not None and state11.get("status") == "done", str(state11)[:200])
+        check("the Remember my answers box is shown because this fill left fields for the operator",
+              panel11.eval_on_selector("#rememberBox", "el => el.hidden") is False)
+
+        panel11.click("#rememberBtn")
+        panel11.wait_for_function(
+            "() => !document.getElementById('rememberStatus').hidden && "
+            "document.getElementById('rememberStatus').textContent.length > 0", timeout=5000)
+        empty_status = panel11.eval_on_selector("#rememberStatus", "el => el.textContent")
+        check("clicking Remember before typing any answers reports nothing to remember yet",
+              "nothing to remember" in (empty_status or "").lower(), repr(empty_status))
+        check("no /answers/learn call was made when nothing had been typed",
+              len(answers_learn_calls) == 0, json.dumps(answers_learn_calls))
+
+        # Simulate the operator answering the fields a fill left blank, AND typing into the
+        # password field too (which must never be sent — see content.js's readFieldsForAnswers()).
+        tab11.fill("#notice_period", "Two weeks")
+        tab11.fill("#salary_expect", "120000")
+        tab11.fill("#fake_password", "hunter2")
+
+        panel11.click("#rememberBtn")
+        panel11.wait_for_function(
+            "() => (document.getElementById('rememberStatus').textContent || "
+            "'').toLowerCase().includes('saved')", timeout=5000)
+        remember_status = panel11.eval_on_selector("#rememberStatus", "el => el.textContent")
+        check("the panel reports how many answers were saved and how many were skipped",
+              "Saved 1" in (remember_status or "") and "skipped 1" in (remember_status or ""),
+              repr(remember_status))
+
+        check("exactly one /answers/learn call was made", len(answers_learn_calls) == 1,
+              json.dumps(answers_learn_calls))
+        qas = {i["question"]: i["answer"] for i in answers_learn_calls[0]} if answers_learn_calls else {}
+        check("the notice-period answer sent matches what was typed after the fill",
+              qas.get("What is your notice period?") == "Two weeks", json.dumps(qas))
+        check("the salary answer sent matches what was typed after the fill",
+              qas.get("Desired salary") == "120000", json.dumps(qas))
+        check("the password field's value was NEVER sent to /answers/learn, even though it was "
+              "also left as \"needs you\" and had text typed into it",
+              "hunter2" not in json.dumps(qas) and len(qas) == 2, json.dumps(qas))
+
+        details_text = panel11.eval_on_selector("#rememberDetails", "el => el.textContent")
+        check("the details list shows the saved question",
+              "What is your notice period?" in (details_text or ""), repr(details_text))
+        check("the details list shows the skipped question together with its reason",
+              "Desired salary" in (details_text or "") and "profile" in (details_text or ""),
+              repr(details_text))
+
+        # =====================================================================
+        # TAB 11 continued — REVIEW ROWS (item 5): every row shows a label and a status badge;
+        #          a REQUIRED-but-unfilled field (Desired salary, marked `required` in this
+        #          fixture) sorts before a non-required one in the same "Need you" section even
+        #          though it was scanned later in the DOM; clicking a row scrolls/flashes the
+        #          real field on the real page.
+        # =====================================================================
+        rows_info = panel11.evaluate("""
+            () => Array.from(document.querySelectorAll('#results .field-row')).map(el => ({
+                label: el.querySelector('.label') ? el.querySelector('.label').textContent : '',
+                status: el.querySelector('.status-badge') ? el.querySelector('.status-badge').textContent : '',
+                fieldId: el.dataset.fieldId || null,
+            }))
+        """)
+        needs_you_rows = [r for r in rows_info if r["status"].lower() in ("left for you", "kept your value")]
+        check("every 'needs you' row shows a label and a status badge",
+              len(needs_you_rows) >= 2 and all(r["label"] and r["status"] for r in needs_you_rows),
+              json.dumps(needs_you_rows))
+        labels_in_order = [r["label"] for r in needs_you_rows]
+        salary_idx = next((i for i, l in enumerate(labels_in_order) if "salary" in l.lower()), None)
+        notice_idx = next((i for i, l in enumerate(labels_in_order) if "notice period" in l.lower()), None)
+        check("the REQUIRED-but-unfilled field (Desired salary) sorts before the non-required "
+              "one (notice period) in the same section, even though it was scanned later in the DOM",
+              salary_idx is not None and notice_idx is not None and salary_idx < notice_idx,
+              json.dumps(labels_in_order))
+
+        salary_row_id = next((r["fieldId"] for r in needs_you_rows if "salary" in r["label"].lower()), None)
+        check("the salary row carries a clickable field id", bool(salary_row_id), json.dumps(needs_you_rows))
+        if salary_row_id:
+            panel11.click(f'[data-field-id="{salary_row_id}"]')
+            try:
+                tab11.wait_for_function(
+                    "() => document.getElementById('salary_expect').getAttribute('data-applypilot-flash') === 'true'",
+                    timeout=3000)
+                flashed = True
+            except Exception:
+                flashed = False
+            check("clicking a row flashes the real field on the real page", flashed)
+
+        # =====================================================================
+        # TAB 12 — APPLICATION LOG (item 4): a completed fill automatically POSTs /log (never a
+        #          click) with the page URL, the page's own document title, and counts translated
+        #          into the service's own key names (needs_you/unreadable, not needsYou/
+        #          couldNotRead); the panel shows "Logged" and a "Mark as applied" button that
+        #          POSTs /log/{id}/status and updates the panel to reflect it.
+        # =====================================================================
+        log_calls_before = len(log_calls)
+        tab12 = ctx.new_page()
+        tab12.goto(PAGE_BASE + "#t=12")
+        tab12_id = find_tab_id(helper, "#t=12")
+        check("found tab 12's chrome tab id", tab12_id is not None)
+
+        panel12 = ctx.new_page()
+        panel12.goto(f"{panel_url}?tabId={tab12_id}")
+        panel12.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel12.click("#scanBtn")
+        state12 = wait_for_done(helper, tab12_id, timeout_s=20)
+        check("tab 12's fill reached a terminal status",
+              state12 is not None and state12.get("status") == "done", str(state12)[:200])
+
+        panel12.wait_for_function("() => !document.getElementById('logLine').hidden", timeout=5000)
+        check("the panel shows 'Logged' once the fill completes, with no click needed",
+              "logged" in (panel12.eval_on_selector("#logStatusText", "el => el.textContent") or "").lower())
+        check("the Mark as applied button is shown (not yet applied)",
+              panel12.eval_on_selector("#markAppliedBtn", "el => el.hidden") is False)
+
+        new_log_calls = log_calls[log_calls_before:]
+        check("logging a completed fill made exactly one automatic /log call (no click involved)",
+              len(new_log_calls) == 1, json.dumps(new_log_calls)[:300])
+        if new_log_calls:
+            logged = new_log_calls[0]
+            check("the /log call named this tab's own URL", logged.get("url", "").endswith("#t=12"), logged.get("url"))
+            check("the /log call sent the page's own document.title",
+                  logged.get("title") == "Mock Job Application (ApplyPilot Copilot test page)", logged.get("title"))
+            c = logged.get("counts") or {}
+            check("the /log call's counts use the service's own key names (needs_you, unreadable) "
+                  "translated from the panel's own state, and match it",
+                  c.get("filled") == (state12.get("counts") or {}).get("filled")
+                  and c.get("needs_you") == (state12.get("counts") or {}).get("needsYou")
+                  and c.get("unreadable") == (state12.get("couldNotRead") or 0),
+                  json.dumps({"sent": c, "state_counts": state12.get("counts"), "state_couldNotRead": state12.get("couldNotRead")}))
+
+        panel12.click("#markAppliedBtn")
+        panel12.wait_for_function(
+            "() => (document.getElementById('logStatusText').textContent || "
+            "'').toLowerCase().includes('applied')", timeout=5000)
+        check("exactly one /log/{id}/status call was made, with status 'applied'",
+              len(log_status_calls) == 1 and log_status_calls[0][1] == "applied", json.dumps(log_status_calls))
+        check("clicking Mark as applied hides the button once it succeeds",
+              panel12.eval_on_selector("#markAppliedBtn", "el => el.hidden") is True)
+
+        # =====================================================================
+        # TAB 12 continued — EXPORT FILL REPORT (item 6): downloads a JSON file with, per field,
+        #          frame/label/tag-or-widget/status/source/reason, page host/path and counts --
+        #          and NEVER a field's value, anywhere in the file.
+        # =====================================================================
+        check("the Export fill report button is enabled once there's a completed fill to export",
+              panel12.eval_on_selector("#exportReportBtn", "el => el.disabled") is False)
+        try:
+            with panel12.expect_download(timeout=5000) as export_download_info:
+                panel12.click("#exportReportBtn")
+            export_download = export_download_info.value
+            check("clicking Export fill report triggers a real download",
+                  export_download.suggested_filename.startswith("applypilot-fill-report-"),
+                  export_download.suggested_filename)
+            export_path = export_download.path()
+            report = json.loads(pathlib.Path(export_path).read_text(encoding="utf-8"))
+        except Exception as e:
+            check("clicking Export fill report triggers a real download", False, str(e))
+            report = None
+        if report is not None:
+            check("the report names this page's host and path",
+                  report.get("page", {}).get("path", "").endswith("test-page.html"), json.dumps(report.get("page")))
+            check("the report's counts match the fill's own counts",
+                  report.get("counts", {}).get("filled") == (state12.get("counts") or {}).get("filled"),
+                  json.dumps(report.get("counts")))
+            fields = report.get("fields") or []
+            check("the report has one row per field across every list (filled+drafts+needsYou+failed)",
+                  len(fields) == sum((state12.get("counts") or {}).get(k, 0) for k in ("filled", "drafts", "needsYou", "failed")),
+                  f"report has {len(fields)} rows, state counts: {json.dumps(state12.get('counts'))}")
+            check("every row has a label, a status, and a frame (frameId + url)",
+                  all(f.get("label") and f.get("status") and f.get("frame", {}).get("url") for f in fields),
+                  json.dumps(fields[:3]))
+            check("at least one row's frame url matches this tab's own page",
+                  any("test-page.html" in (f.get("frame") or {}).get("url", "") for f in fields), json.dumps(fields[:3]))
+            raw_report_text = json.dumps(report)
+            check("NO field value anywhere in the exported report (the whole point of this export)",
+                  '"value"' not in raw_report_text and '"values"' not in raw_report_text, raw_report_text[:300])
+            check("the actual filled VALUES ('Test Value ...') never appear anywhere in the report text",
+                  "Test Value" not in raw_report_text, raw_report_text[:300])
+
+        # =====================================================================
+        # TAB 13 — KEYBOARD SHORTCUT (item 7): "fill-page"'s handler (background.js's
+        #          handleFillPageCommand()) fills the ACTIVE tab directly -- no panel click
+        #          involved -- when every frame it needs is already permitted (a plain
+        #          single-frame 127.0.0.1 page always is, via the manifest's own static
+        #          host_permissions). Invoked directly against the real service worker
+        #          (Playwright has no API to simulate an OS-level keyboard shortcut for an
+        #          extension command) -- the exact same function chrome.commands.onCommand calls.
+        # =====================================================================
+        tab13 = ctx.new_page()
+        tab13.goto(PAGE_BASE + "#t=13")
+        tab13_id = find_tab_id(helper, "#t=13")
+        check("found tab 13's chrome tab id", tab13_id is not None)
+
+        sw.evaluate(
+            "(args) => handleFillPageCommand({ id: args.tabId, url: args.url })",
+            {"tabId": tab13_id, "url": PAGE_BASE + "#t=13"},
+        )
+        state13 = wait_for_done(helper, tab13_id, timeout_s=20)
+        check("the fill-page command filled the active tab directly, with no panel click involved",
+              state13 is not None and state13.get("status") == "done", str(state13)[:200])
+        if state13:
+            check("the fill-page command's fill actually filled real fields",
+                  (state13.get("counts") or {}).get("filled", 0) > 0, json.dumps(state13.get("counts")))
+
+        # The downstream half of the "missing permission" path: a genuinely cross-origin,
+        # ungranted frame can't be produced in THIS harness -- every fixture is 127.0.0.1, always
+        # covered by the manifest's own static host_permissions (see this file's existing notes on
+        # why the real chrome.permissions.request() prompt itself is equally out of reach here).
+        # This calls openPanelWithPermissionNotice() directly with a fabricated missing-frame list
+        # to prove what it does once handleFillPageCommand() decides permission is needed: record
+        # the right host, open the panel, and never silently fill anything.
+        tab14 = ctx.new_page()
+        tab14.goto(PAGE_BASE + "#t=14")
+        tab14_id = find_tab_id(helper, "#t=14")
+        check("found tab 14's chrome tab id", tab14_id is not None)
+        sw.evaluate(
+            "(args) => openPanelWithPermissionNotice(args.tabId, "
+            "[{ frameId: 99, url: 'https://embedded.example.com/app' }])",
+            {"tabId": tab14_id},
+        )
+        state14 = get_state(helper, tab14_id)
+        check("openPanelWithPermissionNotice records the missing host, never a fill",
+              bool(state14) and (state14.get("permissionNeeded") or {}).get("hosts") == ["embedded.example.com"]
+              and (state14.get("counts") or {}).get("filled", 0) == 0,
+              json.dumps(state14))
+
+        panel14 = ctx.new_page()
+        panel14.goto(f"{panel_url}?tabId={tab14_id}")
+        panel14.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel14.wait_for_function(
+            "() => (document.getElementById('statusBox').textContent || '').includes('embedded.example.com')",
+            timeout=5000)
+        status14 = panel14.eval_on_selector("#statusBox", "el => el.textContent")
+        check("the panel shows the exact permission-needed line naming the missing host",
+              "needs permission" in (status14 or "").lower() and "embedded.example.com" in (status14 or ""),
+              repr(status14))
+        check("the panel does NOT show a fill summary since nothing was actually filled",
+              panel14.eval_on_selector("#fillSummary", "el => el.hidden") is True)
+        panel14.close()
+
+        # =====================================================================
+        # TAB 15 — MULTI-STEP CONTINUATION (item 8), opt-in and OFF by default: turning the
+        #          panel's toggle ON (a real click, gated the same way Fill/Report are) arms
+        #          content.js's watcher; a step transition this test drives directly (standing in
+        #          for the operator clicking Workday's own "Next" — this extension never does)
+        #          triggers a brand-new fill automatically, with NO click and NO RUN_FILL message
+        #          sent by this test; the step counter advances; turning the toggle back off stops
+        #          any further automatic fills.
+        # =====================================================================
+        tab15 = ctx.new_page()
+        tab15.goto(f"{SERVICE_URL}/multi-step-page.html#t=15")
+        tab15_id = find_tab_id(helper, "#t=15")
+        check("found tab 15's chrome tab id", tab15_id is not None)
+
+        panel15 = ctx.new_page()
+        panel15.goto(f"{panel_url}?tabId={tab15_id}")
+        panel15.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+
+        check("the continuation toggle is OFF by default", panel15.eval_on_selector("#continuationToggle", "el => el.checked") is False)
+        panel15.check("#continuationToggle")
+        panel15.wait_for_function("() => document.getElementById('continuationToggle').checked === true", timeout=5000)
+
+        panel15.click("#scanBtn")
+        # Enabling continuation moments ago already wrote an 'idle' state for this tab (see
+        # background.js's SET_CONTINUATION) -- wait for THIS click's own fill to actually start
+        # (status really becomes 'running') before handing off to wait_for_done(), so it can't
+        # mistake that stale 'idle' write for this fill having already finished.
+        deadline_running = time.time() + 5
+        while time.time() < deadline_running and (get_state(helper, tab15_id) or {}).get("status") != "running":
+            time.sleep(0.05)
+        state15a = wait_for_done(helper, tab15_id, timeout_s=20)
+        check("step 1's fill (a normal, explicitly-clicked fill) completed",
+              state15a is not None and state15a.get("status") == "done", str(state15a)[:200])
+        step1_val = tab15.eval_on_selector("#s1_name", "el => el.value")
+        check("step 1's own field was filled", bool(step1_val), repr(step1_val))
+        panel15.wait_for_function(
+            "() => (document.getElementById('continuationStepLine').textContent || '').includes('Step 1')",
+            timeout=5000)
+
+        resolve_calls_before_step2 = len(resolve_calls)
+        tab15.evaluate("() => window.__goToStep2()")  # standing in for clicking Workday's own "Next"
+
+        deadline = time.time() + 15
+        while time.time() < deadline and len(resolve_calls) <= resolve_calls_before_step2:
+            time.sleep(0.1)
+        check("the step-2 transition triggered a brand-new /resolve call AUTOMATICALLY, with no "
+              "click and no RUN_FILL message sent by this test",
+              len(resolve_calls) > resolve_calls_before_step2,
+              f"before={resolve_calls_before_step2} after={len(resolve_calls)}")
+
+        state15b = None
+        deadline2 = time.time() + 15
+        while time.time() < deadline2:
+            s = get_state(helper, tab15_id)
+            if s and s.get("status") == "done" and (s.get("continuation") or {}).get("steps", 0) >= 2:
+                state15b = s
+                break
+            time.sleep(0.1)
+        check("the automatic step-2 fill completed and the step counter advanced to 2",
+              state15b is not None, json.dumps(get_state(helper, tab15_id))[:300])
+        if state15b:
+            check("step 2's own field was filled automatically (never step 1's, which is gone)",
+                  (state15b.get("counts") or {}).get("filled", 0) > 0, json.dumps(state15b.get("counts")))
+            step2_val = tab15.eval_on_selector("#s2_email", "el => el.value")
+            check("step 2's real field on the real page actually got filled",
+                  bool(step2_val), repr(step2_val))
+        panel15.wait_for_function(
+            "() => (document.getElementById('continuationStepLine').textContent || '').includes('Step 2')",
+            timeout=5000)
+        check("same guards applied to the automatic step-2 fill: no submission, no navigation",
+              tab15.evaluate("() => !window.__FORM_SUBMITTED__") is True)
+
+        # Turning it off must stop any further automatic fills.
+        panel15.uncheck("#continuationToggle")
+        panel15.wait_for_function("() => document.getElementById('continuationToggle').checked === false", timeout=5000)
+        resolve_calls_before_step3 = len(resolve_calls)
+        tab15.evaluate("() => window.__goToStep3()")
+        time.sleep(2.5)  # generous settle window (debounce + poll + DOM-quiet) — nothing should happen
+        check("turning the toggle off stops future automatic fills (no new /resolve call for step 3)",
+              len(resolve_calls) == resolve_calls_before_step3,
+              f"before={resolve_calls_before_step3} after={len(resolve_calls)}")
+        step3_val = tab15.eval_on_selector("#s3_phone", "el => el.value")
+        check("step 3's field was correctly left untouched once continuation was turned off",
+              step3_val in ("", None), repr(step3_val))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -821,7 +1518,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))

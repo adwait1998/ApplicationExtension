@@ -52,6 +52,124 @@ if (self.chrome && chrome.sidePanel && typeof chrome.sidePanel.setPanelBehavior 
 }
 
 // ---------------------------------------------------------------------
+// AUTO-CONNECT — no terminal, no pasted token.
+//
+// manifest.json pins this extension's id (via its top-level "key") to the one value the native
+// host's install-host command writes into com.applypilot.copilot.json's allowed_origins, so
+// chrome.runtime.sendNativeMessage below only ever reaches a host that was deliberately set up
+// for THIS extension. Chrome itself refuses to start the host at all for any other extension id
+// — this file never has to check that itself.
+//
+// The host speaks a tiny two-command protocol (see native_host.py):
+//   {cmd:"hello"}         -> {ok:true, version}            — not used here, kept for options.js
+//   {cmd:"ensure_server"} -> {ok:true, port, token, started} once a service answers /health, or
+//                            {ok:false, error} (not installed, or it never came up).
+// A missing host is a normal, expected state (the operator hasn't run
+// `applypilot extension install-host` yet) — never a hard failure. In that case this file falls
+// back to exactly the manual-token flow that existed before this build (paste serviceUrl+token
+// in Options), and the panel gets a one-line tip via chrome.storage.local.serviceConnection.
+// ---------------------------------------------------------------------
+var NATIVE_HOST_NAME = 'com.applypilot.copilot';
+
+function sendNativeMessage(message) {
+  return new Promise(function (resolve) {
+    try {
+      if (!chrome.runtime.sendNativeMessage) { resolve({ ok: false, error: 'nativeMessaging unavailable in this browser' }); return; }
+      chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, function (response) {
+        var err = chrome.runtime.lastError;
+        if (err) { resolve({ ok: false, error: (err && err.message) || String(err) }); return; }
+        resolve(response && typeof response === 'object' ? response : { ok: false, error: 'empty response from the native host' });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  });
+}
+
+// Chrome's own wording for "no host manifest registered for this id" — this is the expected,
+// common case on a machine that never ran `applypilot extension install-host`.
+function isHostMissingError(message) {
+  return typeof message === 'string' && /native messaging host not found/i.test(message);
+}
+
+/** Merges `patch` into chrome.storage.local.serviceConnection — read by the Settings page. */
+function recordServiceConnection(patch) {
+  return chrome.storage.local.get(['serviceConnection']).then(function (data) {
+    var merged = {};
+    var existing = data.serviceConnection || {};
+    for (var k in existing) if (Object.prototype.hasOwnProperty.call(existing, k)) merged[k] = existing[k];
+    for (var k2 in patch) if (Object.prototype.hasOwnProperty.call(patch, k2)) merged[k2] = patch[k2];
+    merged.checkedAt = Date.now();
+    return chrome.storage.local.set({ serviceConnection: merged });
+  });
+}
+
+/**
+ * Asks the native host to make sure the local service is up, and if it answers with a real
+ * {port, token}, stores them into chrome.storage.local under the SAME keys getConfig() already
+ * reads (serviceUrl/token) — so this is indistinguishable, to every existing call site, from the
+ * operator having pasted them into Options. Always resolves (never rejects); the caller decides
+ * what to do next.
+ */
+function ensureServerViaNativeHost() {
+  return sendNativeMessage({ cmd: 'ensure_server' }).then(function (resp) {
+    if (resp && resp.ok && resp.port && resp.token) {
+      return chrome.storage.local.set({
+        serviceUrl: 'http://127.0.0.1:' + resp.port,
+        token: resp.token
+      }).then(function () {
+        return recordServiceConnection({ mode: 'native', ok: true, error: null, started: !!resp.started });
+      }).then(function () {
+        return { ok: true };
+      });
+    }
+    var errMsg = (resp && resp.error) || 'the native host gave no usable response';
+    var hostMissing = isHostMissingError(errMsg);
+    return recordServiceConnection({
+      mode: hostMissing ? 'manual' : 'native',
+      ok: false,
+      error: errMsg
+    }).then(function () {
+      return { ok: false, hostMissing: hostMissing, error: errMsg };
+    });
+  });
+}
+
+/**
+ * Wraps any of the service-call functions below (each of which independently reads
+ * serviceUrl/token via getConfig()) with the auto-connect contract from the build spec:
+ *   - if nothing is configured yet, call ensure_server BEFORE the first real attempt;
+ *   - if a real attempt still comes back unauthorized/unreachable/unconfigured, call ensure_server
+ *     ONCE more and retry the SAME call ONCE more.
+ * At most one native-host round trip and at most two HTTP attempts per call, either way — this
+ * can never loop. `callFn` takes no arguments and returns the same {ok, error, ...} shape every
+ * call*() function below already returns; this changes none of those shapes.
+ */
+function requestWithAutoConnect(callFn) {
+  var connectAttempted = false;
+  function isRetryableFailure(result) {
+    return !!(result && result.ok === false &&
+      (result.error === 'unauthorized' || result.error === 'unreachable' || result.error === 'no-token'));
+  }
+  function attempt() {
+    return callFn().then(function (result) {
+      if (isRetryableFailure(result) && !connectAttempted) {
+        connectAttempted = true;
+        return ensureServerViaNativeHost().then(attempt);
+      }
+      return result;
+    });
+  }
+  return getConfig().then(function (cfg) {
+    if (!cfg.token && !connectAttempted) {
+      connectAttempted = true;
+      return ensureServerViaNativeHost().then(attempt);
+    }
+    return attempt();
+  });
+}
+
+// ---------------------------------------------------------------------
 // per-tab fill state — chrome.storage.session, keyed by tab id
 // ---------------------------------------------------------------------
 //
@@ -108,6 +226,10 @@ function friendlyFetchError(serviceUrl) {
 }
 
 function callResolve(url, fields) {
+  return requestWithAutoConnect(function () { return callResolveRaw(url, fields); });
+}
+
+function callResolveRaw(url, fields) {
   return getConfig().then(function (cfg) {
     if (!cfg.token) {
       return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
@@ -162,6 +284,10 @@ function parseFilenameFromDisposition(disposition) {
  * rather than throwing, so content.js can fall back to today's skip behaviour.
  */
 function callResume() {
+  return requestWithAutoConnect(callResumeRaw);
+}
+
+function callResumeRaw() {
   return getConfig().then(function (cfg) {
     if (!cfg.token) {
       return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
@@ -221,6 +347,10 @@ function callResume() {
  * expansion entirely and fill the page exactly as it did before this feature existed.
  */
 function callProfileCounts() {
+  return requestWithAutoConnect(callProfileCountsRaw);
+}
+
+function callProfileCountsRaw() {
   return getConfig().then(function (cfg) {
     if (!cfg.token) {
       return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
@@ -239,6 +369,10 @@ function callProfileCounts() {
 }
 
 function callHealth() {
+  return requestWithAutoConnect(callHealthRaw);
+}
+
+function callHealthRaw() {
   return getConfig().then(function (cfg) {
     var headers = cfg.token ? { 'X-ApplyPilot-Token': cfg.token } : {};
     return fetch(cfg.serviceUrl + '/health', { headers: headers }).then(function (resp) {
@@ -265,6 +399,212 @@ function handleResponse(resp, serviceUrl) {
   }, function () {
     return { ok: false, error: 'bad-json', message: 'Service at ' + serviceUrl + ' returned a response that was not valid JSON.' };
   });
+}
+
+/**
+ * Like handleResponse(), but on a non-2xx JSON body carries the FastAPI-style {"detail": "..."}
+ * through VERBATIM (as `.detail`, never truncated) instead of handleResponse()'s generic
+ * "HTTP <code>: <first 200 chars>" text — used for endpoints whose error detail is itself the
+ * whole point of showing the operator something (cover-letter's 403 "model not allowed on this
+ * computer" / 422 "no job description", see the build spec). `.message` is kept in sync with
+ * `.detail` so a caller that only reads `.message` (the older convention every other call* here
+ * uses) still gets something sensible.
+ */
+function handleResponseVerbatim(resp, serviceUrl) {
+  if (resp.status === 401) {
+    return { ok: false, error: 'unauthorized', message: 'The service rejected the token (401 Unauthorized). Check the token in the extension options page.' };
+  }
+  if (!resp.ok) {
+    return resp.json().then(function (body) {
+      var detail = body && body.detail;
+      var text = typeof detail === 'string' ? detail : (detail != null ? JSON.stringify(detail) : ('HTTP ' + resp.status));
+      return { ok: false, error: 'http-' + resp.status, status: resp.status, detail: text, message: text };
+    }, function () {
+      var text = 'Service returned HTTP ' + resp.status;
+      return { ok: false, error: 'http-' + resp.status, status: resp.status, detail: text, message: text };
+    });
+  }
+  return resp.json().then(function (data) {
+    return { ok: true, data: data };
+  }, function () {
+    return { ok: false, error: 'bad-json', message: 'Service at ' + serviceUrl + ' returned a response that was not valid JSON.' };
+  });
+}
+
+function postJson(cfg, path, body, responseHandler) {
+  return fetch(cfg.serviceUrl + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-ApplyPilot-Token': cfg.token },
+    body: JSON.stringify(body)
+  }).then(function (resp) {
+    return responseHandler(resp, cfg.serviceUrl);
+  }, function () {
+    return { ok: false, error: 'unreachable', message: friendlyFetchError(cfg.serviceUrl) };
+  });
+}
+
+function noTokenResult() {
+  return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
+}
+
+// ---------------------------------------------------------------------
+// COVER LETTER (item 2) — POST /cover-letter {urls, page_text} -> {text, warnings, draft:true,
+// provider, job:{title,company,source}}. Errors (403 "model not allowed on this computer yet",
+// 422 "no job description"/"drafting refused", or anything else) are surfaced with their real
+// `detail` text intact — see handleResponseVerbatim() above — so the panel can show them
+// verbatim rather than a generic failure.
+// ---------------------------------------------------------------------
+function callCoverLetterRaw(urls, pageText) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/cover-letter', { urls: urls || [], page_text: pageText || '' }, handleResponseVerbatim);
+  });
+}
+function callCoverLetter(urls, pageText) {
+  return requestWithAutoConnect(function () { return callCoverLetterRaw(urls, pageText); });
+}
+
+// ---------------------------------------------------------------------
+// REMEMBER MY ANSWERS (item 3) — POST /answers/learn {items:[{question,answer}]} ->
+// {saved:[question...], skipped:[{question, reason}...]}. Never automatic — only ever called
+// from rememberAnswersForTab() below, itself only ever triggered by the panel's own click.
+// ---------------------------------------------------------------------
+function callAnswersLearnRaw(items) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/answers/learn', { items: items || [] }, handleResponseVerbatim);
+  });
+}
+function callAnswersLearn(items) {
+  return requestWithAutoConnect(function () { return callAnswersLearnRaw(items); });
+}
+
+/**
+ * "Remember my answers": rereads the CURRENT value of every field this tab's last fill left for
+ * the human (state.needsYou — qualified ids, see applyFrameReport()), grouped by the frame each
+ * one actually lives in (exactly one READ_FIELDS_FOR_ANSWERS round trip per frame that has any),
+ * and hands the non-empty ones to /answers/learn with that field's own resolved label as the
+ * question. content.js is what enforces "non-empty only, never passwords/files" (see
+ * readFieldsForAnswers() there) — this function only routes to the right frames and re-attaches
+ * each answer to the label the fill already worked out, since content.js's reply is just
+ * {id -> value}, not full field metadata.
+ */
+function rememberAnswersForTab(tabId) {
+  return chrome.storage.session.get(tabStateKey(tabId)).then(function (stored) {
+    var state = stored[tabStateKey(tabId)];
+    var needsYou = (state && state.needsYou) || [];
+    var byFrame = {}; // frameId -> [{ localId, label }]
+    needsYou.forEach(function (n) {
+      var parts = splitQualifiedId(n.id);
+      if (!parts) return;
+      byFrame[parts.frameId] = byFrame[parts.frameId] || [];
+      byFrame[parts.frameId].push({ localId: parts.localId, label: n.label || '' });
+    });
+    var frameIds = Object.keys(byFrame);
+    if (!frameIds.length) {
+      return { ok: true, data: { saved: [], skipped: [] }, noAnswersFound: true };
+    }
+    return Promise.all(frameIds.map(function (frameIdStr) {
+      var frameId = parseInt(frameIdStr, 10);
+      var localIds = byFrame[frameIdStr].map(function (e) { return e.localId; });
+      return chrome.tabs.sendMessage(tabId, { type: 'READ_FIELDS_FOR_ANSWERS', ids: localIds }, { frameId: frameId })
+        .then(function (resp) { return { frameIdStr: frameIdStr, values: (resp && resp.values) || {} }; })
+        .catch(function () { return { frameIdStr: frameIdStr, values: {} }; });
+    })).then(function (perFrame) {
+      var items = [];
+      perFrame.forEach(function (pf) {
+        (byFrame[pf.frameIdStr] || []).forEach(function (e) {
+          var val = pf.values[e.localId];
+          if (val != null && String(val).trim() !== '') {
+            items.push({ question: e.label, answer: String(val) });
+          }
+        });
+      });
+      if (!items.length) {
+        return { ok: true, data: { saved: [], skipped: [] }, noAnswersFound: true };
+      }
+      return callAnswersLearn(items);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
+// APPLICATION LOG (item 4) — POST /log {url, title, company, counts} -> the log entry
+// ({id, status, ...}); POST /log/{id}/status {status} -> {ok:true}. Logging itself is automatic
+// (right after a fill completes, see the FILL_STATE_UPDATE handler below) — nothing here is
+// gated on a click; only "Mark as applied" is.
+// ---------------------------------------------------------------------
+function callLogRaw(payload) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/log', payload, handleResponseVerbatim);
+  });
+}
+function callLog(payload) {
+  return requestWithAutoConnect(function () { return callLogRaw(payload); });
+}
+
+function callLogStatusRaw(id, status) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/log/' + encodeURIComponent(id) + '/status', { status: status }, handleResponseVerbatim);
+  });
+}
+function callLogStatus(id, status) {
+  return requestWithAutoConnect(function () { return callLogStatusRaw(id, status); });
+}
+
+// A handful of well-known ATS domains already get a much better company name out of the service
+// itself (job_context.parse_ats_url reads the real posting slug/org name) — POST /log's own
+// `company = company or parsed.get("slug", "")` means whatever non-empty string we send here
+// WINS over that smarter lookup, so this deliberately sends '' for those hosts and lets the
+// service do the better job. For everything else (a company's own careers page on its own
+// domain, which parse_ats_url doesn't recognize at all), a plain hostname-derived guess is
+// better than nothing.
+var KNOWN_ATS_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com)$/i;
+var GENERIC_HOST_SUBDOMAINS = { www: 1, jobs: 1, careers: 1, apply: 1, applications: 1, boards: 1, career: 1, recruiting: 1, talent: 1 };
+function guessCompanyFromUrl(url) {
+  try {
+    var host = new URL(url).hostname.toLowerCase();
+    if (KNOWN_ATS_HOST_RE.test(host)) return '';
+    var labels = host.split('.').filter(Boolean);
+    while (labels.length > 2 && GENERIC_HOST_SUBDOMAINS[labels[0]]) labels.shift();
+    var core = labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+    if (!core) return '';
+    return core.charAt(0).toUpperCase() + core.slice(1);
+  } catch (e) {
+    return '';
+  }
+}
+
+/** Fire-and-forget: POSTs /log for a tab's just-completed fill and stashes the resulting
+ * {id, status} into that tab's own stored state (as `logEntry`) so the panel can render
+ * "Logged" and a "Mark as applied" button. Never throws — a failed log call just means no
+ * logEntry appears; it never blocks or undoes anything about the fill itself. */
+function logFillCompletion(tabId, state) {
+  if (!state || !state.url || !/^https?:\/\//.test(state.url)) return Promise.resolve();
+  var counts = state.counts || {};
+  var payload = {
+    url: state.url,
+    title: state.title || '',
+    company: guessCompanyFromUrl(state.url),
+    counts: {
+      filled: counts.filled || 0,
+      drafts: counts.drafts || 0,
+      needs_you: counts.needsYou || 0,
+      failed: counts.failed || 0,
+      unreadable: state.couldNotRead || 0
+    }
+  };
+  return callLog(payload).then(function (resp) {
+    return updateStoredState(tabId, function (existing) {
+      var combined = existing || initialCombinedState([]);
+      combined.logEntry = (resp && resp.ok && resp.data && resp.data.id)
+        ? { id: resp.data.id, status: resp.data.status || 'filled' }
+        : null;
+      return combined;
+    });
+  }).catch(function () {});
 }
 
 // ---------------------------------------------------------------------
@@ -371,6 +711,9 @@ function initialCombinedState(frameIds) {
     note: null,
     skippedFrames: 0,
     couldNotRead: 0,
+    logEntry: null,
+    permissionNeeded: null,
+    continuation: null,
     _frameStates: {},
     _expectedFrameIds: (frameIds || []).slice()
   };
@@ -390,9 +733,10 @@ function applyFrameReport(combined, frameId, frameState) {
   combined._expectedFrameIds = expected;
 
   var reported = [];
+  var reportedFrameIds = []; // same index correspondence as `reported` — see concatList() below
   for (var i = 0; i < expected.length; i++) {
     var s = combined._frameStates[expected[i]];
-    if (s) reported.push(s);
+    if (s) { reported.push(s); reportedFrameIds.push(expected[i]); }
   }
   var anyRunning = reported.length < expected.length || reported.some(function (s) { return s.status === 'running'; });
 
@@ -404,12 +748,32 @@ function applyFrameReport(combined, frameId, frameState) {
 
   var topState = combined._frameStates[0];
   combined.url = (topState && topState.url) || (reported[0] && reported[0].url) || combined.url || '';
+  // The top frame's own document.title (see content.js's freshState()) — used only for the
+  // application log (item 4), which wants a human-readable title, not a URL.
+  combined.title = (topState && topState.title) || combined.title || '';
   combined.startedAt = combined.startedAt || (reported[0] && reported[0].startedAt) || Date.now();
   combined.updatedAt = Date.now();
 
+  // Every entry's `id` is re-qualified with ITS OWN frame's id (reusing the same qualifyId() the
+  // /resolve round trip uses) as it's folded into the combined, panel-visible state — so a row in
+  // filled/drafts/needsYou/failed is always independently routable back to "which frame, which
+  // local field id" (e.g. to scroll/flash it, or to read a field back for "remember my answers"),
+  // never just a same-shaped local id two frames could otherwise collide on. Everything else on
+  // the entry (label/value/reason/...) passes through unchanged; a `frame` field is added too
+  // (this frame's own last-reported url) for anything that wants to show/report where a field
+  // lives without a second round trip.
   function concatList(key) {
     var out = [];
-    reported.forEach(function (s) { out = out.concat(s[key] || []); });
+    reported.forEach(function (s, idx) {
+      var frameId = reportedFrameIds[idx];
+      (s[key] || []).forEach(function (item) {
+        var copy = {};
+        for (var k in item) if (Object.prototype.hasOwnProperty.call(item, k)) copy[k] = item[k];
+        if (copy.id != null) copy.id = qualifyId(frameId, copy.id);
+        copy.frame = { frameId: frameId, url: s.url || '' };
+        out.push(copy);
+      });
+    });
     return out;
   }
   combined.filled = concatList('filled');
@@ -465,7 +829,16 @@ function runFillForTab(tabId, opts) {
     var usedWebNavigation = frameInfo.usedWebNavigation;
     var frameIds = frames.map(function (f) { return f.frameId; });
 
-    return updateStoredState(tabId, function () { return initialCombinedState(frameIds); })
+    return updateStoredState(tabId, function (existing) {
+      var fresh = initialCombinedState(frameIds);
+      // Item 8 (multi-step continuation): a fresh fill run resets everything about the PREVIOUS
+      // fill's own results, but the operator's own toggle state must survive it — this is exactly
+      // what makes step 2's own fill (triggered by this same function, from
+      // CONTINUATION_RUN_FILL below) keep the watch armed instead of silently turning it off the
+      // moment the first new-step fill starts.
+      fresh.continuation = (existing && existing.continuation) || null;
+      return fresh;
+    })
       .then(function () {
         return Promise.all(frames.map(function (f) {
           return chrome.tabs.sendMessage(tabId, { type: 'PREPARE_AND_SCAN' }, { frameId: f.frameId })
@@ -637,6 +1010,75 @@ function undoFillForTab(tabId) {
   });
 }
 
+// ---------------------------------------------------------------------
+// KEYBOARD SHORTCUT (item 7) — manifest.json's "commands": _execute_action (Alt+Shift+F) is a
+// reserved name Chrome dispatches by simulating the toolbar icon's own click, which already
+// opens the side panel (setPanelBehavior() at the top of this file) — no code needed for that
+// one. "fill-page" (Alt+Shift+G) is this file's own command: fill the ACTIVE tab directly,
+// without making the operator open the panel and click Fill first.
+// ---------------------------------------------------------------------
+
+/**
+ * The command gesture itself grants activeTab for the tab's own top frame — enough to inject and
+ * scan/fill it even on a site this extension has never been allowed on before. It does NOT
+ * extend to a genuinely cross-origin child frame (an embedded ATS iframe); getFrames() already
+ * excludes any same-origin child (see excludeFramesCoveredByParentRecursion()), so every frame
+ * left in `nonTopFrames` below is one that needs its OWN real host permission regardless of
+ * activeTab. If any of those isn't already granted, this never fills the top frame alone and
+ * quietly skips the rest — it opens the panel and leaves the exact same permission-needed note
+ * the panel's own Fill/Report click handlers show, so the operator can grant it the normal way.
+ */
+function handleFillPageCommand(tab) {
+  if (!tab || typeof tab.id !== 'number' || !/^https?:\/\//.test(tab.url || '')) return Promise.resolve();
+  var tabId = tab.id;
+  return getFrames(tabId).then(function (frameInfo) {
+    var nonTopFrames = frameInfo.frames.filter(function (f) { return f.frameId !== 0; });
+    return Promise.all(nonTopFrames.map(function (f) {
+      var origin = frameOrigin(f.url);
+      if (!origin) return true; // unparseable — never block the whole command over this alone
+      return chrome.permissions.contains({ origins: [origin + '/*'] });
+    })).then(function (allGranted) {
+      if (allGranted.every(Boolean)) {
+        return chrome.scripting.executeScript({ target: { tabId: tabId, allFrames: true }, files: ['scanner.js', 'capture.js', 'content.js'] })
+          .then(function () { return runFillForTab(tabId, { url: tab.url }); });
+      }
+      return openPanelWithPermissionNotice(tabId, nonTopFrames);
+    });
+  }).catch(function () {});
+}
+
+function openPanelWithPermissionNotice(tabId, missingFrames) {
+  var hosts = [];
+  missingFrames.forEach(function (f) {
+    var origin = frameOrigin(f.url);
+    if (origin) {
+      var h = origin.replace(/^https?:\/\//, '');
+      if (hosts.indexOf(h) === -1) hosts.push(h);
+    }
+  });
+  var openPromise = (chrome.sidePanel && typeof chrome.sidePanel.open === 'function')
+    ? chrome.sidePanel.open({ tabId: tabId }).catch(function () {})
+    : Promise.resolve();
+  return openPromise.then(function () {
+    return updateStoredState(tabId, function (existing) {
+      var combined = existing || initialCombinedState([]);
+      // A brand-new state defaults to 'running' (see initialCombinedState) — nothing is actually
+      // running here, so that would misrender as "Filling…" forever. An EXISTING state (a
+      // previous fill's own result) is left exactly as it was; only `permissionNeeded` is added.
+      if (!existing) combined.status = 'idle';
+      combined.permissionNeeded = { hosts: hosts, checkedAt: Date.now() };
+      return combined;
+    });
+  });
+}
+
+if (self.chrome && chrome.commands && chrome.commands.onCommand &&
+    typeof chrome.commands.onCommand.addListener === 'function') {
+  chrome.commands.onCommand.addListener(function (command, tab) {
+    if (command === 'fill-page') handleFillPageCommand(tab);
+  });
+}
+
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (!msg || typeof msg !== 'object') return false;
 
@@ -670,6 +1112,16 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     callProfileCounts().then(sendResponse);
     return true;
   }
+  if (msg.type === 'DRAFT_COVER_LETTER') {
+    callCoverLetter(msg.urls, msg.pageText).then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'REMEMBER_ANSWERS') {
+    rememberAnswersForTab(msg.tabId).then(sendResponse, function (e) {
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+    });
+    return true;
+  }
   if (msg.type === 'FILL_STATE_UPDATE') {
     // Only ever sent by a content.js frame, whose sender.tab is always populated (a real tab,
     // never the side panel or options page) and whose sender.frameId Chrome always fills in.
@@ -680,11 +1132,106 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     }
     var tabId = sender.tab.id;
     var frameId = typeof sender.frameId === 'number' ? sender.frameId : 0;
+    // Captured from inside the updater (see below) so the log call can fire once the write has
+    // actually landed, without a second read-modify-write cycle just to notice the transition.
+    var justCompletedState = null;
     updateStoredState(tabId, function (existing) {
+      var previousStatus = existing ? existing.status : null;
       var combined = existing || initialCombinedState([frameId]);
-      return applyFrameReport(combined, frameId, msg.state);
+      var result = applyFrameReport(combined, frameId, msg.state);
+      // Application log (item 4): log exactly on the RUNNING -> DONE transition, never on a
+      // status that was already 'done' (e.g. inserting a cover-letter draft afterwards, item 2,
+      // reports 'done' again but nothing about the fill itself changed) — see logFillCompletion().
+      // A same-URL refill (multi-step continuation, item 8, or just clicking Fill again) still
+      // gets its own transition and its own /log call; the SERVICE'S own /log de-dupes same-URL
+      // calls within an hour into one updated entry (see app_log.record()) rather than this file
+      // needing to track that itself.
+      if (previousStatus !== 'done' && result.status === 'done') justCompletedState = result;
+      return result;
     }).then(function () {
       sendResponse({ ok: true });
+      if (justCompletedState) logFillCompletion(tabId, justCompletedState);
+    }, function (e) {
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+    });
+    return true;
+  }
+  if (msg.type === 'SCROLL_TO_FIELD') {
+    // Item 5 (Review rows): only an extension page — never a content script — can message a
+    // SPECIFIC frame, which is why this one-line fan-out lives here rather than in sidepanel.js
+    // calling chrome.tabs.sendMessage directly (that would always hit frame 0).
+    var scrollParts = splitQualifiedId(msg.id);
+    if (!scrollParts) { sendResponse({ ok: false, error: 'not a recognizable field id' }); return false; }
+    chrome.tabs.sendMessage(msg.tabId, { type: 'FLASH_FIELD', id: scrollParts.localId }, { frameId: scrollParts.frameId })
+      .then(sendResponse, function (e) { sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }); });
+    return true;
+  }
+  if (msg.type === 'SET_CONTINUATION') {
+    // Item 8: the panel toggle. tabId/enabled come from sidepanel.js's click handler, which has
+    // already gated this on the same permission check Fill/Report use and injected content.js
+    // into the top frame — see there. Recorded into this tab's own state (so the panel can
+    // render it, and so a later fill this file itself starts for step 2+ knows to keep it armed
+    // — see runFillForTab()'s own preservation of `existing.continuation`), and forwarded to the
+    // top frame so it can actually start/stop watching.
+    var contTabId = msg.tabId;
+    Promise.resolve().then(function () {
+      if (!msg.enabled) {
+        return updateStoredState(contTabId, function (existing) {
+          var combined = existing || initialCombinedState([]);
+          // See openPanelWithPermissionNotice()'s own comment: initialCombinedState() defaults
+          // to 'running', which would otherwise misrender as "Filling…" (and disable Fill/etc.)
+          // forever on a tab nothing has ever actually run a fill on yet.
+          if (!existing) combined.status = 'idle';
+          combined.continuation = { enabled: false, host: null, steps: 0 };
+          return combined;
+        }).then(function () {
+          return chrome.tabs.sendMessage(contTabId, { type: 'SET_CONTINUATION', enabled: false }, { frameId: 0 }).catch(function () {});
+        });
+      }
+      var host = frameOrigin(msg.tabUrl) ? new URL(msg.tabUrl).hostname : null;
+      if (!host) return { ok: false, error: 'no scriptable page in this tab' };
+      return updateStoredState(contTabId, function (existing) {
+        var combined = existing || initialCombinedState([]);
+        if (!existing) combined.status = 'idle';
+        combined.continuation = { enabled: true, host: host, steps: 1 };
+        return combined;
+      }).then(function () {
+        return chrome.tabs.sendMessage(contTabId, { type: 'SET_CONTINUATION', enabled: true, host: host }, { frameId: 0 });
+      });
+    }).then(function () { sendResponse({ ok: true }); },
+            function (e) { sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }); });
+    return true;
+  }
+  if (msg.type === 'CONTINUATION_RUN_FILL') {
+    // Only ever sent by content.js's own top-frame watcher (see runContinuationCheck() there) —
+    // re-checks the toggle is STILL on for this tab (it may have been turned off in the moment
+    // between that frame noticing a step change and this message arriving) before doing anything.
+    if (!sender || !sender.tab || typeof sender.tab.id !== 'number') { sendResponse({ ok: false }); return false; }
+    var stepTabId = sender.tab.id;
+    chrome.storage.session.get(tabStateKey(stepTabId)).then(function (stored) {
+      var existing = stored[tabStateKey(stepTabId)];
+      if (!existing || !existing.continuation || !existing.continuation.enabled) return; // turned off meanwhile
+      return updateStoredState(stepTabId, function (existing2) {
+        if (existing2 && existing2.continuation) existing2.continuation.steps = (existing2.continuation.steps || 1) + 1;
+        return existing2;
+      }).then(function () {
+        return chrome.tabs.get(stepTabId);
+      }).then(function (tab) {
+        return runFillForTab(stepTabId, { url: tab.url });
+      });
+    }).catch(function () {});
+    sendResponse({ ok: true }); // fire-and-forget, same contract as RUN_FILL's own ack
+    return false;
+  }
+  if (msg.type === 'LOG_STATUS') {
+    callLogStatus(msg.id, msg.status).then(function (resp) {
+      if (!resp || !resp.ok) { sendResponse(resp); return; }
+      updateStoredState(msg.tabId, function (existing) {
+        var combined = existing || initialCombinedState([]);
+        if (!existing) combined.status = 'idle'; // defensive — see openPanelWithPermissionNotice()'s comment
+        if (combined.logEntry && combined.logEntry.id === msg.id) combined.logEntry.status = msg.status;
+        return combined;
+      }).then(function () { sendResponse(resp); }, function () { sendResponse(resp); });
     }, function (e) {
       sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
     });

@@ -60,17 +60,42 @@ fill, never to the panel's UI.
 ## Connecting it to the local service
 
 The extension talks to a companion service that runs on your machine (built separately, under
-`src/applypilot/`, started with something like `applypilot serve-extension`). On first run
-that service prints a URL and a token.
+`src/applypilot/`, started with something like `applypilot serve-extension`).
+
+### Auto-connect (the normal path)
+
+Run `applypilot extension install-host` once, from a terminal, and you never need a terminal or
+a pasted token again. That command pins this extension's id (giving `manifest.json` a `key`, so
+the id no longer depends on which folder you loaded it from) and registers a Chrome
+native-messaging host (`com.applypilot.copilot`) that only THIS extension id may talk to.
+
+From then on, `background.js` calls that host itself, right before the first service call it
+ever needs to make (and again, once, if a later call ever comes back unauthorized or
+unreachable — e.g. the service was restarted and rotated its token): the host starts
+`applypilot serve-extension` if nothing is already answering on its port, waits for it to come
+up, and hands back its port and token, which `background.js` stores exactly where the manual
+flow below already looks (`chrome.storage.local.serviceUrl`/`token`). Nothing is pasted, nothing
+is typed — the first time you click **Fill this page** after installing the host, it just works.
+Every attempt (success or failure) is recorded to `chrome.storage.local.serviceConnection` —
+`{mode: "native"|"manual", ok, error, checkedAt}` — for the Settings page to show.
+
+### Manual fallback
+
+If you haven't run `install-host` (or you're on a browser build where native messaging isn't
+available), the extension falls back to exactly the flow that existed before auto-connect:
 
 1. Right-click the extension icon → **Options** (or click **Settings** inside the side panel).
 2. Paste the **Service URL** (defaults to `http://127.0.0.1:8787` — it must always be
-   `http://127.0.0.1`, the options page refuses anything else) and the **token**.
+   `http://127.0.0.1`, the options page refuses anything else) and the **token** `applypilot
+   serve-extension` printed on its own first run.
 3. Click **Save**, then **Test connection**. You should see which decision tiers the service
    reports (`canary`, `deterministic`, and — if the optional Laya model loaded — `laya`).
 
-If the service isn't running, or the token is wrong, the panel and options page show a plain
-error message instead of failing silently (see `background.js` — 401 → "token is wrong",
+The panel's footer line says so directly when the native host genuinely isn't installed yet
+("Specified native messaging host not found" is Chrome's own wording for that) and nothing is
+configured: "Tip: run `applypilot extension install-host` once and the service will start by
+itself." If the service isn't running, or the token is wrong, the panel and options page show a
+plain error message instead of failing silently (see `background.js` — 401 → "token is wrong",
 fetch failure → "is the service running?", any other non-2xx → the status code and body).
 
 ## Using it on a job application page
@@ -142,6 +167,117 @@ below.
    the panel tells you how many were actually confirmed restored (read back after undoing), not
    just how many restores were attempted. **Report page** (unchanged, top frame only) saves the
    form's structure — never values — for diagnosing a bad fill.
+
+## Draft cover letter
+
+The panel's **Draft cover letter** button asks the local service to write one, from your profile
+and résumé, against the job behind the page you're looking at:
+
+1. `content.js` (top frame only, same as **Report page**) reads the page's own main visible text
+   — capped at ~15,000 characters, walking live text nodes and skipping anything inside a form
+   field (`input`/`select`/`textarea`/`button`/`option`) or anything the scanner would already
+   treat as invisible — and separately scans for a `textarea` or plain text `input` whose resolved
+   label mentions "cover letter".
+2. `background.js` calls `POST /cover-letter` with the tab's URL, every frame's URL (an embedded
+   Greenhouse/Lever/Ashby/Workday iframe's own URL is what lets the service recognize the posting
+   through its public API — see `job_context.py`), and that page text as a last resort.
+3. The result is shown in a clearly-marked **DRAFT** box (blue, "review before using" — the same
+   color this panel uses for every piece of generated text, never green) with the job the service
+   identified, any validator warnings, and **Copy** / **Download .txt** buttons. **Insert into the
+   cover-letter box** only appears when step 1 actually found a field for it.
+4. Inserting goes through the exact same guarded `applyFill()` / highlight path a normal fill
+   uses — so it survives a controlled-input re-render the same way, is highlighted **draft**
+   (blue), is recorded in this frame's own `priorValues`, and **Undo** restores it exactly like
+   any other field.
+5. A 403 ("no language model available on this computer, or the operator hasn't allowed the
+   configured cloud one yet") or 422 ("couldn't find this job's description to write a letter
+   against", or the draft was refused because it claimed experience the profile doesn't have — see
+   `grounding.py`) is shown **verbatim** — the service's own `detail` text, not a generic failure.
+
+## Remember my answers
+
+After a fill, if it left anything for you to answer yourself, the panel shows a **Remember my
+answers** button. Clicking it (never automatic):
+
+1. `content.js` reads the CURRENT value of exactly the fields that fill's "needs you" list named
+   (by field id) — non-empty only, and never a password or file field, regardless of what's typed
+   into one.
+2. `background.js` sends each one to `POST /answers/learn` with that field's own resolved label as
+   the question, then the panel shows what was **saved** and what was **skipped** (with the
+   reason the service gave — a canary question, a screening attestation, something
+   company-specific, ...; see `answer_memory.py`).
+3. Saved answers join the active profile's own answer bank, so the answer-bank tier fills them
+   automatically next time the same (or a very similarly worded) question comes up.
+
+If nothing you were left with has an answer typed in yet, clicking the button says so and makes no
+service call at all.
+
+## Application log
+
+Every completed fill is logged automatically — no click required. `background.js` POSTs
+`/log` with the page URL, the page's own `document.title`, a best-effort company guess (a
+recognized ATS host — Greenhouse/Lever/Ashby/Workday — is left for the service's own smarter,
+posting-aware lookup; anything else gets a plain hostname-derived guess), and the fill's counts
+translated into the service's own key names (`needs_you`, `unreadable`). The panel then shows
+**Logged** and a **Mark as applied** button; clicking it posts `/log/{id}/status` and the line
+updates to say so. A second fill of the same page within the hour updates that one entry rather
+than creating a duplicate (the service's own behavior — see `app_log.record()`) — exactly what a
+multi-step form's later steps, or just clicking Fill again, produce.
+
+## Review rows
+
+Every row in Filled / Drafted / Need you / Could not fill shows the field's own label, a status
+badge (**Verified**, **Draft**, **Left for you**, **Kept your value**, **Failed**, or **Didn't
+stick**), and — when the fill had one — its source (`profile`, `answer_bank`, `draft`, ...).
+Clicking a row asks `background.js` to route to the exact frame that field lives in (every row's
+id is qualified with its own frame — see `applyFrameReport()`), which scrolls it into view and
+flashes its highlight right on the page. Within "Need you" and "Could not fill", a **required**
+field that's still unfilled sorts to the top of its section, so the field most likely to block
+your application is never buried below a dozen optional ones. The summary line's "N couldn't
+read" count (see "Report honestly" below) is unchanged by any of this.
+
+## Export fill report
+
+**Export fill report** downloads a JSON file built entirely from what's already in
+`chrome.storage.session` — no page access, no permission prompt. Per field: which frame it's in
+(id and URL), its label, its tag/widget, its status, its source, and its reason — plus the page's
+host/path and the fill's counts. **Never a value, anywhere in the file** — even a reason string
+that quotes the attempted value for your own benefit on screen (e.g. `Could not match "Senior
+Engineer" to an option`) has that quoted text redacted before it's written out, since this file is
+meant to be sent to someone else to diagnose a bad fill.
+
+## Keyboard shortcuts
+
+Two commands, both rebindable at `chrome://extensions/shortcuts`:
+
+- **Alt+Shift+F** opens the panel (`_execute_action`, a name Chrome itself dispatches by
+  simulating the toolbar icon's own click — no code here, it just reuses `openPanelOnActionClick`).
+- **Alt+Shift+G** fills the active tab directly, without opening the panel or clicking Fill first.
+  The shortcut's own gesture grants `activeTab` for the tab's top frame, which is enough on its
+  own for a page with no cross-origin embedded form. If the page DOES have one (an embedded
+  Greenhouse/Lever-style iframe) and its origin isn't already granted, this never fills the top
+  frame alone and silently skips the rest — it opens the panel and shows the same "ApplyPilot
+  needs permission..." line the panel's own Fill/Report buttons show, so you grant it the normal
+  way (click **Fill this page**).
+
+## Multi-step continuation (opt-in)
+
+A per-tab toggle in the panel, **off by default**: "Keep filling as I go through steps." Turning
+it on (gated the same way Fill/Report are — nothing runs until you do) arms `content.js`'s own
+watcher in the top frame for a Workday-style multi-step form. It watches for two independent,
+concrete signals that a new step just rendered — never a guess, never a timer alone:
+
+1. `location.href` changed since the last step (a step that changes the URL, or a hash-only route
+   change).
+2. The form root re-rendered: most of the elements the last fill actually touched are no longer
+   connected to the document at all.
+
+Either one, once the page settles, triggers a completely normal fill for the new step — same
+`PREPARE_AND_SCAN`/`APPLY_FILLS` pipeline, same submit shield, same post-fill verification, same
+"never overwrite the user" rule. **This never clicks Next or Submit itself** — it only reacts once
+you (or the page) have already moved to the next step. The panel shows the step count and the
+toggle stays visible so turning it off is always one click away. It's automatically treated as off
+the moment the tab navigates to a different host than the one it was turned on for.
 
 ## Fill every frame
 
@@ -254,6 +390,11 @@ erases an existing one, so "already has something" is never a reason to stop add
     own.
 - `storage`: holds the service URL and token in `chrome.storage.local` (never synced), and is
   also what backs `chrome.storage.session` — the per-tab fill-result store described below.
+- `nativeMessaging`: lets `background.js` talk to the `com.applypilot.copilot` native host (see
+  "Auto-connect" above) to start the local service and fetch its port/token without a terminal.
+  The host only ever accepts a connection from the extension id `manifest.json`'s `key` pins —
+  see `allowed_origins` in the host manifest `install-host` writes — so this permission cannot be
+  used to reach any OTHER native host on the machine.
 
 ## Architecture / file map
 
@@ -574,3 +715,15 @@ submissions). What's left is genuinely manual — things automation on a mock pa
 6. Try it against a real company careers page that embeds its ATS form in a cross-origin
    `<iframe>` (the scenario "Fill every frame" above exists for) and confirm the embedded form's
    fields get scanned, filled and highlighted exactly like a top-level form would.
+7. **The keyboard shortcuts** — press Alt+Shift+F on any tab and confirm the panel opens exactly
+   as it does from the toolbar icon; press Alt+Shift+G on a real job application page (no panel
+   open at all) and confirm it fills the page directly. On a real page embedding a cross-origin
+   ATS iframe you haven't already granted, confirm Alt+Shift+G does NOT partially fill the top
+   frame — it opens the panel showing the "needs permission" line instead, and a real, native
+   `chrome.commands` keypress is not something Playwright can simulate at all, so
+   `chrome_panel_test.py` instead calls `handleFillPageCommand()`/`openPanelWithPermissionNotice()`
+   directly against the real service worker — see that file's own comments on both this and item
+   7's other genuinely-manual-only gap, `chrome.sidePanel.open()`'s user-gesture timing once the
+   permission check's own `await` has already happened (this build's own code degrades safely
+   either way: the permission note is written to storage regardless of whether the panel visibly
+   auto-opens, so it's there the next time the panel *is* opened, manually or otherwise).

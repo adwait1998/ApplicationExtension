@@ -248,6 +248,124 @@ button.secondary.cancel:hover { background: var(--err-bg); }
   line-height: 1.4;
 }
 
+/* -- cover letter draft box (item 2): blue like every other "generated text, review before
+   using" surface in this panel (see .field-row.draft above) — never green, never presented as
+   a fact. -- */
+.cover-letter-status {
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info);
+}
+.cover-letter-status.error { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+.cover-letter-status.ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
+.cover-letter-box {
+  margin: 0 12px 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--draft-bg);
+  border: 1px solid var(--draft-border);
+}
+.cover-letter-job {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 2px 0 8px;
+}
+.cover-letter-text {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+.cover-letter-warnings {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.cover-letter-box .actions { padding: 10px 0 0; }
+
+/* -- remember my answers (item 3) -- */
+.remember-box { padding: 0 12px 8px; }
+.remember-box .actions { padding: 0 0 8px; }
+.remember-status {
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info);
+}
+.remember-status.error { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+.remember-status.ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
+.remember-details { display: flex; flex-direction: column; gap: 4px; }
+.remember-row {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.remember-row.saved { background: var(--ok-bg); border: 1px solid var(--ok-border); }
+.remember-row.skipped { background: var(--warn-bg); border: 1px solid var(--warn-border); }
+
+/* -- multi-step continuation (item 8) -- */
+.continuation-row {
+  margin: 8px 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.continuation-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.continuation-toggle input { margin: 0; }
+.continuation-step-line {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* -- application log (item 4) -- */
+.log-line {
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.log-line button.secondary { flex: none; padding: 4px 10px; font-size: 12px; }
+
 .results {
   max-height: 60vh;
   overflow-y: auto;
@@ -279,10 +397,33 @@ button.secondary.cancel:hover { background: var(--err-bg); }
    real person's name. */
 .field-row.draft { background: var(--draft-bg); border: 1px solid var(--draft-border); }
 
+/* Item 5 (Review rows): every row with a field id is clickable (scrolls/flashes it on the
+   page) — a plain pointer + a focus ring is the only affordance needed; the row's own
+   background already carries the status color. */
+.field-row[data-field-id] { cursor: pointer; }
+.field-row[data-field-id]:hover { filter: brightness(1.12); }
+.field-row[data-field-id]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .field-row .label { font-weight: 600; }
-.field-row .value { color: var(--ok); }
+.field-row .value { color: var(--ok); margin-top: 2px; }
 .field-row .reason { color: var(--text-dim); margin-top: 2px; }
 .field-row.draft .value { color: var(--draft); }
+
+.status-badge {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #fff;
+}
+.status-badge.status-verified { background: var(--ok); }
+.status-badge.status-draft { background: var(--draft); }
+.status-badge.status-left_for_you, .status-badge.status-kept_value { background: var(--warn); }
+.status-badge.status-failed, .status-badge.status-didnt_stick { background: var(--err); }
 
 .section-title.draft-title { color: var(--draft); }
 

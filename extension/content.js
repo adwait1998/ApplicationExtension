@@ -455,15 +455,38 @@
       return (f && (f.label || f.name)) || ('field #' + fill.id);
     }
 
+    // Item 5 (Review rows): every row this run produces carries a `status` from a fixed,
+    // human-facing vocabulary (verified / draft / left_for_you / kept_value / failed /
+    // didnt_stick — sidepanel.js turns these into the exact wording the panel shows) and a
+    // `required` flag (from the original FieldDescriptor) so the panel can sort an unfilled
+    // required field to the top of its section. `kind`/`widget` ride along too, for the export
+    // report (item 6) — never `value`, which that export deliberately omits.
+    function requiredFor(idish) {
+      var f = fieldsById[idish.id];
+      return !!(f && f.required);
+    }
+    function widgetFor(idish) {
+      var f = fieldsById[idish.id];
+      return (f && f.widget) || '';
+    }
+    function tagFor(idish) {
+      var f = fieldsById[idish.id];
+      return (f && f.tag) || '';
+    }
+
     function step(i) {
       if (i >= fills.length) return Promise.resolve();
 
       if (ctx.isCancelled()) {
-        for (var c = i; c < fills.length; c++) failed.push({ id: fills[c].id, reason: 'Not attempted — cancelled' });
+        for (var c = i; c < fills.length; c++) {
+          failed.push({ id: fills[c].id, reason: 'Not attempted — cancelled', status: 'failed', required: requiredFor(fills[c]), tag: tagFor(fills[c]), widget: widgetFor(fills[c]) });
+        }
         return Promise.resolve();
       }
       if (ctx.overBudget()) {
-        for (var b = i; b < fills.length; b++) failed.push({ id: fills[b].id, reason: 'Not attempted — time budget exceeded' });
+        for (var b = i; b < fills.length; b++) {
+          failed.push({ id: fills[b].id, reason: 'Not attempted — time budget exceeded', status: 'failed', required: requiredFor(fills[b]), tag: tagFor(fills[b]), widget: widgetFor(fills[b]) });
+        }
         return Promise.resolve();
       }
 
@@ -473,7 +496,7 @@
       ctx.onProgress({ current: i + 1, total: total, label: label });
 
       if (!entry) {
-        failed.push({ id: fill.id, reason: 'Field no longer found on the page (did the page change after scanning?)' });
+        failed.push({ id: fill.id, reason: 'Field no longer found on the page (did the page change after scanning?)', status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill) });
         return step(i + 1);
       }
       if (!fill.auto_fill) {
@@ -481,7 +504,10 @@
         // confidence). Treat exactly like a skip: highlight, never write.
         var targets = ApplyPilotScanner.getHighlightTargets(entry);
         for (var t = 0; t < targets.length; t++) highlight(targets[t], 'skipped', fill.reason || 'Not confident enough to auto-fill');
-        needsYou.push({ id: fill.id, label: label, reason: fill.reason || 'Not confident enough to auto-fill', tag: (fieldsById[fill.id] || {}).tag });
+        needsYou.push({
+          id: fill.id, label: label, reason: fill.reason || 'Not confident enough to auto-fill',
+          status: 'left_for_you', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+        });
         return step(i + 1);
       }
 
@@ -510,7 +536,10 @@
         delete priorValues[fill.id]; // nothing was written — nothing for Undo to restore
         var keepTargets = ApplyPilotScanner.getHighlightTargets(entry);
         for (var kt = 0; kt < keepTargets.length; kt++) highlight(keepTargets[kt], 'skipped', 'kept your value');
-        needsYou.push({ id: fill.id, label: label, reason: 'kept your value', tag: (fieldsById[fill.id] || {}).tag });
+        needsYou.push({
+          id: fill.id, label: label, reason: 'kept your value',
+          status: 'kept_value', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+        });
         return step(i + 1);
       }
 
@@ -532,18 +561,25 @@
           applied.push({
             id: fill.id, label: label, value: fill.value,
             values: (Array.isArray(fill.values) && fill.values.length) ? fill.values : null,
-            reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft
+            reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft,
+            status: isDraft ? 'draft' : 'verified', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
           });
         } else if (outcome.timedOut) {
           for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Timed out waiting for this field to respond');
-          failed.push({ id: fill.id, label: label, reason: 'Timed out after ' + Math.round(ctx.fieldTimeoutMs / 1000) + 's — the page did not respond in time' });
+          failed.push({
+            id: fill.id, label: label, reason: 'Timed out after ' + Math.round(ctx.fieldTimeoutMs / 1000) + 's — the page did not respond in time',
+            status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+          });
         } else {
           // entry._lastReason is set by scanner.js's applyFill() for the Workday popup
           // widgets (e.g. "no confident match for ... among dropdown options") — surface it
           // when present rather than only the generic message.
           var extra = entry._lastReason ? (' — ' + entry._lastReason) : (outcome.error ? (' — ' + (outcome.error.message || outcome.error)) : '');
           for (var h3 = 0; h3 < hlTargets.length; h3++) highlight(hlTargets[h3], 'skipped', 'Could not match "' + fill.value + '" to an option' + extra);
-          failed.push({ id: fill.id, label: label, reason: 'Could not match value "' + fill.value + '" to an option on the page' + extra });
+          failed.push({
+            id: fill.id, label: label, reason: 'Could not match value "' + fill.value + '" to an option on the page' + extra,
+            status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+          });
         }
       }).then(function () { return step(i + 1); });
     }
@@ -552,7 +588,11 @@
       for (var s = 0; s < skipped.length; s++) {
         var skip = skipped[s];
         var sEntry = registry[skip.id];
-        needsYou.push({ id: skip.id, label: (fieldsById[skip.id] || {}).label || (fieldsById[skip.id] || {}).name, reason: skip.reason || 'Skipped — please answer this yourself', tag: (fieldsById[skip.id] || {}).tag });
+        needsYou.push({
+          id: skip.id, label: (fieldsById[skip.id] || {}).label || (fieldsById[skip.id] || {}).name,
+          reason: skip.reason || 'Skipped — please answer this yourself',
+          status: 'left_for_you', required: requiredFor(skip), tag: tagFor(skip), widget: widgetFor(skip)
+        });
         if (!sEntry) continue;
         var sTargets = ApplyPilotScanner.getHighlightTargets(sEntry);
         for (var st = 0; st < sTargets.length; st++) highlight(sTargets[st], 'skipped', skip.reason || 'Skipped — please answer this yourself');
@@ -589,7 +629,11 @@
           for (var h = 0; h < hlTargets.length; h++) {
             highlight(hlTargets[h], 'skipped', "Didn't stick — the page reverted this field after it was filled");
           }
-          reverted.push({ id: a.id, label: a.label, reason: "Didn't stick — the page reverted this field after it was filled (re-render, or the widget cleared itself)" });
+          reverted.push({
+            id: a.id, label: a.label, source: a.source, required: a.required, tag: a.tag, widget: a.widget,
+            status: 'didnt_stick',
+            reason: "Didn't stick — the page reverted this field after it was filled (re-render, or the widget cleared itself)"
+          });
         }
       });
       result.applied = stillApplied;
@@ -786,6 +830,9 @@
     return {
       status: status,
       url: location.href,
+      // The top frame's own document.title — background.js only reads this off frame 0's own
+      // report (see applyFrameReport()), but every frame sets it the same way, harmlessly.
+      title: document.title || '',
       startedAt: startedAt || null,
       updatedAt: Date.now(),
       progress: null,
@@ -802,8 +849,17 @@
     };
   }
 
+  // The most recent state object this frame has reported, kept around so a standalone action
+  // that happens OUTSIDE the normal prepareAndScan/applyFills pipeline (inserting a cover-letter
+  // draft, item 2; "remember my answers" touches no DOM so it doesn't need this) can update just
+  // its own corner of that state (e.g. undoAvailable, or append one more drafted field) and
+  // re-report it, WITHOUT resetting the visible fill summary the way starting a fresh
+  // freshState('running'/'idle') would. Never read by anything outside this file.
+  var lastReportedState = null;
+
   function sendStateUpdate(state) {
     state.updatedAt = Date.now();
+    lastReportedState = state;
     try {
       var p = chrome.runtime.sendMessage({ type: 'FILL_STATE_UPDATE', state: state });
       // Fire-and-forget from this file's point of view — the pipeline must not stall waiting
@@ -932,6 +988,309 @@
       });
   }
 
+  // ---------------------------------------------------------------------
+  // COVER LETTER (item 2) — a "Draft cover letter" click in the panel needs the page's own
+  // visible text (a last-resort job description source — the service tries the operator's jobs
+  // DB and the ATS's own public posting API first, see job_context.py) and, separately, whether
+  // there's somewhere on THIS page to put the finished draft. Both are read-only / additive:
+  // extracting text touches nothing, finding the field only SCANS, and inserting goes through the
+  // exact same guarded applyFill()/highlight()/priorValues path a normal fill uses so Undo can
+  // restore it too — see insertCoverLetterDraft() below. Top frame only, same as "Report page".
+  // ---------------------------------------------------------------------
+  var MAX_PAGE_TEXT_CHARS = 15000;
+  var PAGE_TEXT_EXCLUDED_TAGS = { script: 1, style: 1, noscript: 1, input: 1, select: 1, textarea: 1, button: 1, option: 1, optgroup: 1 };
+
+  function isInsideExcludedField(el) {
+    var n = el;
+    while (n) {
+      if (n.nodeType === 1 && PAGE_TEXT_EXCLUDED_TAGS[n.tagName.toLowerCase()]) return true;
+      n = n.parentElement;
+    }
+    return false;
+  }
+
+  /**
+   * The page's own main visible text, capped at MAX_PAGE_TEXT_CHARS, excluding form fields —
+   * walks live text nodes (never a detached clone: visibility needs real layout, and
+   * ApplyPilotScanner.isVisible() only works on a node that's actually in the rendered document)
+   * so it naturally skips display:none/hidden copy the same way the scanner already does for
+   * fields. Read-only — never touches the DOM.
+   */
+  function extractVisiblePageText(doc) {
+    var root = doc && doc.body;
+    if (!root || typeof doc.createTreeWalker !== 'function') return '';
+    var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var parts = [];
+    var total = 0;
+    var node;
+    while ((node = walker.nextNode())) {
+      if (total >= MAX_PAGE_TEXT_CHARS) break;
+      var raw = node.nodeValue;
+      if (!raw || !raw.trim()) continue;
+      var parentEl = node.parentElement;
+      if (!parentEl || isInsideExcludedField(parentEl)) continue;
+      try {
+        if (!ApplyPilotScanner.isVisible(parentEl)) continue;
+      } catch (e) {
+        continue;
+      }
+      var text = raw.replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      parts.push(text);
+      total += text.length + 1;
+    }
+    return parts.join(' ').slice(0, MAX_PAGE_TEXT_CHARS);
+  }
+
+  var COVER_LETTER_LABEL_RE = /cover\s*letter/i;
+
+  /**
+   * A textarea/text-input FieldDescriptor whose resolved label mentions "cover letter", or null.
+   * Runs a real scanAll() (merged additively into the live `registry` — never replacing it, so
+   * ids an earlier fill's Undo still depends on keep resolving) purely to find candidates; nothing
+   * is written here.
+   */
+  function findCoverLetterField() {
+    var result = ApplyPilotScanner.scanAll(document);
+    for (var id in result.registry) {
+      if (Object.prototype.hasOwnProperty.call(result.registry, id)) registry[id] = result.registry[id];
+    }
+    var match = null;
+    result.fields.forEach(function (f) {
+      if (match) return;
+      var tag = String(f.tag || '').toLowerCase();
+      var type = String(f.type || '').toLowerCase();
+      var isTextish = tag === 'textarea' || (tag === 'input' && (type === '' || type === 'text'));
+      if (isTextish && COVER_LETTER_LABEL_RE.test(f.label || '')) match = f;
+    });
+    return match ? { id: match.id, label: match.label || '' } : null;
+  }
+
+  /**
+   * Republishes whatever this frame last reported, with just `patch` applied, WITHOUT resetting
+   * filled/drafts/needsYou/failed to empty the way starting a brand-new freshState() would — so a
+   * standalone action taken between fills (or before any fill has run at all) never wipes an
+   * already-visible fill summary. If nothing has been reported yet, seeds a minimal 'done' state
+   * so the panel has something to render.
+   */
+  function patchReportedState(patch) {
+    var state = lastReportedState || freshState('done', Date.now());
+    for (var k in patch) if (Object.prototype.hasOwnProperty.call(patch, k)) state[k] = patch[k];
+    sendStateUpdate(state);
+    return state;
+  }
+
+  /**
+   * Inserts `text` into the field `fieldId` (from findCoverLetterField(), or a stale id from a
+   * page that has since changed) through the SAME guarded applyFill() + highlight() path a normal
+   * fill uses, so it survives a controlled-input re-render the same way, is recorded in
+   * `priorValues` (Undo replays it exactly like any other field — see undo() above), and is
+   * highlighted 'draft' (blue), never 'filled' (green) — this is generated text the operator must
+   * review, same rule as every other draft in this extension.
+   */
+  function insertCoverLetterDraft(fieldId, text) {
+    var entry = registry[fieldId];
+    if (!entry) return Promise.resolve({ ok: false, error: 'That field is no longer on the page (did it change since the draft was requested?).' });
+    if (!Object.prototype.hasOwnProperty.call(priorValues, fieldId)) {
+      try { priorValues[fieldId] = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { priorValues[fieldId] = undefined; }
+    }
+    return Promise.resolve().then(function () {
+      return ApplyPilotScanner.applyFill(entry, text);
+    }).then(function (ok) {
+      var targets = ApplyPilotScanner.getHighlightTargets(entry);
+      if (!ok) {
+        return { ok: false, error: 'The page would not accept the draft text in that field.' };
+      }
+      for (var i = 0; i < targets.length; i++) {
+        highlight(targets[i], 'draft', 'Cover letter draft inserted — review before submitting');
+      }
+      var label = (currentPrepare && currentPrepare.fieldsById[fieldId] && currentPrepare.fieldsById[fieldId].label) || 'Cover letter';
+      var state = lastReportedState;
+      var already = state && (state.drafts || []).some(function (d) { return d.id === fieldId; });
+      if (!already) {
+        var drafts = (state && state.drafts || []).concat([{
+          id: fieldId, label: label, value: text, reason: 'Cover letter draft inserted', profile_key: null,
+          source: 'cover-letter', draft: true, status: 'draft', required: false, tag: 'textarea', widget: ''
+        }]);
+        var counts = (state && state.counts) || emptyCounts();
+        patchReportedState({
+          status: 'done', drafts: drafts,
+          counts: { filled: counts.filled || 0, drafts: drafts.length, needsYou: counts.needsYou || 0, failed: counts.failed || 0 },
+          undoAvailable: true
+        });
+      } else {
+        patchReportedState({ undoAvailable: true });
+      }
+      return { ok: true };
+    }, function (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // REMEMBER MY ANSWERS (item 3) — background.js's rememberAnswersForTab() asks this frame to
+  // read back the CURRENT value of specific fields (by LOCAL id — background.js has already
+  // stripped the frame qualifier off before sending this) once the operator has typed answers
+  // into whatever a fill left for them and clicks the panel's button. Never automatic. Deliberately
+  // excludes anything password/file-shaped and anything still empty — those are simply left out
+  // of the returned map rather than included as "" or a placeholder value.
+  // ---------------------------------------------------------------------
+  function readFieldsForAnswers(ids) {
+    var values = {};
+    (ids || []).forEach(function (id) {
+      var entry = registry[id];
+      if (!entry) return;
+      var els = entryElements(entry);
+      var isSensitive = els.some(function (el) {
+        if (!el || el.tagName !== 'INPUT') return false;
+        var t = String(el.type || '').toLowerCase();
+        return t === 'password' || t === 'file';
+      });
+      if (isSensitive) return;
+      var val;
+      try { val = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { return; }
+      if (val == null || typeof val === 'boolean') return; // a checkbox's true/false isn't answer text
+      var text = String(val).trim();
+      if (text) values[id] = text;
+    });
+    return values;
+  }
+
+  // ---------------------------------------------------------------------
+  // REVIEW ROWS (item 5) — clicking a row in the panel scrolls that field into view in its own
+  // frame and flashes its highlight. background.js routes FLASH_FIELD to the right frame (it
+  // splits the qualified id — see splitQualifiedId() there); this only ever sees its OWN local
+  // id, exactly like every other per-frame message.
+  // ---------------------------------------------------------------------
+  var FLASH_STYLE_ID = 'applypilot-flash-style';
+  var FLASH_ATTR = 'data-applypilot-flash';
+
+  function ensureFlashStyle(doc) {
+    if (doc.getElementById(FLASH_STYLE_ID)) return;
+    var style = doc.createElement('style');
+    style.id = FLASH_STYLE_ID;
+    style.textContent =
+      '@keyframes applypilot-flash-pulse { 0%, 100% { outline-width: 2px; } 50% { outline-width: 5px; outline-color: #f0b400; } }' +
+      '[' + FLASH_ATTR + '="true"] { animation: applypilot-flash-pulse 0.35s ease-in-out 3; }';
+    (doc.head || doc.documentElement).appendChild(style);
+  }
+
+  function flashElement(el) {
+    if (!el) return false;
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {
+      try { el.scrollIntoView(); } catch (e2) { /* best-effort */ }
+    }
+    ensureFlashStyle(el.ownerDocument || document);
+    el.setAttribute(FLASH_ATTR, 'true');
+    setTimeout(function () { el.removeAttribute(FLASH_ATTR); }, 1100);
+    return true;
+  }
+
+  /** Scrolls to and flashes the first highlight target for local field id `id`, or false if it's
+   * no longer on the page (a stale row from before the page changed). */
+  function scrollToField(id) {
+    var entry = registry[id];
+    if (!entry) return false;
+    var targets = ApplyPilotScanner.getHighlightTargets(entry);
+    return flashElement(targets[0]);
+  }
+
+  // ---------------------------------------------------------------------
+  // MULTI-STEP CONTINUATION (item 8) — opt-in, OFF by default (see sidepanel.js's toggle). Top
+  // frame only: Workday's own "My Experience" / step-progress flows are same-document SPA
+  // navigation in the TOP document, which is exactly what lets this same long-lived content.js
+  // instance (window.__applyPilotContentLoaded already guards re-injection) keep watching across
+  // steps without ever being re-injected.
+  //
+  // Two independent, DOM-fact-based signals decide "a new step just rendered" — never a timer
+  // alone, never a guess:
+  //   1. location.href changed since the last completed step (a step that changes the URL, or a
+  //      hash-only route change a MutationObserver's childList/subtree filter might not catch).
+  //   2. "the form root re-rendered": a majority of the elements THIS extension's own last fill
+  //      actually touched are no longer connected to the document at all — the concrete, checkable
+  //      meaning of "Workday replaced the whole step's markup" rather than eyeballing a heuristic
+  //      field-count difference.
+  // Either one, after the page settles (reusing waitForDomQuiet — same "let it stop mutating"
+  // wait résumé-attach already relies on), asks background.js to run a completely normal fill for
+  // the new step: same PREPARE_AND_SCAN/APPLY_FILLS pipeline, same shield, same verification,
+  // same "never overwrite the user" rule — nothing about how a step is filled is special-cased.
+  // Never clicks Next/Submit itself — see README "The one rule that matters".
+  // ---------------------------------------------------------------------
+  var CONTINUATION_SETTLE_DEBOUNCE_MS = 600;
+  var continuation = null; // { host, lastUrl, watchedElements, observer, poll, settleTimer, checking, steps }
+
+  function currentRegistryElements() {
+    var els = [];
+    for (var id in registry) {
+      if (Object.prototype.hasOwnProperty.call(registry, id)) els = els.concat(entryElements(registry[id]));
+    }
+    return els;
+  }
+
+  function stopContinuationWatch() {
+    if (continuation) {
+      if (continuation.observer) continuation.observer.disconnect();
+      if (continuation.poll) clearInterval(continuation.poll);
+      if (continuation.settleTimer) clearTimeout(continuation.settleTimer);
+    }
+    continuation = null;
+  }
+
+  function scheduleContinuationCheck() {
+    if (!continuation || continuation.checking) return;
+    if (continuation.settleTimer) clearTimeout(continuation.settleTimer);
+    continuation.settleTimer = setTimeout(runContinuationCheck, CONTINUATION_SETTLE_DEBOUNCE_MS);
+  }
+
+  function runContinuationCheck() {
+    if (!continuation || activeRun) return; // never overlap with a fill already running in THIS frame
+    if (location.hostname !== continuation.host) {
+      // Never on a different host than the one the toggle was turned on for — a full navigation
+      // away is the one case a full-page unload wouldn't already have torn this module down for.
+      stopContinuationWatch();
+      return;
+    }
+    var urlChanged = location.href !== continuation.lastUrl;
+    var known = continuation.watchedElements;
+    var stillConnected = known.filter(function (el) { return el && el.isConnected; }).length;
+    var formReplaced = known.length > 0 && (stillConnected / known.length) < 0.5;
+    if (!urlChanged && !formReplaced) return;
+
+    continuation.checking = true;
+    continuation.lastUrl = location.href;
+    waitForDomQuiet(document, DOM_QUIET_MS, DOM_QUIET_MAX_MS).then(function () {
+      if (!continuation) return; // turned off while we were waiting for the page to settle
+      continuation.steps = (continuation.steps || 1) + 1;
+      try {
+        var p = chrome.runtime.sendMessage({ type: 'CONTINUATION_RUN_FILL' });
+        if (p && typeof p.then === 'function') p.then(function () {}, function () {});
+      } catch (e) {
+        // best-effort — same "never throw across the extension boundary" rule as sendStateUpdate()
+      }
+    }).then(function () {
+      if (continuation) {
+        continuation.watchedElements = currentRegistryElements();
+        continuation.checking = false;
+      }
+    });
+  }
+
+  function startContinuationWatch(host) {
+    stopContinuationWatch();
+    continuation = {
+      host: host, lastUrl: location.href, watchedElements: currentRegistryElements(),
+      observer: null, poll: null, settleTimer: null, checking: false, steps: 1
+    };
+    if (typeof MutationObserver !== 'undefined') {
+      continuation.observer = new MutationObserver(scheduleContinuationCheck);
+      continuation.observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    }
+    // Cheap poll alongside the observer — this feature is opt-in and off by default, so the small
+    // timer cost only exists while it's actually on — catches a route change a MutationObserver's
+    // subtree filter might not (e.g. a hash-only change with no DOM mutation at all).
+    continuation.poll = setInterval(scheduleContinuationCheck, 1000);
+  }
+
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || typeof msg !== 'object') return false;
 
@@ -1053,6 +1412,34 @@
         var cap = self.ApplyPilotCapture;
         sendResponse(cap ? { ok: true, structure: cap.captureStructure(document) }
                          : { ok: false, error: 'capture.js not loaded' });
+        return false;
+      }
+      if (msg.type === 'EXTRACT_PAGE_TEXT') {
+        // Read-only, top frame only (sidepanel.js never sends this to any other frame) — see
+        // "COVER LETTER" above.
+        sendResponse({ ok: true, text: extractVisiblePageText(document) });
+        return false;
+      }
+      if (msg.type === 'FIND_COVER_LETTER_FIELD') {
+        sendResponse({ ok: true, field: findCoverLetterField() });
+        return false;
+      }
+      if (msg.type === 'INSERT_COVER_LETTER') {
+        insertCoverLetterDraft(msg.fieldId, String(msg.text || '')).then(sendResponse);
+        return true; // async response
+      }
+      if (msg.type === 'READ_FIELDS_FOR_ANSWERS') {
+        sendResponse({ ok: true, values: readFieldsForAnswers(msg.ids) });
+        return false;
+      }
+      if (msg.type === 'FLASH_FIELD') {
+        sendResponse({ ok: scrollToField(msg.id) });
+        return false;
+      }
+      if (msg.type === 'SET_CONTINUATION') {
+        if (msg.enabled) startContinuationWatch(msg.host || location.hostname);
+        else stopContinuationWatch();
+        sendResponse({ ok: true });
         return false;
       }
     } catch (e) {

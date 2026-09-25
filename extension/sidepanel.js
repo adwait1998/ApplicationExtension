@@ -36,6 +36,7 @@
   var cancelBtn = document.getElementById('cancelBtn');
   var undoBtn = document.getElementById('undoBtn');
   var reportBtn = document.getElementById('reportBtn');
+  var exportReportBtn = document.getElementById('exportReportBtn');
   var statusBox = document.getElementById('statusBox');
   var staleBanner = document.getElementById('staleBanner');
   var progressBox = document.getElementById('progressBox');
@@ -47,6 +48,32 @@
   var tiersLine = document.getElementById('tiersLine');
   var serviceDot = document.getElementById('serviceDot');
   var optionsBtn = document.getElementById('optionsBtn');
+
+  // -- cover letter (item 2) --
+  var coverLetterBtn = document.getElementById('coverLetterBtn');
+  var coverLetterStatusEl = document.getElementById('coverLetterStatus');
+  var coverLetterBoxEl = document.getElementById('coverLetterBox');
+  var coverLetterJobEl = document.getElementById('coverLetterJob');
+  var coverLetterTextEl = document.getElementById('coverLetterText');
+  var coverLetterWarningsEl = document.getElementById('coverLetterWarnings');
+  var coverLetterCopyBtn = document.getElementById('coverLetterCopyBtn');
+  var coverLetterDownloadBtn = document.getElementById('coverLetterDownloadBtn');
+  var coverLetterInsertBtn = document.getElementById('coverLetterInsertBtn');
+
+  // -- remember my answers (item 3) --
+  var rememberBoxEl = document.getElementById('rememberBox');
+  var rememberBtn = document.getElementById('rememberBtn');
+  var rememberStatusEl = document.getElementById('rememberStatus');
+  var rememberDetailsEl = document.getElementById('rememberDetails');
+
+  // -- application log (item 4) --
+  var logLineEl = document.getElementById('logLine');
+  var logStatusTextEl = document.getElementById('logStatusText');
+  var markAppliedBtn = document.getElementById('markAppliedBtn');
+
+  // -- multi-step continuation (item 8) --
+  var continuationToggle = document.getElementById('continuationToggle');
+  var continuationStepLineEl = document.getElementById('continuationStepLine');
 
   // TEST-ONLY: "?tabId=<id>" pins this panel instance to a specific tab for its whole lifetime
   // instead of following chrome.tabs.onActivated/onUpdated in its own window. This exists
@@ -72,6 +99,9 @@
   // status line can say "Cancelling…" instead of flipping back to a generic "Filling…" while
   // the loop finishes its current field. Cleared once that tab is no longer 'running'.
   var cancelRequestedForTab = null;
+  // The last FIND_COVER_LETTER_FIELD result for activeTabId ({id, label}), or null — see
+  // "DRAFT COVER LETTER" below. Reset whenever the active tab changes (see setActiveTab()).
+  var coverLetterFieldForTab = null;
 
   function stateKey(tabId) {
     return 'fillState_' + tabId;
@@ -241,6 +271,58 @@
     resumeLineEl.textContent = 'No résumé upload on this page.';
   }
 
+  // Item 5 (Review rows): the human-facing word for each of content.js's fixed `status` values
+  // (see applyFills()/verifyAppliedFills() there), and which CSS modifier draws it.
+  var STATUS_LABELS = {
+    verified: 'Verified', draft: 'Draft', left_for_you: 'Left for you',
+    kept_value: 'Kept your value', failed: 'Failed', didnt_stick: "Didn't stick"
+  };
+
+  /** Required-not-yet-filled rows first, stable otherwise — item 5's "required fields that are
+   * not filled come first". Only ever applied to needsYou/failed (nothing in filled/drafts is
+   * "not filled"). */
+  function sortRequiredFirst(list) {
+    return list
+      .map(function (item, idx) { return { item: item, idx: idx }; })
+      .sort(function (a, b) {
+        var ra = a.item.required ? 0 : 1;
+        var rb = b.item.required ? 0 : 1;
+        return ra !== rb ? ra - rb : a.idx - b.idx;
+      })
+      .map(function (w) { return w.item; });
+  }
+
+  /** One row: label + status badge, its value (facts/drafts only — never for needsYou/failed,
+   * which never had one), and a reason/source line. `data-field-id` (the qualified id
+   * background.js's applyFrameReport() stamped on) is what a click routes to SCROLL_TO_FIELD —
+   * absent (e.g. a row from before this build's ids existed) simply makes that row unclickable,
+   * never an error.
+   */
+  function buildRow(entry, cssClass, showValue) {
+    var row = document.createElement('div');
+    row.className = 'field-row ' + cssClass;
+    if (entry.id) {
+      row.dataset.fieldId = entry.id;
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.title = 'Click to jump to this field on the page';
+    }
+    var statusText = STATUS_LABELS[entry.status] || '';
+    var html = '<div class="row-top"><span class="label">' + escapeHtml(entry.label || '(unlabeled field)') + '</span>' +
+      (statusText ? '<span class="status-badge status-' + escapeHtml(entry.status) + '">' + escapeHtml(statusText) + '</span>' : '') +
+      '</div>';
+    if (showValue && entry.value != null && entry.value !== '') {
+      html += '<div class="value">' + escapeHtml(entry.value) + '</div>';
+    }
+    var reasonBits = [];
+    if (entry.reason) reasonBits.push(escapeHtml(entry.reason));
+    if (entry.source) reasonBits.push('source: ' + escapeHtml(entry.source));
+    if (entry.profile_key) reasonBits.push(escapeHtml(entry.profile_key));
+    if (reasonBits.length) html += '<div class="reason">' + reasonBits.join(' &middot; ') + '</div>';
+    row.innerHTML = html;
+    return row;
+  }
+
   // Facts / drafts / needs-you / failed are always rendered as separate, clearly-labelled
   // groups — never merged into one flat list (drafts in particular must never be mistaken for
   // a fact pulled straight from the profile).
@@ -248,22 +330,15 @@
     resultsBox.innerHTML = '';
     var filled = state.filled || [];
     var drafts = state.drafts || [];
-    var needsYou = state.needsYou || [];
-    var failed = state.failed || [];
+    var needsYou = sortRequiredFirst(state.needsYou || []);
+    var failed = sortRequiredFirst(state.failed || []);
 
     if (filled.length) {
       var filledTitle = document.createElement('div');
       filledTitle.className = 'section-title';
       filledTitle.textContent = 'Filled (' + filled.length + ')';
       resultsBox.appendChild(filledTitle);
-      filled.forEach(function (a) {
-        var row = document.createElement('div');
-        row.className = 'field-row filled';
-        row.innerHTML =
-          '<div class="value">' + escapeHtml(a.value) + '</div>' +
-          '<div class="reason">' + escapeHtml(a.reason || '') + (a.profile_key ? ' &middot; ' + escapeHtml(a.profile_key) : '') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      filled.forEach(function (a) { resultsBox.appendChild(buildRow(a, 'filled', true)); });
     }
 
     if (drafts.length) {
@@ -271,15 +346,7 @@
       draftTitle.className = 'section-title draft-title';
       draftTitle.textContent = 'Drafted — review before submitting (' + drafts.length + ')';
       resultsBox.appendChild(draftTitle);
-      drafts.forEach(function (a) {
-        var row = document.createElement('div');
-        row.className = 'field-row draft';
-        row.innerHTML =
-          '<div class="draft-badge">DRAFT</div>' +
-          '<div class="value">' + escapeHtml(a.value) + '</div>' +
-          '<div class="reason">' + escapeHtml(a.reason || '') + (a.profile_key ? ' &middot; ' + escapeHtml(a.profile_key) : '') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      drafts.forEach(function (a) { resultsBox.appendChild(buildRow(a, 'draft', true)); });
     }
 
     if (needsYou.length) {
@@ -287,12 +354,7 @@
       skipTitle.className = 'section-title';
       skipTitle.textContent = 'Need you (' + needsYou.length + ')';
       resultsBox.appendChild(skipTitle);
-      needsYou.forEach(function (s) {
-        var row = document.createElement('div');
-        row.className = 'field-row skipped';
-        row.innerHTML = '<div class="reason">' + escapeHtml(s.reason || 'Left for you to fill in') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      needsYou.forEach(function (s) { resultsBox.appendChild(buildRow(s, 'skipped', false)); });
 
       // A single, once-per-render nudge: only when drafts are off (the operator's own Settings
       // toggle, a LOCAL-ONLY preference read directly from storage) AND at least one "need
@@ -316,12 +378,7 @@
       failTitle.className = 'section-title';
       failTitle.textContent = 'Could not fill (' + failed.length + ')';
       resultsBox.appendChild(failTitle);
-      failed.forEach(function (f) {
-        var row = document.createElement('div');
-        row.className = 'field-row failed';
-        row.innerHTML = '<div class="reason">' + escapeHtml(f.reason || '') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      failed.forEach(function (f) { resultsBox.appendChild(buildRow(f, 'failed', false)); });
     }
 
     if (!resultsBox.children.length) {
@@ -358,6 +415,7 @@
       cancelBtn.hidden = true;
       undoBtn.disabled = true;
       reportBtn.disabled = true;
+      exportReportBtn.disabled = true;
       progressBox.hidden = true;
       fillSummaryEl.hidden = true;
       resumeLineEl.hidden = true;
@@ -395,6 +453,37 @@
     scanBtn.disabled = !scriptable || isRunning;
     cancelBtn.hidden = !isRunning;
     undoBtn.disabled = isRunning || stale || !state || !state.undoAvailable;
+    // Item 6 (Export fill report): anything worth reporting on — enabled once there's at least
+    // one row in any of the four lists, on a result that's current for this page.
+    var hasRows = !!(state && (((state.filled || []).length) + ((state.drafts || []).length) +
+      ((state.needsYou || []).length) + ((state.failed || []).length)) > 0);
+    exportReportBtn.disabled = isRunning || stale || !hasRows;
+
+    // Item 8 (multi-step continuation): render whatever background.js has recorded — this file
+    // never decides on its own whether the watch is on. "Never on a different host than the one
+    // the toggle was turned on for" is enforced on the WATCHING side too (content.js self-disarms
+    // on an in-page navigation to a different host — see runContinuationCheck()), but a full page
+    // reload/navigation tears down that content.js instance entirely without a chance to report
+    // back, so this is the other half: if the tab's CURRENT host no longer matches the host the
+    // toggle was armed for, treat it as off here and tell background.js to clean up the stale
+    // record, rather than showing a toggle that looks on but has nothing left watching.
+    var cont = state && state.continuation;
+    if (cont && cont.enabled && scriptable) {
+      var currentHost = null;
+      try { currentHost = new URL(tab.url).hostname; } catch (e) { /* ignore */ }
+      if (currentHost && cont.host && currentHost !== cont.host) {
+        chrome.runtime.sendMessage({ type: 'SET_CONTINUATION', tabId: tabId, enabled: false }).catch(function () {});
+        cont = null;
+      }
+    }
+    continuationToggle.checked = !!(cont && cont.enabled);
+    continuationToggle.disabled = !scriptable || isRunning;
+    if (cont && cont.enabled && cont.steps > 0) {
+      continuationStepLineEl.hidden = false;
+      continuationStepLineEl.textContent = 'Step ' + cont.steps;
+    } else {
+      continuationStepLineEl.hidden = true;
+    }
 
     renderProgress(isRunning ? state.progress : null);
 
@@ -406,6 +495,12 @@
         : 'Filling…');
     } else if (!state) {
       setStatus('Ready — click Fill this page to scan and fill.');
+    } else if (state.permissionNeeded && (state.permissionNeeded.hosts || []).length) {
+      // Item 7: the fill-page keyboard shortcut found a cross-origin frame it wasn't already
+      // allowed to fill and refused to partially fill the rest silently — same wording the
+      // panel's own Fill/Report click handlers use when chrome.permissions.request() is declined.
+      setStatus('ApplyPilot needs permission to fill forms on ' + state.permissionNeeded.hosts.join(', ') +
+        ' — nothing runs until you allow it. Click Fill this page to grant it.', true);
     } else if (state.error) {
       setStatus('SAFETY/ERROR: ' + state.error, true);
     } else if (state.shieldFired) {
@@ -424,6 +519,8 @@
       fillSummaryEl.hidden = true;
       resumeLineEl.hidden = true;
       resultsBox.innerHTML = '';
+      rememberBoxEl.hidden = true;
+      logLineEl.hidden = true;
       return;
     }
 
@@ -436,10 +533,35 @@
     fillSummaryEl.textContent = line;
     renderResumeLine(state.resume);
     await renderResults(state);
+
+    // "Remember my answers" (item 3) only makes sense once there's at least one field a fill
+    // left for the operator to answer themselves, on a result that's actually current for this
+    // page (never a stale, previous-page result — see `stale` above).
+    rememberBoxEl.hidden = stale || !((state.needsYou || []).length > 0);
+
+    // Application log (item 4): background.js logs a fill automatically right after it
+    // completes (see logFillCompletion() there) and stores the result as state.logEntry — this
+    // is a pure renderer for that, never itself the thing that decides to log.
+    if (!stale && state.logEntry && state.logEntry.id) {
+      logLineEl.hidden = false;
+      var applied = state.logEntry.status === 'applied';
+      logStatusTextEl.textContent = applied ? 'Logged — marked as applied.' : 'Logged.';
+      markAppliedBtn.hidden = applied;
+    } else {
+      logLineEl.hidden = true;
+    }
   }
 
   function setActiveTab(tabId) {
     activeTabId = tabId;
+    // A cover-letter draft is specific to whichever job/tab it was written for — never carry it
+    // over to a different tab you switch to (see "draft cover letter" below).
+    coverLetterFieldForTab = null;
+    coverLetterBoxEl.hidden = true;
+    setCoverLetterStatus('');
+    // Likewise, a "Saved N answers" confirmation is specific to whichever tab/fill produced it.
+    setRememberStatus('');
+    rememberDetailsEl.innerHTML = '';
     renderForTab(tabId);
   }
 
@@ -461,6 +583,26 @@
     }
   });
 
+  // AUTO-CONNECT (see background.js): background.js already tried the native host itself before
+  // answering HEALTH (see requestWithAutoConnect there), so by the time this runs the outcome is
+  // final for this check — this only decides what to SHOW. chrome.storage.local.serviceConnection
+  // is written on every attempt (native success/failure, or "host not installed at all"); the one
+  // case worth a dedicated hint is "host not installed" while nothing is configured yet, since
+  // that's the one thing the operator can fix in one command.
+  async function maybeNativeHostTip() {
+    try {
+      var data = await chrome.storage.local.get(['serviceConnection', 'token']);
+      var conn = data.serviceConnection;
+      if (!data.token && conn && conn.mode === 'manual' && conn.ok === false &&
+          /native messaging host not found/i.test(conn.error || '')) {
+        return ' Tip: run `applypilot extension install-host` once and the service will start by itself.';
+      }
+    } catch (e) {
+      // best-effort hint only — never blocks the rest of the status line
+    }
+    return '';
+  }
+
   async function checkHealth() {
     try {
       var resp = await chrome.runtime.sendMessage({ type: 'HEALTH' });
@@ -470,7 +612,8 @@
         tiersLine.textContent = 'Service connected. Tiers: ' + (tiers.length ? tiers.join(', ') : 'none reported');
       } else {
         setDot('err');
-        tiersLine.textContent = (resp && resp.message) || 'Service unreachable.';
+        var tip = await maybeNativeHostTip();
+        tiersLine.textContent = ((resp && resp.message) || 'Service unreachable.') + tip;
       }
     } catch (e) {
       setDot('err');
@@ -534,6 +677,45 @@
     }
   });
 
+  // ---------------------------------------------------------------------
+  // MULTI-STEP CONTINUATION (item 8) toggle. OFF by default. Turning it ON is gated on the SAME
+  // synchronous permission-then-inject pattern Fill/Report use (content.js must already be
+  // listening in the top frame for SET_CONTINUATION to reach it) — nothing here runs on a page
+  // until this click. Turning it OFF never touches permissions or injection at all.
+  // ---------------------------------------------------------------------
+  continuationToggle.addEventListener('change', function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    var wantOn = continuationToggle.checked;
+    if (!wantOn) {
+      chrome.runtime.sendMessage({ type: 'SET_CONTINUATION', tabId: tabId, enabled: false }).catch(function () {});
+      return;
+    }
+    var gate = gatePermissions(tabId); // synchronous, no await before this — see gatePermissions()
+    gate.promise.then(async function (granted) {
+      if (!granted) {
+        continuationToggle.checked = false;
+        setStatus('ApplyPilot needs permission to keep filling on ' +
+          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', true);
+        return;
+      }
+      var tab = await safeGetTab(tabId);
+      if (!tab || !canScript(tab.url)) { continuationToggle.checked = false; return; }
+      try {
+        await ensureInjected(tabId); // top frame only — content.js must be listening for this
+        var resp = await chrome.runtime.sendMessage({ type: 'SET_CONTINUATION', tabId: tabId, enabled: true, tabUrl: tab.url });
+        if (!resp || !resp.ok) {
+          continuationToggle.checked = false;
+          setStatus((resp && resp.error) || 'Could not enable step continuation.', true);
+        }
+        await renderForTab(tabId);
+      } catch (e) {
+        continuationToggle.checked = false;
+        setStatus('Could not enable step continuation: ' + (e && e.message ? e.message : e), true);
+      }
+    });
+  });
+
   undoBtn.addEventListener('click', async function () {
     if (activeTabId == null) return;
     try {
@@ -581,6 +763,317 @@
         reportBtn.disabled = false;
       }
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // EXPORT FILL REPORT (item 6). Purely a transform of state already sitting in
+  // chrome.storage.session — no page access, no permission gate, nothing injected. Per field:
+  // frame, label, tag/widget, status, source and reason — NEVER a value, on purpose, since this
+  // is meant to be sent to someone else to diagnose a bad fill.
+  // ---------------------------------------------------------------------
+  // A handful of reason strings quote the actual attempted value for the operator's OWN benefit
+  // on screen (e.g. `Could not match "Senior Engineer" to an option`) — genuinely useful there,
+  // but exactly what this export must never carry off the machine. Rather than trust every
+  // reason-generating call site (present and future, including the service's own `fill.reason`
+  // text) to never do this, every quoted substring is redacted here, at the one place this
+  // export is actually built.
+  function redactQuoted(text) {
+    return String(text || '').replace(/"[^"]*"/g, '"[redacted]"');
+  }
+
+  function reportRow(entry) {
+    return {
+      frame: entry.frame || null,
+      label: entry.label || '',
+      tag: entry.tag || '',
+      widget: entry.widget || '',
+      status: entry.status || '',
+      source: entry.source || '',
+      reason: redactQuoted(entry.reason || '')
+    };
+  }
+
+  function buildFillReport(state) {
+    var host = '', path = '';
+    try {
+      var u = new URL(state.url || '');
+      host = u.host;
+      path = u.pathname;
+    } catch (e) {
+      // a state with no valid url at all — page/host stay empty rather than throwing
+    }
+    return {
+      page: { host: host, path: path },
+      counts: state.counts || {},
+      couldNotRead: state.couldNotRead || 0,
+      skippedFrames: state.skippedFrames || 0,
+      fields: []
+        .concat((state.filled || []).map(reportRow))
+        .concat((state.drafts || []).map(reportRow))
+        .concat((state.needsYou || []).map(reportRow))
+        .concat((state.failed || []).map(reportRow))
+    };
+  }
+
+  exportReportBtn.addEventListener('click', async function () {
+    if (activeTabId == null) return;
+    try {
+      var stored = await chrome.storage.session.get(stateKey(activeTabId));
+      var state = stored[stateKey(activeTabId)];
+      if (!state) { setStatus('Nothing to export yet — fill this page first.', true); return; }
+      var report = buildFillReport(state);
+      var blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      var hostPart = (report.page.host || 'page').replace(/[^a-z0-9.-]/gi, '_');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'applypilot-fill-report-' + hostPart + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      setStatus('Saved the fill report (labels/status/source only — never values). Send it when a form fills badly.');
+    } catch (e) {
+      setStatus('Could not export the fill report: ' + (e && e.message ? e.message : e), true);
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // DRAFT COVER LETTER (item 2). Top frame only, gated on the same permission check as Fill/
+  // Report (it reads the page's visible text and scans for a cover-letter field). The service
+  // call itself goes through background.js (it holds the token); everything else here talks
+  // straight to content.js, the same pattern "Report page" already uses for CAPTURE.
+  // ---------------------------------------------------------------------
+  function setCoverLetterStatus(text, kind) {
+    if (!text) { coverLetterStatusEl.hidden = true; coverLetterStatusEl.textContent = ''; return; }
+    coverLetterStatusEl.hidden = false;
+    coverLetterStatusEl.textContent = text;
+    coverLetterStatusEl.className = 'cover-letter-status' + (kind ? ' ' + kind : '');
+  }
+
+  async function gatherFrameUrls(tabId, topUrl) {
+    var urls = [topUrl];
+    try {
+      if (chrome.webNavigation && typeof chrome.webNavigation.getAllFrames === 'function') {
+        var frames = await chrome.webNavigation.getAllFrames({ tabId: tabId });
+        (frames || []).forEach(function (f) {
+          if (f.url && urls.indexOf(f.url) === -1) urls.push(f.url);
+        });
+      }
+    } catch (e) {
+      // best-effort — the top URL alone is still a useful ATS-recognizable URL most of the time
+    }
+    return urls;
+  }
+
+  function renderCoverLetter(data) {
+    coverLetterBoxEl.hidden = false;
+    var job = data.job || {};
+    var jobBits = [];
+    if (job.title) jobBits.push(job.title);
+    if (job.company) jobBits.push(job.company);
+    var jobLine = jobBits.length ? jobBits.join(' · ') : 'Job details not identified';
+    coverLetterJobEl.textContent = jobLine + ' — drafted by ' + (data.provider || 'the local model') +
+      (job.source ? (' (job source: ' + job.source + ')') : '');
+    coverLetterTextEl.value = data.text || '';
+    var warnings = data.warnings || [];
+    coverLetterWarningsEl.hidden = !warnings.length;
+    if (warnings.length) coverLetterWarningsEl.textContent = 'Review before sending: ' + warnings.join(' · ');
+    coverLetterInsertBtn.hidden = !coverLetterFieldForTab;
+  }
+
+  coverLetterBtn.addEventListener('click', function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    // Synchronous, no `await` before it — see the block comment on gatePermissions() above.
+    var gate = gatePermissions(tabId);
+    gate.promise.then(async function (granted) {
+      if (!granted) {
+        setCoverLetterStatus('ApplyPilot needs permission to read this page on ' +
+          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', 'error');
+        return;
+      }
+      var tab = await safeGetTab(tabId);
+      if (!tab || !canScript(tab.url)) {
+        setCoverLetterStatus('Open a job application page (http/https) in this tab, then try again.', 'error');
+        return;
+      }
+      coverLetterBtn.disabled = true;
+      coverLetterBoxEl.hidden = true;
+      coverLetterFieldForTab = null;
+      setCoverLetterStatus('Drafting…');
+      try {
+        // Top frame only — content.js's EXTRACT_PAGE_TEXT/FIND_COVER_LETTER_FIELD (scanner.js is
+        // a dependency of both; capture.js rides along unused, same as every other injection here).
+        await ensureInjected(tabId);
+        var textResp = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_PAGE_TEXT' });
+        var fieldResp = await chrome.tabs.sendMessage(tabId, { type: 'FIND_COVER_LETTER_FIELD' });
+        coverLetterFieldForTab = (fieldResp && fieldResp.field) || null;
+        var urls = await gatherFrameUrls(tabId, tab.url);
+        var resp = await chrome.runtime.sendMessage({
+          type: 'DRAFT_COVER_LETTER', tabId: tabId, urls: urls,
+          pageText: (textResp && textResp.text) || ''
+        });
+        if (!resp || !resp.ok) {
+          // 403 (model not allowed on this computer) / 422 (no job description / drafting
+          // refused) carry the service's own `.detail` verbatim — see handleResponseVerbatim()
+          // in background.js — shown exactly as the service wrote it, no extra wrapping.
+          setCoverLetterStatus((resp && (resp.detail || resp.message)) || 'Could not draft a cover letter.', 'error');
+          return;
+        }
+        renderCoverLetter(resp.data || {});
+        setCoverLetterStatus('');
+      } catch (e) {
+        setCoverLetterStatus('Could not draft a cover letter: ' + (e && e.message ? e.message : e), 'error');
+      } finally {
+        coverLetterBtn.disabled = false;
+      }
+    });
+  });
+
+  coverLetterCopyBtn.addEventListener('click', async function () {
+    try {
+      await navigator.clipboard.writeText(coverLetterTextEl.value);
+      setCoverLetterStatus('Copied to clipboard.', 'ok');
+    } catch (e) {
+      setCoverLetterStatus('Could not copy: ' + (e && e.message ? e.message : e), 'error');
+    }
+  });
+
+  coverLetterDownloadBtn.addEventListener('click', function () {
+    var blob = new Blob([coverLetterTextEl.value], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cover-letter.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  });
+
+  coverLetterInsertBtn.addEventListener('click', async function () {
+    if (activeTabId == null || !coverLetterFieldForTab) return;
+    var tabId = activeTabId;
+    coverLetterInsertBtn.disabled = true;
+    try {
+      // Goes through content.js's normal guarded applyFill()/highlight() path — recorded as a
+      // draft and undoable exactly like any other field (see insertCoverLetterDraft() there).
+      var resp = await chrome.tabs.sendMessage(tabId, {
+        type: 'INSERT_COVER_LETTER', fieldId: coverLetterFieldForTab.id, text: coverLetterTextEl.value
+      });
+      if (resp && resp.ok) {
+        setCoverLetterStatus('Inserted into "' + (coverLetterFieldForTab.label || 'the cover letter field') +
+          '" — review the page before submitting.', 'ok');
+        await renderForTab(tabId);
+      } else {
+        setCoverLetterStatus((resp && resp.error) || 'Could not insert the draft into that field.', 'error');
+      }
+    } catch (e) {
+      setCoverLetterStatus('Could not insert the draft: ' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      coverLetterInsertBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // REMEMBER MY ANSWERS (item 3). Never automatic — only ever runs on this click. All the actual
+  // work (reading the right frames' current field values, filtering, calling /answers/learn)
+  // happens in background.js's rememberAnswersForTab(); this is a thin renderer for its result.
+  // ---------------------------------------------------------------------
+  function setRememberStatus(text, kind) {
+    if (!text) { rememberStatusEl.hidden = true; rememberStatusEl.textContent = ''; return; }
+    rememberStatusEl.hidden = false;
+    rememberStatusEl.textContent = text;
+    rememberStatusEl.className = 'remember-status' + (kind ? ' ' + kind : '');
+  }
+
+  function renderRememberDetails(saved, skipped) {
+    rememberDetailsEl.innerHTML = '';
+    (saved || []).forEach(function (q) {
+      var row = document.createElement('div');
+      row.className = 'remember-row saved';
+      row.textContent = 'Saved: ' + q;
+      rememberDetailsEl.appendChild(row);
+    });
+    (skipped || []).forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'remember-row skipped';
+      row.textContent = (s.question || '(no question text)') + ' — ' + (s.reason || 'skipped');
+      rememberDetailsEl.appendChild(row);
+    });
+  }
+
+  rememberBtn.addEventListener('click', async function () {
+    if (activeTabId == null) return;
+    rememberBtn.disabled = true;
+    setRememberStatus('Saving…');
+    rememberDetailsEl.innerHTML = '';
+    try {
+      var resp = await chrome.runtime.sendMessage({ type: 'REMEMBER_ANSWERS', tabId: activeTabId });
+      if (!resp || !resp.ok) {
+        setRememberStatus((resp && (resp.detail || resp.message)) || 'Could not save your answers.', 'error');
+        return;
+      }
+      if (resp.noAnswersFound) {
+        setRememberStatus('Nothing to remember yet — none of the fields left for you have an answer typed in.');
+        return;
+      }
+      var data = resp.data || {};
+      var saved = data.saved || [];
+      var skipped = data.skipped || [];
+      var line = 'Saved ' + saved.length + (saved.length === 1 ? ' answer' : ' answers');
+      if (skipped.length) line += ', skipped ' + skipped.length + (skipped.length === 1 ? ' question' : ' questions');
+      setRememberStatus(line, 'ok');
+      renderRememberDetails(saved, skipped);
+    } catch (e) {
+      setRememberStatus('Could not save your answers: ' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      rememberBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // APPLICATION LOG (item 4). Logging itself already happened automatically (background.js,
+  // right after the fill this state belongs to completed) — this button only ever sets the
+  // status the applicant themselves knows is true (did you actually submit it?).
+  // ---------------------------------------------------------------------
+  markAppliedBtn.addEventListener('click', async function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    var stored = await chrome.storage.session.get(stateKey(tabId));
+    var state = stored[stateKey(tabId)];
+    var id = state && state.logEntry && state.logEntry.id;
+    if (!id) return;
+    markAppliedBtn.disabled = true;
+    try {
+      var resp = await chrome.runtime.sendMessage({ type: 'LOG_STATUS', tabId: tabId, id: id, status: 'applied' });
+      if (!resp || !resp.ok) {
+        setStatus((resp && (resp.detail || resp.message)) || 'Could not mark this application as applied.', true);
+      }
+      await renderForTab(tabId);
+    } catch (e) {
+      setStatus('Could not mark this application as applied: ' + (e && e.message ? e.message : e), true);
+    } finally {
+      markAppliedBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // REVIEW ROWS (item 5): clicking (or pressing Enter/Space on, for keyboard users) any row with
+  // a field id scrolls that field into view in its own frame and flashes its highlight —
+  // background.js's SCROLL_TO_FIELD splits the qualified id and messages the right frame. One
+  // delegated listener (resultsBox's contents are fully replaced on every render — see
+  // renderResults()/buildRow() above) rather than one per row.
+  // ---------------------------------------------------------------------
+  function scrollToRow(row) {
+    if (!row || !row.dataset || !row.dataset.fieldId || activeTabId == null) return;
+    chrome.runtime.sendMessage({ type: 'SCROLL_TO_FIELD', tabId: activeTabId, id: row.dataset.fieldId })
+      .catch(function () {});
+  }
+  resultsBox.addEventListener('click', function (e) {
+    scrollToRow(e.target.closest('[data-field-id]'));
+  });
+  resultsBox.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var row = e.target.closest('[data-field-id]');
+    if (!row) return;
+    e.preventDefault();
+    scrollToRow(row);
   });
 
   optionsBtn.addEventListener('click', function () {
