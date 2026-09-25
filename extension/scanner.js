@@ -1402,6 +1402,26 @@
     return count === 1 ? idx : -1;
   }
 
+  /**
+   * `indices` (2+ option indices some earlier tier already matched by some criterion) is not
+   * REAL ambiguity when every one of those options renders the exact same normalised text --
+   * the applicant could never have told them apart on the page either (ground truth, live probe
+   * 2026-09-24: job-boards.greenhouse.io/twilio's geocoder returned "Seattle, Washington, United
+   * States" TWICE for the same query) -- so the first is picked rather than refusing outright.
+   * Two or more matched options with DIFFERENT text are still genuinely ambiguous and this
+   * changes nothing for them (returns -1, exactly as every existing caller already did before
+   * this helper existed). `indices.length < 2` is returned unchanged -- this only ever COLLAPSES
+   * an already-ambiguous result, never manufactures a match out of zero or one.
+   */
+  function firstOfIdenticalMatches(indices, optionTexts) {
+    if (indices.length < 2) return indices.length ? indices[0] : -1;
+    var first = cleanText(optionTexts[indices[0]]).toLowerCase();
+    for (var i = 1; i < indices.length; i++) {
+      if (cleanText(optionTexts[indices[i]]).toLowerCase() !== first) return -1;
+    }
+    return indices[0];
+  }
+
   var NEGATION_RE = /\bnot\b|n't/i;
 
   // Matches BOTH a decline-shaped VALUE ("Decline to self-identify") and a decline-shaped
@@ -1599,7 +1619,11 @@
       if (otNorm && valueRe.test(otNorm)) forwardMatches.push(i);
     }
     if (forwardMatches.length === 1) return forwardMatches[0];
-    if (forwardMatches.length > 1) return -1;
+    // 2+ matches is ambiguous UNLESS every one of them renders the identical text (see
+    // firstOfIdenticalMatches) -- a page rendering the same option twice is never something the
+    // applicant could have disambiguated either, so the first is picked; genuinely different
+    // texts still refuse exactly as before.
+    if (forwardMatches.length > 1) return firstOfIdenticalMatches(forwardMatches, optionTexts);
 
     var reverseMatches = [];
     for (i = 0; i < optionTexts.length; i++) {
@@ -1608,6 +1632,7 @@
       if (new RegExp('\\b' + escapeRegExp(otNorm2) + '\\b', 'i').test(v)) reverseMatches.push(i);
     }
     if (reverseMatches.length === 1) return reverseMatches[0];
+    if (reverseMatches.length > 1) return firstOfIdenticalMatches(reverseMatches, optionTexts);
     return -1;
   }
 
@@ -1703,7 +1728,11 @@
           // Never quote `target` (the value being filled in) -- an EEO/disability answer or
           // other applicant-provided value must never land in an exported report; the
           // dropdown's OWN option texts are page furniture and safe to list.
-          return { ok: false, reason: reasonWithOptions('no confident match among the dropdown options', texts) };
+          return {
+            ok: false,
+            reason: reasonWithOptions('no confident match among the dropdown options', texts),
+            optionsSeen: cleanedOptionTexts(texts)
+          };
         }
 
         var matched = optionEls[idx];
@@ -2251,6 +2280,20 @@
     return reason + ' (saw: ' + shown.map(function (t) { return JSON.stringify(t); }).join(', ') + ')';
   }
 
+  /**
+   * The same "safe to reveal" option texts reasonWithOptions() folds into a human-readable
+   * sentence (and truncates to 8 for that), but as plain structured data -- `optionsSeen` on a
+   * failed combobox/button-group/Workday-dropdown fill's result (see applyFill()'s wd-dropdown/
+   * combobox/button-group branches, which stash this onto entry._lastOptions). content.js's
+   * second-chance /resolve round trip needs the actual rendered texts, not a sentence containing
+   * them, and never truncated -- the service's canary.choose_option needs the WHOLE option set
+   * to pick correctly. Purely the page's own furniture (never anything the applicant typed or
+   * the profile holds), so always safe to send back to the local service.
+   */
+  function cleanedOptionTexts(optionTexts) {
+    return (optionTexts || []).map(cleanText).filter(Boolean);
+  }
+
   /** A single, unadorned mouse event -- ground truth: react-select's flyout toggles on
    * `mouseup`, never `click` (a bare click is preventDefault()'d by the button). */
   function dispatchMouseEvent(el, type) {
@@ -2477,6 +2520,31 @@
    * the input itself. Returns a Promise of the now-open, rendered menu, or null if it never
    * opened / never finished rendering within budget. */
   function openCombobox(entry, doc) {
+    // Idempotent: a live probe (2026-09-24, job-boards.greenhouse.io/gitlab) showed a real
+    // react-select widget's Escape only clears the typed search text -- it does NOT collapse
+    // the listbox itself, so a PRIOR failed attempt on this same field (see
+    // resolveAmbiguousChoiceFields()/content.js's second-chance round trip, or simply two
+    // applyFill() calls in a row) can leave the menu already open. Blindly clicking "Toggle
+    // flyout" again would then CLOSE it (it is a genuine open/close toggle) instead of opening
+    // it -- collapsing straight to zero rendered options and a spurious "no options rendered
+    // while filtering".
+    //
+    // Only trusted when the search input is ALSO currently empty -- a live-Chrome regression
+    // (chrome_widgets_test.py) showed why: that test's OWN negative control calls
+    // setNativeValue(entry.input, 'Software Engineer') directly (never through applyFill, so
+    // nothing ever cleared it afterwards), which left the mock's menu open showing just the ONE
+    // option matching THAT leftover text -- an unrelated, stale, already-filtered view that a
+    // later applyFill(entry, 'Engineer') must never mistake for "the real, current option set"
+    // (a single leftover option is trivially, wrongly, "unambiguous"). scanner.js itself always
+    // clears the input back to '' before returning a failure (see the two setNativeValue(...,'')
+    // calls below), so an empty input reliably means whatever the menu shows next is the
+    // widget's own default/unfiltered view, not some abandoned filter -- exactly the GitLab case
+    // this fix targets. A non-empty leftover search text instead falls through to the ordinary
+    // open path below, same as if nothing were open at all.
+    var already = resolveComboboxMenu(entry);
+    if (already && isVisible(already) && comboboxMenuHasContent(already) && !cleanText(entry.input.value)) {
+      return Promise.resolve(already);
+    }
     var input = entry.input;
     var scope = comboboxFieldScope(input);
     var toggle = scope && scope.querySelector ? scope.querySelector('button[aria-label="Toggle flyout" i]') : null;
@@ -2594,16 +2662,20 @@
 
         var query = comboboxFilterQuery(target);
         if (!query) {
-          dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+          dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape', 27);
           // Never quote `target` (the value being filled in) -- an EEO/disability answer or
           // other applicant-provided value must never land in an exported report; the
           // combobox's OWN option texts are page furniture and safe to list.
-          return { ok: false, reason: reasonWithOptions('no confident match among the combobox options', texts) };
+          return {
+            ok: false,
+            reason: reasonWithOptions('no confident match among the combobox options', texts),
+            optionsSeen: cleanedOptionTexts(texts)
+          };
         }
         setNativeValue(entry.input, query);
         return waitForComboboxFilterResults(entry, doc).then(function (found) {
           if (!found) {
-            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape', 27);
             setNativeValue(entry.input, '');
             return { ok: false, reason: 'no options rendered while filtering' };
           }
@@ -2611,9 +2683,13 @@
           var idx2 = matchChoiceOption(target, texts2);
           if (idx2 === -1) idx2 = matchCityStateOption(target, texts2);
           if (idx2 === -1) {
-            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape', 27);
             setNativeValue(entry.input, '');
-            return { ok: false, reason: reasonWithOptions('no confident match among the filtered options', texts2) };
+            return {
+              ok: false,
+              reason: reasonWithOptions('no confident match among the filtered options', texts2),
+              optionsSeen: cleanedOptionTexts(texts2)
+            };
           }
           return commitComboboxOption(entry, found.menu, found.els, idx2, doc);
         });
@@ -2794,7 +2870,11 @@
       // Never quote `target` (the value being filled in) -- an EEO/disability answer or other
       // applicant-provided value must never land in an exported report; the button group's
       // OWN option texts are page furniture and safe to list.
-      return Promise.resolve({ ok: false, reason: reasonWithOptions('no confident match among the button options', texts) });
+      return Promise.resolve({
+        ok: false,
+        reason: reasonWithOptions('no confident match among the button options', texts),
+        optionsSeen: cleanedOptionTexts(texts)
+      });
     }
     var button = entry.buttons[idx];
     if (!isChoiceButtonSafe(button, entry.container, texts)) {
@@ -3064,7 +3144,12 @@
    * that merely contains it.
    *
    * Returns -1 (leave it, never guess) when `value` isn't recognisably "City, <a real US
-   * state>" at all, when no option's city+state segments match, or when more than one does.
+   * state>" at all, when no option's city+state segments match, or when more than one DIFFERENT
+   * rendered text does. Two or more matches that all render the exact SAME text (a live probe,
+   * 2026-09-24, job-boards.greenhouse.io/twilio: typing "Seattle" returned "Seattle, Washington,
+   * United States" TWICE, a genuine geocoder duplicate) are not real ambiguity -- the applicant
+   * could never have told them apart on the page either -- so the first is picked instead; see
+   * firstOfIdenticalMatches.
    */
   function matchCityStateOption(target, optionTexts) {
     var parts = splitCityState(target);
@@ -3080,7 +3165,8 @@
       var optState = cleanText(optParts.state).toLowerCase();
       if (variants.indexOf(optState) !== -1) matches.push(i);
     }
-    return matches.length === 1 ? matches[0] : -1;
+    if (matches.length === 1) return matches[0];
+    return firstOfIdenticalMatches(matches, optionTexts);
   }
 
   function isLeverLocationRowSafe(el, resultsContainer) {
@@ -4193,6 +4279,13 @@
     if (entry.kind === 'wd-dropdown') {
       return fillWorkdayDropdown(entry, value).then(function (r) {
         entry._lastReason = r.reason || '';
+        // The option texts this popup actually rendered when the match failed (see
+        // fillWorkdayDropdown's reasonWithOptions()/optionsSeen) -- absent (null) on success, so
+        // a later failed attempt can never accidentally read a stale list from an earlier one.
+        // content.js's second-chance /resolve round trip (after the main apply pass, before the
+        // verify sweep) reads this to give the service the real options it never saw the first
+        // time. Never anything the applicant typed -- only this widget's own page furniture.
+        entry._lastOptions = r.optionsSeen || null;
         return !!r.ok;
       });
     }
@@ -4210,12 +4303,18 @@
       return fillComboboxValue(entry, value, ownerDoc(entry.input)).then(function (r) {
         entry._lastReason = r.reason ||
           (r.failedTerms && r.failedTerms.length ? ('no confident match for ' + r.failedTerms.length + ' of ' + value.length + ' requested terms') : '');
+        // See the wd-dropdown branch above -- same optionsSeen/entry._lastOptions contract. Only
+        // ever set by the single-value path (fillComboboxOne); the multi-select (array `value`)
+        // path's aggregate {ok, failedTerms} result has no single option list to offer, so this
+        // is simply cleared (null) for it, same as on any success.
+        entry._lastOptions = r.optionsSeen || null;
         return !!r.ok;
       });
     }
     if (entry.kind === 'button-group') {
       return fillButtonGroup(entry, value, ownerDoc(entry.buttons[0])).then(function (r) {
         entry._lastReason = r.reason || '';
+        entry._lastOptions = r.optionsSeen || null;
         return !!r.ok;
       });
     }

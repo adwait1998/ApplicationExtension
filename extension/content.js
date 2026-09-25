@@ -661,6 +661,156 @@
   }
 
   // ---------------------------------------------------------------------
+  // SECOND CHANCE FOR AMBIGUOUS CHOICE WIDGETS (this build). A react-select/ARIA combobox,
+  // Ashby-style button group, or Workday dropdown only renders its options once opened, so the
+  // service's FIRST /resolve call (which never saw them) can only answer with a short guess like
+  // "Yes" -- which the apply loop above correctly refuses to force onto real options like "Yes,
+  // I will require H-1B sponsorship" / "Yes, I will require TN visa support" (see
+  // reasonWithOptions()/optionsSeen in scanner.js). Rather than leaving a field like that blank,
+  // this runs ONCE, right after the main apply pass and BEFORE the verify sweep below: it
+  // collects every such failure (recognised by scanner.js having stashed the rendered option
+  // texts on entry._lastOptions -- see applyFill()'s wd-dropdown/combobox/button-group branches),
+  // and gives the service exactly one more chance for ALL of them together, in a SINGLE /resolve
+  // request (through the exact same RESOLVE_NEW_FIELDS round trip the rescan-rounds feature below
+  // already uses) -- the SAME field descriptor it already scanned, this time with `options`
+  // filled in with the real rendered texts. The service's canary.choose_option can then pick the
+  // ONE option consistent with the whole profile (or refuse again with its own reason).
+  //
+  // Never trusts the second answer blindly: a returned fill is only re-applied when its value is
+  // EXACTLY one of the option texts THIS field's own first attempt saw (never a value invented
+  // out of thin air, and never routed to a different field) -- re-run through applyFill() exactly
+  // like the first attempt (same guards/shield/per-field-timeout/cancel). Inserted BEFORE
+  // verifyAppliedFills() specifically so a successful re-fill gets the exact same outer
+  // verification sweep every other fill already gets -- nothing about a second-chance fill's
+  // final "verified" status is special-cased.
+  //
+  // At most ONE extra /resolve round trip total (never per-field), and at most one extra fill
+  // attempt per field. Fails soft throughout: any field the service still can't confidently
+  // answer (including a transport-level failure of the /resolve call itself, or a returned value
+  // that isn't one of the options this field actually rendered) is reported exactly like any
+  // other "please answer this yourself" field -- 'left_for_you' in the Need You list, carrying
+  // the most honest reason available -- never silently dropped, and never a false "Filled".
+  // ---------------------------------------------------------------------
+
+  function resolveAmbiguousChoiceFields(result, fieldsById, ctx) {
+    var candidatesById = {};
+    result.failed.forEach(function (f) {
+      var entry = registry[f.id];
+      var optionsSeen = entry && entry._lastOptions;
+      var original = fieldsById[f.id];
+      if (entry && optionsSeen && optionsSeen.length && original) {
+        candidatesById[f.id] = { entry: entry, optionsSeen: optionsSeen, original: original, failedRecord: f };
+      }
+    });
+    var ids = Object.keys(candidatesById);
+    if (!ids.length || ctx.isCancelled() || ctx.overBudget()) return Promise.resolve(result);
+
+    var descriptors = ids.map(function (id) {
+      var c = candidatesById[id];
+      var copy = {};
+      for (var k in c.original) if (Object.prototype.hasOwnProperty.call(c.original, k)) copy[k] = c.original[k];
+      copy.id = id;
+      copy.options = c.optionsSeen;
+      return copy;
+    });
+
+    ctx.onProgress({
+      current: result.total, total: result.total,
+      label: 'Double-checking ' + descriptors.length + ' field(s) against their real on-page options…'
+    });
+
+    return chrome.runtime.sendMessage({ type: 'RESOLVE_NEW_FIELDS', url: location.href, fields: descriptors }).then(function (resp) {
+      // Fail soft on any transport-level problem: every candidate keeps its ORIGINAL "no
+      // confident match" failure record untouched -- a second chance that can't even reach the
+      // service must never turn an otherwise-working fill into a worse-reported one.
+      if (!resp || !resp.ok) return result;
+
+      var fillById = {}; (resp.fills || []).forEach(function (f) { fillById[f.id] = f; });
+      var skipById = {}; (resp.skipped || []).forEach(function (s) { skipById[s.id] = s; });
+
+      var untouchedFailed = result.failed.filter(function (f) { return !candidatesById[f.id]; });
+      var carriedOverFailed = []; // only populated if Cancel/budget stops the loop early
+      var extraNeedsYou = [];
+      var newlyApplied = [];
+
+      function leftForYou(id, reason, source) {
+        var c = candidatesById[id];
+        extraNeedsYou.push({
+          id: id, label: c.failedRecord.label, reason: reason, status: 'left_for_you',
+          category: categoryForSource(source), required: c.failedRecord.required,
+          tag: c.failedRecord.tag, widget: c.failedRecord.widget
+        });
+        var hlTargets = ApplyPilotScanner.getHighlightTargets(c.entry);
+        for (var h = 0; h < hlTargets.length; h++) highlight(hlTargets[h], 'skipped', reason);
+      }
+
+      function next(i) {
+        if (i >= ids.length) return Promise.resolve();
+        if (ctx.isCancelled() || ctx.overBudget()) {
+          for (var r = i; r < ids.length; r++) carriedOverFailed.push(candidatesById[ids[r]].failedRecord);
+          return Promise.resolve();
+        }
+        var id = ids[i];
+        var c = candidatesById[id];
+        var fill = fillById[id];
+        var skip = skipById[id];
+
+        if (skip) {
+          leftForYou(id, skip.reason || c.failedRecord.reason, skip.source);
+          return next(i + 1);
+        }
+        if (!fill || !fill.auto_fill || typeof fill.value !== 'string') {
+          // Still not confident (or said nothing at all -- the "second resolve returns nothing"
+          // control) -- report honestly using whatever the service said this time, falling back
+          // to the original scanner-only reason when it said nothing new.
+          leftForYou(id, (fill && fill.reason) || c.failedRecord.reason, fill && fill.source);
+          return next(i + 1);
+        }
+
+        var normalized = c.optionsSeen.map(function (t) { return String(t).trim().toLowerCase(); });
+        if (normalized.indexOf(fill.value.trim().toLowerCase()) === -1) {
+          // The service answered, but not with one of THIS field's own rendered options -- never
+          // force a value the page never actually offered (never quote the returned value itself
+          // here -- it did not come from the page, so it is not safe page-furniture).
+          leftForYou(id, "the service's second answer was not one of the options this field rendered", fill.source);
+          return next(i + 1);
+        }
+
+        return runFieldAttempt(c.entry, fill.value, ctx.fieldTimeoutMs).then(function (ok) {
+          if (ok) {
+            var hlTargets = ApplyPilotScanner.getHighlightTargets(c.entry);
+            var reasonText = (fill.reason || 'Filled') + (fill.profile_key ? ' [' + fill.profile_key + ']' : '');
+            for (var h = 0; h < hlTargets.length; h++) highlight(hlTargets[h], 'filled', reasonText);
+            newlyApplied.push({
+              id: id, label: c.failedRecord.label, value: fill.value, values: null,
+              reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: false,
+              status: 'verified', category: categoryForSource(fill.source),
+              required: c.failedRecord.required, tag: c.failedRecord.tag, widget: c.failedRecord.widget
+            });
+          } else {
+            leftForYou(id, c.entry._lastReason || c.failedRecord.reason, fill.source);
+          }
+        }, function (e) {
+          var timedOut = !!(e && e.isTimeout);
+          var reason = timedOut
+            ? ('Timed out after ' + Math.round(ctx.fieldTimeoutMs / 1000) + 's on the second attempt')
+            : (c.entry._lastReason || c.failedRecord.reason);
+          leftForYou(id, reason, fill.source);
+        }).then(function () { return next(i + 1); });
+      }
+
+      return next(0).then(function () {
+        return {
+          applied: result.applied.concat(newlyApplied),
+          failed: untouchedFailed.concat(carriedOverFailed),
+          needsYou: result.needsYou.concat(extraNeedsYou),
+          total: result.total
+        };
+      });
+    }, function () { return result; }); // sendMessage itself rejected -- fail soft, nothing changes
+  }
+
+  // ---------------------------------------------------------------------
   // RE-SCAN FOR NEWLY-REVEALED FIELDS (reviewer round 3, item 2). Some forms only render part of
   // themselves in response to an earlier answer — e.g. a Lever-style US EEO survey (16 radios)
   // that appears only once "What is your location?" is set to United States. Without this, those
@@ -1529,6 +1679,13 @@
       };
 
       applyFills(msg.fills || [], msg.skipped || [], pending.fieldsById || {}, applyCtx).then(function (result) {
+        // Give a react-select/button-group/Workday-dropdown field that failed because the
+        // service never saw its real options one more chance, now that scanner.js has recorded
+        // what it actually rendered (entry._lastOptions) — see resolveAmbiguousChoiceFields()
+        // above. Runs BEFORE the verify sweep so a successful second-chance fill gets exactly
+        // the same outer verification every other fill already gets.
+        return resolveAmbiguousChoiceFields(result, pending.fieldsById || {}, applyCtx);
+      }).then(function (result) {
         state.progress = { current: result.total, total: result.total, label: 'Confirming fields stuck…' };
         sendStateUpdate(state);
         return verifyAppliedFills(result);

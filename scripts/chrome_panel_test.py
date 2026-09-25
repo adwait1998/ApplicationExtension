@@ -123,6 +123,7 @@ answers_learn_calls = []  # every /answers/learn request's `items` list — item
 log_calls = []  # every /log request body — item 4
 log_status_calls = []  # every (entry_id, status) POSTed to /log/{id}/status — item 4
 resume_tailor_calls = []  # every /resume/tailor request body — "Tailor my résumé"
+sponsor_resolve_options_calls = []  # (name, options) for sponsor_combobox's SECOND /resolve call
 
 # The tailored PDF's own bytes/filename this stub hands back from GET /resume/tailored/{id} —
 # deliberately NOT the same filename (or even the same underlying bytes) a base résumé attach
@@ -171,7 +172,24 @@ def build_fills(fields):
         # answers" exclusion — see item 3). Anything named "remember_test_*" is ALSO always left
         # for the human regardless of type — the REMEMBER MY ANSWERS fixture below relies on this
         # to get plain text fields into the "needs you" pile on demand.
-        if (widget in ("wd-prompt", "wd-dropdown")
+        #
+        # "combobox" joined this list for the same reason as wd-dropdown/wd-prompt (this build):
+        # its real options are unknown at scan time (fields[].options == []) — a react-select
+        # menu only renders them once opened — so value_for_field()'s blind "Test Value fN" can
+        # never be one of them. Before this build that just failed harmlessly ("no confident
+        # match"); now scanner.js also stashes what it actually rendered on entry._lastOptions,
+        # which fires content.js's new second-chance /resolve round trip for EVERY such field on
+        # a page (test-page.html's own gh_ambiguous/gh_location_dup/gh_country/... fixtures all
+        # scan as "combobox") — an extra, genuine /resolve call this stub's own generic filler was
+        # never meant to provoke, and which broke tab 5's "exactly ONE /resolve call for the whole
+        # page" assertion. A dedicated test that WANTS to exercise the real feature (see the
+        # "sponsor-resolve-page" branch below) still gets one, by re-adding its own fill/skip for
+        # those specific field names after this loop already skipped them here — never blocked,
+        # just never the wrong default guess. ("button-group" needs no such change: its
+        # descriptor's `options` ARE known at scan time, so value_for_field() already returns a
+        # REAL option text for it, which always exact-matches — never ambiguous, never a spurious
+        # second /resolve call.)
+        if (widget in ("wd-prompt", "wd-dropdown", "combobox")
                 or ftype in ("hidden", "file", "submit", "button", "image", "reset", "password")
                 or name.startswith("remember_test_")):
             skipped.append({"id": f["id"], "reason": "test stub: left for you"})
@@ -377,6 +395,142 @@ RESUME_TAILOR_PAGE_BYTES = b"""<!DOCTYPE html>
 </body></html>
 """
 
+# A fixture for the sponsorship-combobox second-chance /resolve round trip (this build): a
+# react-select-style combobox only renders its options once opened, so the FIRST /resolve call
+# (fields[].options == []) can only get a short, non-committal answer like "Yes" — which
+# scanner.js correctly refuses to force onto real options that bundle facts ("Yes, I will require
+# H-1B sponsorship" vs "Yes, I will require TN visa support"). See StubHandler.do_POST's
+# "sponsor-resolve-page" branch below for the stateful stub behavior (answers "Yes" first, then —
+# once called AGAIN with `options` filled in, via content.js's resolveAmbiguousChoiceFields() —
+# the one option consistent with the applicant's profile).
+#
+# Two identically-shaped comboboxes on ONE page, both ambiguous on the first pass, resolved in the
+# SAME single second-chance /resolve call (never one extra round trip per field):
+#   - sponsor_combobox: the positive case — the stub answers with the exact H-1B option once it
+#     sees the real options, and that fill must end up committed and verified.
+#   - sponsor_combobox_silent: the negative control — the stub answers NOTHING for this field on
+#     the second call (simulating "the service still can't tell"), so it must stay empty and be
+#     reported 'left_for_you', never silently dropped and never falsely "Filled".
+# This lets one page prove "exactly two /resolve calls total" while covering both outcomes.
+#
+# The react-select-style markup below (`.select__control`/`.select__input[role=combobox]`/
+# `.select__menu`/`.select__option`, `button[aria-label="Toggle flyout"]`) mirrors
+# extension/test-page.html's own `makeReactSelect()` fixtures exactly, since that is the shape
+# scanner.js's combobox detector and fill/verify code actually look for. The `input` listener
+# deliberately does NOT filter by the typed query — it always re-renders the full 3-option
+# catalog — so this fixture's "no confident match" failure always carries the COMPLETE option set
+# into entry._lastOptions/optionsSeen, matching exactly what the stub below expects to see.
+SPONSOR_RESOLVE_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Sponsorship second-chance resolve fixture</title></head>
+<body>
+<h1>Sponsorship second-chance resolve fixture</h1>
+<form id="sponsor-form">
+  <div class="select" id="sponsor_field">
+    <label id="sponsor_label">Will you now or in the future require sponsorship to work in the US?</label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="sponsor_value">
+          <input type="text" role="combobox" id="sponsor_input" class="select__input" name="sponsor_combobox"
+                 aria-labelledby="sponsor_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="sponsor_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="sponsor_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="select" id="sponsor_silent_field">
+    <label id="sponsor_silent_label">Do you require sponsorship (silent-control combobox)?</label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="sponsor_silent_value">
+          <input type="text" role="combobox" id="sponsor_silent_input" class="select__input" name="sponsor_combobox_silent"
+                 aria-labelledby="sponsor_silent_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="sponsor_silent_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="sponsor_silent_menu" style="display:none;"></div>
+    </div>
+  </div>
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('sponsor-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+
+  function makeSimpleSelect(inputId, toggleId, menuId, valueId, options) {
+    var input = document.getElementById(inputId);
+    var toggle = document.getElementById(toggleId);
+    var menu = document.getElementById(menuId);
+    var valueContainer = document.getElementById(valueId);
+    var committed = null;
+    var mousedownArmed = null;
+
+    function renderValue() {
+      Array.prototype.slice.call(valueContainer.querySelectorAll('.select__single-value')).forEach(function (n) { n.remove(); });
+      if (!committed) return;
+      var sv = document.createElement('div');
+      sv.className = 'select__single-value';
+      sv.textContent = committed;
+      valueContainer.insertBefore(sv, input);
+    }
+    function openMenu() { menu.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
+    function closeMenu() { menu.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
+    function renderOptions() {
+      menu.innerHTML = '';
+      options.forEach(function (text) {
+        var opt = document.createElement('div');
+        opt.className = 'select__option';
+        opt.setAttribute('role', 'option');
+        opt.textContent = text;
+        opt.addEventListener('mousedown', function (e) { e.preventDefault(); mousedownArmed = text; });
+        opt.addEventListener('click', function () {
+          if (mousedownArmed !== text) return;
+          mousedownArmed = null;
+          committed = text;
+          renderValue();
+          input.value = '';
+          closeMenu();
+        });
+        menu.appendChild(opt);
+      });
+    }
+    menu.style.display = 'none';
+    toggle.addEventListener('mouseup', function () {
+      if (menu.style.display === 'block') { closeMenu(); return; }
+      renderOptions();
+      openMenu();
+    });
+    toggle.addEventListener('click', function (e) { e.preventDefault(); });
+    input.addEventListener('keyup', function (e) {
+      if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(); openMenu(); }
+    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    input.addEventListener('input', function () {
+      // Deliberately NOT filtering by the typed query -- see the file-level comment above.
+      renderOptions();
+      openMenu();
+    });
+    input.addEventListener('blur', function () {
+      setTimeout(function () { input.value = ''; closeMenu(); }, 0);
+    });
+    return { committedValue: function () { return committed; } };
+  }
+
+  window.__sponsorSelect = makeSimpleSelect('sponsor_input', 'sponsor_toggle', 'sponsor_menu', 'sponsor_value',
+    ['Yes, I will require H-1B sponsorship', 'Yes, I will require TN visa support', 'No, I will not require sponsorship']);
+  window.__sponsorSilentSelect = makeSimpleSelect('sponsor_silent_input', 'sponsor_silent_toggle', 'sponsor_silent_menu', 'sponsor_silent_value',
+    ['Yes, I will require O-1 sponsorship', 'Yes, I will require E-3 sponsorship', 'No, I will not require sponsorship']);
+</script>
+</body></html>
+"""
+
 
 class StubHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -442,6 +596,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/sponsor-resolve-page.html"):
+            body = SPONSOR_RESOLVE_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/health":
             self._json(200, {"tiers_available": ["test-stub"]})
         elif self.path == "/profile/counts":
@@ -482,6 +643,47 @@ class StubHandler(BaseHTTPRequestHandler):
                     fills[0]["reason"] = "Matches disability status 'Yes, I have a disability' from your profile"
                 if skipped:
                     skipped[0]["reason"] = "Kept race/ethnicity as Hispanic or Latino, no safe automatic answer"
+            if "sponsor-resolve-page" in url:
+                # The second-chance /resolve round trip (this build): a combobox's real options
+                # are unknown at scan time (fields[].options == []), so the FIRST call here can
+                # only answer with a short, non-committal "Yes" for either field below — exactly
+                # what a real canary sponsorship question gets before scanner.js ever opens the
+                # widget. content.js recognizes the resulting "no confident match" failure (the
+                # options bundle facts a plain "Yes" can't disambiguate), stashes what it actually
+                # rendered, and calls back through this SAME endpoint ONE more time with `options`
+                # filled in — recognized here by `f["options"]` no longer being empty.
+                for f in fields:
+                    name = f.get("name") or ""
+                    if name not in ("sponsor_combobox", "sponsor_combobox_silent"):
+                        continue
+                    # Replace whatever build_fills()'s generic default already produced for this
+                    # field (a plain "Test Value fN", since it has no options at scan time) with
+                    # this fixture's own deliberate answers.
+                    fills = [x for x in fills if x["id"] != f["id"]]
+                    skipped = [x for x in skipped if x["id"] != f["id"]]
+                    options = f.get("options") or []
+                    if not options:
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "Yes",
+                            "reason": "canary match (sponsorship) — real options not seen yet",
+                            "profile_key": "canary:sponsorship", "source": "canary", "draft": False,
+                        })
+                    elif name == "sponsor_combobox":
+                        # The positive case: given the real options, the one naming the
+                        # applicant's own visa (H-1B) is the answer — mirrors canary.choose_option
+                        # picking among several "Yes, ..." options that bundle facts. Recorded
+                        # (rather than asserted here — this runs on a background server thread)
+                        # so the main thread can check() it once the browser-driven part is done.
+                        sponsor_resolve_options_calls.append((name, list(options)))
+                        fills.append({
+                            "id": f["id"], "auto_fill": True,
+                            "value": "Yes, I will require H-1B sponsorship",
+                            "reason": "canary match (sponsorship) — names your H-1B specifically",
+                            "profile_key": "canary:sponsorship", "source": "canary", "draft": False,
+                        })
+                    # else (sponsor_combobox_silent, options non-empty): deliberately answer
+                    # NOTHING for it — neither a fill NOR a skip — the negative control for "the
+                    # second resolve returns nothing" (item 4's own control case).
             self._json(200, {"fills": fills, "skipped": skipped})
         elif self.path == "/resume/tailor":
             length = int(self.headers.get("Content-Length") or 0)
@@ -573,6 +775,7 @@ SERVICE_URL = f"http://127.0.0.1:{stub_port}"
 PAGE_BASE = f"{SERVICE_URL}/test-page.html"
 WRAPPER_URL = f"{SERVICE_URL}/embed-wrapper.html"
 RESUME_TAILOR_URL = f"{SERVICE_URL}/resume-tailor-page.html"
+SPONSOR_RESOLVE_URL = f"{SERVICE_URL}/sponsor-resolve-page.html"
 
 
 # ---------------------------------------------------------------------------
@@ -2043,6 +2246,64 @@ with sync_playwright() as p:
                   bool(fields22) and all(f.get("category") for f in fields22), json.dumps(fields22[:3]))
 
         # =====================================================================
+        # TAB 23 — the sponsorship-combobox second-chance /resolve round trip (this build): a
+        #          react-select-style combobox whose real options ("Yes, I will require H-1B
+        #          sponsorship" / "Yes, I will require TN visa support" / "No, I will not require
+        #          sponsorship") are unknown to the FIRST /resolve call, which can only answer
+        #          "Yes" — scanner.js correctly refuses to force that onto three real options, and
+        #          content.js's resolveAmbiguousChoiceFields() gives the service exactly ONE more
+        #          chance, with the real options filled in, before the verify sweep. The SAME
+        #          page also carries the negative control (a second combobox the stub answers
+        #          NOTHING for on the second call) so one page proves "exactly two /resolve calls
+        #          total" while covering both outcomes — see SPONSOR_RESOLVE_PAGE_BYTES/
+        #          StubHandler.do_POST's "sponsor-resolve-page" branch above.
+        # =====================================================================
+        tab23 = ctx.new_page()
+        tab23.goto(SPONSOR_RESOLVE_URL + "#t=23")
+        tab23_id = find_tab_id(helper, "#t=23")
+        check("found tab 23's chrome tab id", tab23_id is not None)
+
+        panel23 = ctx.new_page()
+        panel23.goto(f"{panel_url}?tabId={tab23_id}")
+        panel23.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel23.click("#scanBtn")
+        state23 = wait_for_done(helper, tab23_id, timeout_s=60)
+        check("tab 23's fill reached a terminal status", state23 is not None and state23.get("status") == "done",
+              str(state23)[:200])
+
+        sponsor_calls23 = [u for (u, _names) in resolve_calls if "sponsor-resolve-page.html" in (u or "")]
+        check("tab 23: EXACTLY two /resolve calls total (one main pass + one combined second chance, never one per field)",
+              len(sponsor_calls23) == 2, str(len(sponsor_calls23)))
+        check("tab 23: the second /resolve call carried the sponsor_combobox field's REAL rendered options",
+              len(sponsor_resolve_options_calls) == 1 and sponsor_resolve_options_calls[0][1] == [
+                  "Yes, I will require H-1B sponsorship", "Yes, I will require TN visa support",
+                  "No, I will not require sponsorship"
+              ], str(sponsor_resolve_options_calls))
+
+        committed_sponsor23 = tab23.eval_on_selector(
+            "#sponsor_value", "el => { const n = el.querySelector('.select__single-value'); return n ? n.textContent : null; }")
+        check("tab 23: the H-1B option (never the short 'Yes', never a guess) ends up COMMITTED on the real page",
+              committed_sponsor23 == "Yes, I will require H-1B sponsorship", repr(committed_sponsor23))
+
+        filled23 = (state23 or {}).get("filled") or []
+        sponsor_filled23 = next((f for f in filled23 if f.get("value") == "Yes, I will require H-1B sponsorship"), None)
+        check("tab 23: the re-filled H-1B answer is reported VERIFIED (went through the same verify sweep as any other fill)",
+              sponsor_filled23 is not None and sponsor_filled23.get("status") == "verified", str(sponsor_filled23))
+
+        committed_silent23 = tab23.eval_on_selector(
+            "#sponsor_silent_value", "el => { const n = el.querySelector('.select__single-value'); return n ? n.textContent : null; }")
+        check("tab 23 CONTROL: the field the second /resolve call answered NOTHING for stays completely empty on the page",
+              committed_silent23 is None, repr(committed_silent23))
+        needs_you23 = (state23 or {}).get("needsYou") or []
+        silent_needs_you23 = next((n for n in needs_you23 if n.get("label") == "Do you require sponsorship (silent-control combobox)?"), None)
+        check("tab 23 CONTROL: that field is honestly reported 'left for you', never a silent drop and never a false 'Filled'",
+              silent_needs_you23 is not None and silent_needs_you23.get("status") == "left_for_you", str(silent_needs_you23))
+
+        counters23 = submission_counters(tab23)
+        check("tab 23: no native form submission at any point in the second-chance round trip",
+              counters23["form"] is False, json.dumps(counters23))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -2053,7 +2314,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22), ("tab23", tab23)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))

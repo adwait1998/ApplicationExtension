@@ -1378,6 +1378,14 @@ pending.push((async () => {
       okBad === false && doc.getElementById('wd_degree_button_text').textContent === 'Bachelors Degree or Equivalent');
     expect('the dropdown popup is closed (Escape) after a failed match, not left open',
       doc.getElementById('wd_degree_listbox').style.display !== 'block');
+    // This build: a failed wd-dropdown fill also carries the option texts it saw as STRUCTURED
+    // DATA on entry._lastOptions (not only baked into the reason string) -- content.js's
+    // second-chance /resolve round trip reads this to give the service the real options.
+    expect('Degree wd-dropdown: entry._lastOptions carries the actual rendered option texts as structured data',
+      JSON.stringify(degreeEntry._lastOptions) === JSON.stringify([
+        'Bachelors Degree or Equivalent', 'Masters Degree or Equivalent', 'Doctorate',
+        'Associates Degree', 'High School or Equivalent'
+      ]));
 
     const countryBtn = doc.getElementById('wd_country_button');
     const countryEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-dropdown' && e.button === countryBtn);
@@ -1634,6 +1642,11 @@ pending.push((async () => {
     mco('Engineer', ['Software Engineer', 'Site Engineer']) === -1);
   expect('containment tier: with only ONE containing option, it still matches normally',
     mco('Engineer', ['Software Engineer', 'Product Designer']) === 0);
+  // Identical duplicates are not ambiguity (this build): the page rendering the SAME option text
+  // twice is never something the applicant could have told apart either -- pick the first. Two
+  // DIFFERENT texts (immediately above) still refuse -- this is the negative control for that.
+  expect('containment tier: two options with the IDENTICAL text both contain the value -- not real ambiguity, picks the first',
+    mco('Engineer', ['Software Engineer', 'Software Engineer']) === 0);
 })();
 
 // --- matchAnswerFamily: ambiguity must hold in EVERY family tier, not only containment ------
@@ -2003,6 +2016,20 @@ pending.push((async () => {
     Scanner.matchCityStateOption('Seattle, Mars', CATALOG) === -1);
   expect('matchCityStateOption: wrong state for an otherwise-matching city -> -1, never guesses the city alone',
     Scanner.matchCityStateOption('Seattle, Oregon', CATALOG) === -1);
+
+  // Identical duplicates are not ambiguity (this build, live probe 2026-09-24,
+  // job-boards.greenhouse.io/twilio: the geocoder returned "Seattle, Washington, United States"
+  // TWICE for the same query) -- the applicant could never have told the two apart on the page
+  // either, so the first is picked rather than refusing outright.
+  const DUPLICATE_CATALOG = ['Seattle, Washington, United States', 'Seattle, Washington, United States'];
+  expect('matchCityStateOption: two options with the IDENTICAL rendered text -- not real ambiguity, picks the first',
+    Scanner.matchCityStateOption('Seattle, Washington', DUPLICATE_CATALOG) === 0);
+
+  // Negative control: two options that both match on city+state but render DIFFERENT full text
+  // (a genuinely different third segment) are still real ambiguity -- never guessed between.
+  const DIFFERENT_TEXT_CATALOG = ['Seattle, Washington, United States', 'Seattle, Washington, USA'];
+  expect('matchCityStateOption: two options matching city+state but with DIFFERENT full text still refuse (-1), never the first',
+    Scanner.matchCityStateOption('Seattle, Washington', DIFFERENT_TEXT_CATALOG) === -1);
 })();
 
 // --- combobox / button-group / Lever-location: async fill + verify behavior, run STRICTLY
@@ -2040,6 +2067,19 @@ pending.push((async () => {
       okBad === false && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
     expect('Country combobox failure reason never quotes the attempted value ("Atlantis")',
       !String(entry._lastReason || '').includes('Atlantis'));
+    // "Atlantis" filters the rendered catalog down to ZERO rows (a DIFFERENT failure -- "no
+    // options rendered while filtering", no options to show), so it never populates
+    // entry._lastOptions. "Can" filters down to a NON-empty-but-not-matching set (just
+    // "Canada") -- the "no confident match among the filtered options" path this build adds
+    // optionsSeen to. This build: that failure also carries the option texts it saw as
+    // STRUCTURED DATA on entry._lastOptions (not only baked into the reason string) --
+    // content.js's second-chance /resolve round trip reads this to give the service the real
+    // options it never saw at first.
+    const okBad2 = await Scanner.applyFill(entry, 'Can');
+    expect('Country combobox: a second no-confident-match value (filters to a single non-matching option) also fails, commit still untouched',
+      okBad2 === false && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
+    expect('Country combobox: entry._lastOptions carries the actual rendered (filtered) option texts as structured data',
+      JSON.stringify(entry._lastOptions) === JSON.stringify(['Canada']));
   }
 
   // ---- combobox: ambiguous negative control (two rendered options both contain "Engineer") ----
@@ -2049,6 +2089,11 @@ pending.push((async () => {
     const ok = await Scanner.applyFill(entry, 'Engineer');
     expect('combobox ambiguous negative control: "Engineer" matches BOTH "Software Engineer" and "Site Engineer" -> stays unfilled',
       ok === false && Scanner.getComboboxCommittedValue(entry) === '');
+    // Negative control for optionsSeen too: two GENUINELY DIFFERENT option texts both matching
+    // is still real ambiguity -- entry._lastOptions is still populated (so a second-chance
+    // /resolve round trip can still try), but the fill itself still correctly refuses above.
+    expect('combobox ambiguous negative control: entry._lastOptions still carries both (different) option texts',
+      JSON.stringify(entry._lastOptions) === JSON.stringify(['Software Engineer', 'Site Engineer']));
   }
 
   // ---- combobox: async/filtered catalog (School) -- ground truth: "No options" is shown
@@ -2183,15 +2228,18 @@ pending.push((async () => {
       ok === true && Scanner.getComboboxCommittedValue(entry) === 'Seattle, Washington, United States');
   }
 
-  // ---- combobox: Location (City), two geocode results render identically -> never guess ----
+  // ---- combobox: Location (City), two geocode results render identically -> not real
+  //      ambiguity (this build): the applicant could never tell the two apart either, so the
+  //      first is committed rather than refusing outright. See matchCityStateOption's own direct
+  //      unit checks above for the negative control (two DIFFERENT texts still refuse). ----------
   {
     const field = fieldByLabel('Location (City) duplicate*');
     const entry = entryFor(field);
     const ok = await Scanner.applyFill(entry, 'Seattle, Washington');
-    expect('Location (City) combobox: two identically-rendered options -> ambiguous, stays unfilled',
-      ok === false && Scanner.getComboboxCommittedValue(entry) === '');
-    expect('Location (City) ambiguous case: the reason still names the (repeated) options it saw',
-      /saw: /.test(entry._lastReason) && /Seattle, Washington, United States/.test(entry._lastReason));
+    expect('Location (City) combobox: two identically-rendered options -> not real ambiguity, the first is committed',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'Seattle, Washington, United States');
+    expect('Location (City) duplicate case: entry._lastOptions is cleared (null) on success, never a stale list from some earlier attempt',
+      entry._lastOptions == null);
   }
 
   // ---- Ashby Yes/No button groups: scoped to their OWN question ----
@@ -2248,6 +2296,36 @@ pending.push((async () => {
     const r = await Scanner.fillButtonGroup(brokenEntry, 'No', doc);
     expect('fillButtonGroup: a stale, already-checked hidden-mirror checkbox is NOT trusted as evidence that a click the page ignores actually selected "No"',
       r.ok === false);
+    container.remove();
+  }
+
+  // ---- button-group: "no confident match" also carries optionsSeen as structured data (this
+  //      build) -- not only baked into the reason string -- so content.js's second-chance
+  //      /resolve round trip can give the service the real options it never saw at first. ------
+  {
+    const container = doc.createElement('div');
+    const visaBtn = doc.createElement('button');
+    visaBtn.type = 'button';
+    visaBtn.textContent = 'Yes, I will require H-1B sponsorship';
+    const otherVisaBtn = doc.createElement('button');
+    otherVisaBtn.type = 'button';
+    otherVisaBtn.textContent = 'Yes, I will require TN visa support';
+    const noBtn2 = doc.createElement('button');
+    noBtn2.type = 'button';
+    noBtn2.textContent = 'No, I will not require sponsorship';
+    container.appendChild(visaBtn);
+    container.appendChild(otherVisaBtn);
+    container.appendChild(noBtn2);
+    doc.body.appendChild(container);
+
+    const sponsorBgEntry = { buttons: [visaBtn, otherVisaBtn, noBtn2], container: container, label: 'Sponsorship button group (optionsSeen check)' };
+    const rBg = await Scanner.fillButtonGroup(sponsorBgEntry, 'Yes', doc);
+    expect('button-group: a short "Yes" against two "Yes, ..." options is ambiguous -> false, never the first',
+      rBg.ok === false);
+    expect('button-group: optionsSeen carries the actual rendered button texts as structured data',
+      JSON.stringify(rBg.optionsSeen) === JSON.stringify([
+        'Yes, I will require H-1B sponsorship', 'Yes, I will require TN visa support', 'No, I will not require sponsorship'
+      ]));
     container.remove();
   }
 
