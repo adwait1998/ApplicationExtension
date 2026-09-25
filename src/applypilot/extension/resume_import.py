@@ -763,6 +763,162 @@ def _deep_merge(base: dict, overlay: dict) -> None:
             base[key] = value
 
 
+# ---------------------------------------------------------------------------
+# Skills — deterministic, verbatim from the résumé's own skills section
+# ---------------------------------------------------------------------------
+
+_SKILLS_HEADING_RE = re.compile(
+    r"^\s*((technical|core|key|professional|design|relevant|hard)\s+)?"
+    r"(skills?|competenc(y|ies)|expertise|toolkit|tools|technologies|tech\s+stack|skill\s+set|skillset)"
+    r"(\s*(&|and|/|,)\s*(tools|technologies|expertise|software|interests|certifications))?\s*:?\s*$",
+    re.I)
+_OTHER_SECTION_RE = re.compile(
+    r"^\s*(summary|profile|about( me)?|objective|(work|professional|relevant)?\s*experience|employment"
+    r"( history)?|education|academic\w*|projects?|selected projects|certifications?|licenses?|awards?|"
+    r"publications?|volunteer\w*|leadership|interests|hobbies|languages|references|activities|honou?rs?|"
+    r"achievements|courses?|coursework)\s*:?\s*$", re.I)
+_SKILL_CATEGORY_RE = re.compile(r"^[•\-*·▪◦]?\s*([A-Za-z][A-Za-z0-9 &/+().'-]{0,40}?)\s*:\s*(?!//)(.*)$")
+_BULLETS = "•-*·▪◦"
+MAX_RESUME_SKILLS = 80
+
+
+def _is_heading(line: str) -> bool:
+    if _OTHER_SECTION_RE.match(line):
+        return True
+    # A bulleted or parenthesised line is list content ("• HTML", "(MCP)"),
+    # and a 2-3 letter caps word is an acronym skill ("SQL", "AWS").
+    if line[:1] in _BULLETS + "([":
+        return False
+    letters = re.sub(r"[^A-Za-z]", "", line)
+    return (len(letters) >= 4 and letters.isupper() and len(line.split()) <= 4
+            and "," not in line and ":" not in line)
+
+
+def _split_skill_items(body: str) -> list[str]:
+    """Split on , ; | and bullets — never inside parentheses, so
+    "AWS (S3, EC2, IAM)" stays one item."""
+    items, cur, depth = [], [], 0
+    for ch in body:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(0, depth - 1)
+        if depth == 0 and ch in ",;|•·▪":
+            items.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    items.append("".join(cur))
+    out = []
+    for item in items:
+        item = re.sub(r"\s+", " ", item).strip(" .\t-–—")
+        if 1 <= len(item) <= 60:
+            out.append(item)
+    return out
+
+
+def _join_wrapped(parts: list[str]) -> str:
+    """Rejoin a skills block's lines. A line that ends mid-list (",", "&",
+    inside parentheses) or a next line that starts lowercase/with "(" is a
+    wrap of the same item; otherwise a new line is a new item."""
+    out = ""
+    for part in parts:
+        if not out:
+            out = part
+            continue
+        depth = out.count("(") - out.count(")")
+        tail = out.rstrip()
+        if (tail.endswith((",", ";", "|", "&", "/", "-", " and")) or depth > 0
+                or part[:1].islower() or part[:1] in "(["):
+            out += " " + part
+        else:
+            out += ", " + part
+    return out
+
+
+def _category_key(name: str) -> str:
+    key = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    return key or "resume"
+
+
+def extract_skills(text: str) -> dict[str, list[str]]:
+    """{category: [skill, ...]} from the résumé's skills section, verbatim.
+    Handles "Category: a, b, c" lines (with wrapped continuation lines), a
+    plain comma list under a SKILLS heading, and a one-line "Skills: a, b".
+    Empty when the résumé has no recognisable skills section — never
+    inferred from job descriptions or anywhere else."""
+    lines = (text or "").splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if _SKILLS_HEADING_RE.match(line.strip()):
+            start = i + 1
+            break
+    blocks: list[tuple[str, str]] = []
+    if start is None:
+        for line in lines:
+            m = re.match(r"^\s*((technical|core|key)\s+)?skills?\s*[:\-–]\s*(.+)$", line, re.I)
+            if m:
+                blocks.append(("skills", m.group(3)))
+                break
+    else:
+        cat, cur = "skills", []
+        for line in lines[start:]:
+            text_line = line.strip()
+            if not text_line:
+                continue
+            if _is_heading(text_line):
+                break
+            m = _SKILL_CATEGORY_RE.match(text_line)
+            if m and len(m.group(1).split()) <= 5:
+                if cur:
+                    blocks.append((cat, _join_wrapped(cur)))
+                cat, cur = m.group(1), [m.group(2)]
+            else:
+                cur.append(text_line.lstrip(_BULLETS + " "))
+        if cur:
+            blocks.append((cat, _join_wrapped(cur)))
+
+    out: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    total = 0
+    for cat, body in blocks:
+        for item in _split_skill_items(body):
+            k = item.lower()
+            if k in seen or total >= MAX_RESUME_SKILLS:
+                continue
+            seen.add(k)
+            out.setdefault(_category_key(cat), []).append(item)
+            total += 1
+    return out
+
+
+def merge_skills(existing: dict | None, extracted: dict[str, list[str]],
+                 replace: bool) -> tuple[dict, list[str]]:
+    """(skills_boundary, warnings). Replace wholesale when told to (a
+    confirmed change of identity) or when nothing is there yet; otherwise
+    keep what exists and add the résumé's, saying which existing skills the
+    résumé does not list so the applicant can prune ones that are not theirs."""
+    existing = existing if isinstance(existing, dict) else {}
+    if replace or not any(isinstance(v, list) and v for v in existing.values()):
+        return {k: list(v) for k, v in extracted.items()}, []
+    merged = {k: list(v) for k, v in existing.items() if isinstance(v, list)}
+    have = {str(x).lower() for v in merged.values() for x in v}
+    for cat, items in extracted.items():
+        for item in items:
+            if item.lower() not in have:
+                merged.setdefault(cat, []).append(item)
+                have.add(item.lower())
+    on_resume = {x.lower() for v in extracted.values() for x in v}
+    not_listed = [str(x) for v in existing.values() if isinstance(v, list) for x in v
+                  if str(x).lower() not in on_resume]
+    warnings = []
+    if not_listed:
+        shown = ", ".join(not_listed[:12]) + (" ..." if len(not_listed) > 12 else "")
+        warnings.append(f"Kept {len(not_listed)} existing skill(s) this résumé doesn't list ({shown}) — "
+                        "remove any that aren't yours.")
+    return merged, warnings
+
+
 def build_draft_profile(
     existing_profile: dict, deterministic: dict[str, str], llm_fields: dict
 ) -> dict:
@@ -869,6 +1025,13 @@ def import_resume(
         provenance["experience.years_of_experience_total"] = "llm"
 
     draft_profile = build_draft_profile(existing_profile, deterministic, llm_fields)
+
+    extracted_skills = extract_skills(text)
+    if extracted_skills:
+        draft_profile["skills_boundary"], skill_warnings = merge_skills(
+            draft_profile.get("skills_boundary"), extracted_skills, replace=allow_identity_change)
+        warnings.extend(skill_warnings)
+        provenance["skills_boundary"] = "deterministic"
 
     return ImportResult(
         draft_profile=draft_profile,
