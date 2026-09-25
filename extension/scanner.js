@@ -1342,6 +1342,14 @@
    * previously picking whichever specific title happened to render first -- a false degree
    * claim). Leaving it for the human beats a wrong one.
    */
+  /** `text` with any trailing "degree" word AND apostrophes stripped -- collapses "Bachelor's
+   * Degree" and "Bachelors" down to the SAME "bachelors" stem. Only ever used to recognise two
+   * options as mere spelling variants of the identical level (see matchDegreeFamily below),
+   * never to widen which OPTIONS count as a family match in the first place. */
+  function degreeBareStem(text) {
+    return normalizeToken(text).replace(/degree$/, '').replace(/'/g, '');
+  }
+
   function matchDegreeFamily(value, optionTexts) {
     var fam = degreeFamilyOf(value);
     if (!fam) return -1;
@@ -1356,7 +1364,28 @@
     var specificMatches = famMatches.filter(function (idx) {
       return normalizeToken(optionTexts[idx]).indexOf(specificTok) !== -1;
     });
-    return specificMatches.length === 1 ? specificMatches[0] : -1;
+    if (specificMatches.length === 1) return specificMatches[0];
+
+    // Ground truth (live probe, 2026-09-24, boards.greenhouse.io/robinhood): Greenhouse's own
+    // standard "Degree" field lists BOTH a bare level noun ("Bachelors") AND its fuller phrasing
+    // ("Bachelor's Degree") as two SEPARATE options -- both match the family regex, and neither
+    // contains a specific title's token (e.g. "Bachelor of Design" narrows to nothing above), so
+    // the "exactly one" rule just above never fires and this used to fall through to -1, failing
+    // a fill the applicant's degree genuinely satisfies. Only when EVERY family match collapses
+    // to the identical bare stem (never triggered by genuinely different specific titles, which
+    // keep their own distinct wording after stripping "degree"/apostrophes) are they treated as
+    // interchangeable spellings of the same level -- preferring whichever ONE of them spells out
+    // the word "degree" (the more complete, unambiguous answer to a field literally labelled
+    // "Degree"), falling back to the first when that doesn't uniquely pick one either.
+    if (specificMatches.length === 0) {
+      var stems = famMatches.map(function (idx) { return degreeBareStem(optionTexts[idx]); });
+      var allSameStem = stems.every(function (s) { return s === stems[0]; });
+      if (allSameStem) {
+        var withDegreeWord = famMatches.filter(function (idx) { return /degree/i.test(optionTexts[idx]); });
+        return withDegreeWord.length === 1 ? withDegreeWord[0] : famMatches[0];
+      }
+    }
+    return -1;
   }
 
   var WD_COUNTRY_ALIASES = {
@@ -1471,7 +1500,20 @@
 
     // -- plain yes/no -----------------------------------------------------------------------
     if (v === 'yes' || v === 'no') {
-      return findUniqueMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
+      var plainIdx = findUniqueMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
+      if (plainIdx !== -1 || v === 'yes') return plainIdx;
+      // Ground truth (live probe, 2026-09-24, boards.greenhouse.io/robinhood): a "have you ever
+      // worked here" screening question can render with NO literal "Yes"/"No" option at all --
+      // e.g. "I currently work at Robinhood...", "I have previously worked at Robinhood...",
+      // "I have never worked at Robinhood" -- so the plain check above (which requires an option
+      // to START with "No") never finds anything, matchAnswerFamily's own "recognised family,
+      // stop here" contract then blocks the generic word-boundary containment tier below from
+      // ever getting a look, and typing "No" against these sentences filters react-select's own
+      // list down to nothing either ("no options rendered while filtering") since none of them
+      // literally contain "no". A plain "No" answer to this shape of question means exactly the
+      // ONE option phrased as a flat denial -- matched here ONLY when it uniquely identifies a
+      // single option, same "never the first of several" discipline as every other family tier.
+      return findUniqueMatch(optionTexts, /\bnever\b/i);
     }
 
     // -- gender -------------------------------------------------------------------------------
@@ -1585,6 +1627,27 @@
     if (alias) {
       for (i = 0; i < optionTexts.length; i++) {
         if (norm(optionTexts[i]) === alias) return i;
+      }
+    }
+
+    // 1c. US state name <-> 2-letter code cross-match -- e.g. the profile's "Washington"
+    // against a Greenhouse "State" react-select whose options render as plain 2-letter codes
+    // ("AL", "AK", ..., "WA", ...). Ground truth (live probe, 2026-09-24,
+    // job-boards.greenhouse.io/oura's 'State*' field): this cross-match previously lived ONLY
+    // in findOptionMatch (native <select>s), so a combobox's own unfiltered option list could
+    // never resolve "Washington" -> "WA" even though both were right there -- the code then
+    // typed "Washington" to filter, react-select's own literal label filter matched nothing
+    // against "WA", and the fill failed ("no options rendered while filtering") despite the
+    // right option being visible the whole time. Promoted here (same reasoning as the degree/
+    // country tiers just above) so every matchChoiceOption caller benefits, not just selects.
+    var stateCode = US_STATE_NAME_TO_CODE[v];
+    var stateName = US_STATE_CODE_TO_NAME[v];
+    if (stateCode || stateName) {
+      for (i = 0; i < optionTexts.length; i++) {
+        var otState = norm(optionTexts[i]);
+        var otStateNoPrefix = otState.replace(/^us[\s-]?/, '');
+        if (stateCode && (otState === stateCode || otStateNoPrefix === stateCode)) return i;
+        if (stateName && otState === stateName) return i;
       }
     }
 
@@ -2675,9 +2738,47 @@
         setNativeValue(entry.input, query);
         return waitForComboboxFilterResults(entry, doc).then(function (found) {
           if (!found) {
+            // Ground truth (live probe, 2026-09-24: Oura's 'State' ["AL","AK",...,"WA"], and
+            // Robinhood's 'Degree'): react-select's OWN text filter is a literal label match, so
+            // typing the profile's full wording ("Washington", "Bachelor of Design") against
+            // options spelled differently ("WA", "Bachelor's Degree") filters the list down to
+            // NOTHING -- even when the ORIGINAL unfiltered list (matched a few lines up, above
+            // this query even being built) already held the right option; a value that only the
+            // "type to filter" fallback ever gets to (matchAndCommitOrFilter's own unfiltered
+            // pass already tried and missed it once) can still be a capability gap in THAT tier
+            // rather than proof the option truly isn't there. Clearing the typed search text
+            // back out (the native setter, same as setNativeValue always uses -- never just
+            // `.value = ''`, which react controls wouldn't notice) makes a real react-select
+            // widget repaint its unfiltered list; openCombobox is idempotent (see its own
+            // comment) so re-calling it here never closes an already-open menu. One last match
+            // attempt against THAT restored list before finally giving up.
             dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape', 27);
             setNativeValue(entry.input, '');
-            return { ok: false, reason: 'no options rendered while filtering' };
+            return openCombobox(entry, doc).then(function (reopened) {
+              var elsBack = comboboxOptionEls(reopened);
+              function tryMatch(elsBack) {
+                var textsBack = elsBack.map(optionAccessibleText);
+                var idxBack = matchChoiceOption(target, textsBack);
+                if (idxBack === -1) idxBack = matchCityStateOption(target, textsBack);
+                if (idxBack !== -1) return commitComboboxOption(entry, reopened, elsBack, idxBack, doc);
+                dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape', 27);
+                setNativeValue(entry.input, '');
+                return {
+                  ok: false,
+                  reason: reasonWithOptions('no options rendered while filtering', textsBack),
+                  optionsSeen: cleanedOptionTexts(textsBack)
+                };
+              }
+              if (elsBack.length || !reopened) return tryMatch(elsBack);
+              // Same "one short re-settle" reasoning as the very first open above -- clearing
+              // the input is itself a re-render react needs a tick to process.
+              return waitFor(function () {
+                var elsBack2 = comboboxOptionEls(reopened);
+                return elsBack2.length ? elsBack2 : null;
+              }, 600, doc).then(function (settledBack) {
+                return tryMatch(settledBack || []);
+              });
+            });
           }
           var texts2 = found.els.map(optionAccessibleText);
           var idx2 = matchChoiceOption(target, texts2);
