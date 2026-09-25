@@ -52,8 +52,13 @@ AUTOCOMPLETE_MAP: dict[str, str] = {
 _NAME_LABEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     # Before first/full name: "Preferred Name (if different from legal name)"
     # contains "legal name" and used to get the full legal name.
+    # "Preferred First & Last Name" -> preferred first + legal last.
+    (re.compile(r"\bpreferred\s+(first\s*(&|and|\+)\s*last|full)\s+name\b", re.I), "personal.preferred_full_name"),
     (re.compile(r"\b(preferred|nick)\s*(first\s*)?name\b|\bname\s+you\s+go\s+by\b", re.I),
      "personal.preferred_name"),
+    # "First and Last Name" / "First & Last Name" is the FULL name; checked
+    # before the last-name rule, which used to claim it and give "Quill Testperson".
+    (re.compile(r"\bfirst\s*(&|and|\+|/)\s*last\s*name\b", re.I), "personal.full_name"),
     (re.compile(r"\b(first\s*name|given\s*name|fname)\b", re.I), "personal.full_name#first"),
     (re.compile(r"\b(last\s*name|family\s*name|surname|lname)\b", re.I), "personal.full_name#last"),
     (
@@ -79,12 +84,14 @@ _NAME_LABEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     # "Location" / "Current location" / "What is your location?" — where the
     # applicant is, as "City, State". Not a job-location preference.
     (re.compile(r"(?<!preferred )(?<!desired )(?<!office )(?<!work )(?<!job )\b(current\s+)?location\b"
-                r"(?!\s+(preference|you\s+are\s+applying|of\s+(the|this)\s+(role|job|position)))", re.I),
+                r"(?!\s+(preference|you\s+are\s+applying|of\s+(the|this)\s+(role|job|position)))"
+                r"|\bwhere\s+are\s+you\s+(currently\s+)?(located|based)\b", re.I),
      "personal.location"),
-    (re.compile(r"\bcurrent\s*(company|employer)\b"
+    (re.compile(r"\b(current|most\s+recent)(\s*/\s*most\s+recent)?\s*(company|employer)\b"
                 r"|\bwhere\s+(are|were)\s+you\s+(currently\s+|most\s+recently\s+)?(employed|working)\b", re.I),
      "experience.current_company"),
-    (re.compile(r"\bcurrent\s*(title|role|job\s*title)\b", re.I), "experience.current_job_title"),
+    (re.compile(r"\b(current|most\s+recent)(\s*/\s*most\s+recent)?\s*(title|role|job\s*title|position)\b", re.I),
+     "experience.current_job_title"),
 ]
 
 # Candidate profile keys eligible for the Laya (tier 4) semantic
@@ -180,8 +187,30 @@ def _skill_search_term(skill: str) -> str:
     return _PAREN_RE.sub("", skill).strip(" ,;-") or skill
 
 
+# Skills are claimed only when the field IS a skills field: a short label
+# ("Skills", "Technical skills"), an explicit request for a list ("List your
+# skills", "Please list any software tools you have used"), or Workday's
+# skills prompt. A question that merely mentions skills or services was
+# filled with the whole skills list on a real Ashby form.
+_SKILLS_REQUEST_RE = re.compile(
+    r"^\W*(please\s+)?(list|enter|add|share|select|what\s+are)\s+(your|any|some|relevant|key|top)?\s*"
+    r"(\w+\s+){0,2}skills\b"
+    r"|\b(list|what)\b.{0,30}\b(software|tools|technologies|programs)\b.{0,40}\b(used|use|proficient|"
+    r"familiar|experienced?|trained)\b",
+    re.I)
+
+
+def _is_skills_field(field: FieldDescriptor, haystack: str) -> bool:
+    label = (field.label or "").strip() or haystack
+    if (field.widget or "") == "wd-prompt" and _SKILLS_LABEL_RE.search(label):
+        return True
+    if _SKILLS_LABEL_RE.search(label) and len(label.split()) <= 5 and "?" not in label:
+        return True
+    return bool(_SKILLS_REQUEST_RE.search(label))
+
+
 def _match_skills(field: FieldDescriptor, haystack: str, profile: dict) -> FillResult | SkipResult | None:
-    if not _SKILLS_LABEL_RE.search(haystack):
+    if not _is_skills_field(field, haystack):
         return None
     skills = _flatten_skills(profile)
     if not skills:
@@ -329,6 +358,89 @@ def _label_rule_fits(path: str, field: FieldDescriptor, haystack: str) -> bool:
     return True
 
 
+# Options that describe a work arrangement ("Remote - US") are a different
+# question from where the applicant lives; never picked as a location.
+_ARRANGEMENT_RE = re.compile(r"\b(remote|hybrid|on-?site|in[- ]office|relocat\w*)\b", re.I)
+
+
+def _names_in(options: list[str], value: str) -> bool:
+    v = re.escape(value.strip().lower())
+    return any(re.search(rf"(?<![a-z]){v}(?![a-z])", o.lower()) for o in options
+               if o and not _ARRANGEMENT_RE.search(o))
+
+
+_US_COUNTRY_ALIASES = ("united states", "united states of america", "usa", "us", "u.s.")
+
+
+def _location_for_options(field: FieldDescriptor, profile: dict, prefer: str) -> str | None:
+    """With the options unknown (a Workday/combobox menu) keep the requested
+    part; with options known, the most specific part some option names."""
+    per = (profile or {}).get("personal") or {}
+    parts = {"personal.city": per.get("city"), "personal.province_state": per.get("province_state"),
+             "personal.country": per.get("country")}
+    if not field.options:
+        key = "personal.city" if prefer == "personal.location" else prefer
+        return parts.get(key) or None
+    order = ["personal.city", "personal.province_state", "personal.country"]
+    if prefer in order:
+        order = [prefer] + [k for k in order if k != prefer]
+    for key in order:
+        val = parts.get(key)
+        if val and _names_in(field.options, str(val)):
+            return str(val)
+    country = str(parts.get("personal.country") or "").strip().lower()
+    if country in _US_COUNTRY_ALIASES:
+        for alias in ("United States", "United States of America", "USA", "US"):
+            if _names_in(field.options, alias):
+                return next(o for o in field.options if not _ARRANGEMENT_RE.search(o)
+                            and re.search(rf"(?<![a-z]){re.escape(alias.lower())}(?![a-z])", o.lower()))
+    return None
+
+
+# "How many years of (relevant) experience do you have?" with range options
+# ("0-2 years", "3-5", "5+", "Less than 1 year"): the option whose range
+# holds the profile's total years — and nothing when two ranges both do.
+_YEARS_Q_RE = re.compile(r"\byears?\b.{0,40}\bexperience\b|\bexperience\b.{0,40}\byears?\b|\bhow\s+many\s+years\b",
+                         re.I)
+
+
+def _option_range(opt: str) -> tuple[float, float] | None:
+    o = opt.lower().replace("–", "-").replace("—", "-")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)", o)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|or\s+more|and\s+(?:up|above|over)|plus)", o) \
+        or re.search(r"(?:more\s+than|over|at\s+least|above)\s+(\d+(?:\.\d+)?)", o)
+    if m:
+        lo = float(m.group(1))
+        return (lo + (0.001 if re.search(r"more\s+than|over|above", o) else 0), float("inf"))
+    m = re.search(r"(?:less\s+than|under|below|fewer\s+than)\s+(\d+(?:\.\d+)?)", o)
+    if m:
+        return 0.0, float(m.group(1)) - 0.001
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(years?|yrs?)?\s*", o)
+    if m:
+        return float(m.group(1)), float(m.group(1)) + 0.999
+    return None
+
+
+def _match_years_range(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | None:
+    if not field.options or not _YEARS_Q_RE.search(field.label or ""):
+        return None
+    raw = str(((profile or {}).get("experience") or {}).get("years_of_experience_total") or "").strip()
+    try:
+        years = float(raw)
+    except ValueError:
+        return None
+    hits = [o for o in field.options if (r := _option_range(o)) and r[0] <= years <= r[1]]
+    if len(hits) != 1:
+        return None if not hits else SkipResult(
+            id=field.id, source="deterministic",
+            reason=f"{len(hits)} options fit {raw} years — pick the right one yourself", auto_fill=False)
+    return FillResult(id=field.id, value=hits[0], source="deterministic",
+                      profile_key="experience.years_of_experience_total", confidence=0.9, auto_fill=True,
+                      reason=f"your total experience ({raw} years)")
+
+
 def _dedupe_ci(items) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -413,6 +525,15 @@ def _match_start_availability(field: FieldDescriptor, haystack: str, profile: di
 def value_for_key(key: str, profile: dict) -> str | None:
     """Resolve a profile path (optionally suffixed ``#first``/``#last``) to
     a string value, or None if unset/blank."""
+    if key == "personal.preferred_full_name":
+        pref = _dig(profile, "personal.preferred_name")
+        full = _dig(profile, "personal.full_name")
+        if not full:
+            return None
+        if not pref:
+            return str(full)
+        _first, last = _split_name(str(full))
+        return f"{pref} {last}".strip()
     if key == "personal.location" and not _dig(profile, key):
         parts = [_dig(profile, "personal.city"), _dig(profile, "personal.province_state")]
         joined = ", ".join(str(x) for x in parts if x)
@@ -469,6 +590,10 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
     if today is not None:
         return today
 
+    years = _match_years_range(field, profile)
+    if years is not None:
+        return years
+
     autocomplete = (field.autocomplete or "").strip().lower()
     if autocomplete:
         # autocomplete can carry multiple tokens ("shipping given-name") —
@@ -504,10 +629,17 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
                 continue
             base_path = path.split("#", 1)[0]
             value = value_for_key(path, profile)
-            if base_path == "personal.location" and _is_choice(field):
-                # An option list of places ("Seattle, WA") is matched by the
-                # city — "Seattle, Washington" is in none of them verbatim.
-                value = value_for_key("personal.city", profile)
+            if base_path in _LOCATION_KEYS and _is_choice(field):
+                # A list of places may be cities ("Seattle, WA"), states or
+                # countries: offer the most specific part of the applicant's
+                # location that one of the options actually names. A
+                # "What is your location?" select on Lever was a country list.
+                value = _location_for_options(field, profile, prefer=base_path)
+                if value is None and field.options:
+                    return SkipResult(id=field.id, source="deterministic",
+                                      reason="none of this field's options names your city, state or country",
+                                      auto_fill=False)
+                value = value if value is not None else value_for_key(path, profile)
             if value:
                 return FillResult(
                     id=field.id,

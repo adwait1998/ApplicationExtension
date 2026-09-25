@@ -352,7 +352,7 @@ def resolve_fields(
                     if answers.answers_enabled(app_dir) else None)
     draft_budget = answers.DraftBudget(app_dir=app_dir) if answers.drafts_enabled(app_dir) else None
     plan = FillPlan(tiers_available=tiers_available(backend, app_dir))
-    for f in fields:
+    for f in structured.infer_run_sections(fields):
         result = resolve_field(
             f, profile, laya=backend, answer_cache=answer_cache, draft_budget=draft_budget,
             app_dir=app_dir, url=url,

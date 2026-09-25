@@ -41,7 +41,8 @@ _MARKERS = {
     # mid-token); "race condition" IS a standalone word "race" though, so it
     # needs an explicit carve-out — never treat the engineering term as EEO.
     "eeo_race": re.compile(r"\b(race(?!\s*-?\s*conditions?\b)|ethnicit\w+)\b", re.I),
-    "eeo_veteran": re.compile(r"\b(veteran|vevraa)\b", re.I),
+    # "What is your military status?" is the veteran self-ID question too.
+    "eeo_veteran": re.compile(r"\b(veteran|vevraa|military\s+status)\b", re.I),
     "eeo_disability": re.compile(r"\bdisabilit\w+\b", re.I),
     # Voluntary LGBTQ+ self-identification. Nothing marked these before, so a
     # draft-enabled path could hand "Do you identify as transgender?" to an
