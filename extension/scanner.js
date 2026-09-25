@@ -1505,6 +1505,31 @@
       if (norm(optionTexts[i]) === v) return i;
     }
 
+    // 1b. degree-level / country synonym normalisation -- e.g. a specific degree TITLE like
+    // "Bachelor of Design" against a generic Greenhouse/Ashby "Degree" combobox whose options
+    // are plain LEVELS ("Bachelor's Degree", "Master's Degree", ...); or "USA"/"US" against a
+    // spelled-out "United States of America". Previously only matchWorkdayDropdownOption ran
+    // this -- a live probe (2026-09-24) showed a Greenhouse Degree combobox fail on exactly
+    // this shape ("no confident match... among filtered options" for "Bachelor of Design"
+    // against ["High School Diploma", "Associate's Degree", "Bachelor's Degree", ...]), so it
+    // is promoted here to benefit every matchChoiceOption caller (combobox, checkbox-group,
+    // radio, native select), not only Workday's dropdown.
+    var fam = degreeFamilyOf(value);
+    if (fam) {
+      var famRe = WD_DEGREE_FAMILY_OPTION_RE[fam];
+      var famMatches = [];
+      for (i = 0; i < optionTexts.length; i++) {
+        if (famRe.test(optionTexts[i])) famMatches.push(i);
+      }
+      if (famMatches.length === 1) return famMatches[0];
+    }
+    var alias = countryAliasOf(value);
+    if (alias) {
+      for (i = 0; i < optionTexts.length; i++) {
+        if (norm(optionTexts[i]) === alias) return i;
+      }
+    }
+
     // 2. answer families -- a recognised family short-circuits here, whether it finds a
     //    fitting option (returns its index) or not (returns -1) -- see matchAnswerFamily.
     //    Family values can legitimately run long ("I am a veteran, but not a protected
@@ -2316,8 +2341,22 @@
     return !!generic && normEqText(generic, matchedText);
   }
 
+  /** True once `menu` has rendered SOMETHING to read -- at least one option, or an explicit
+   * "no options" notice -- not just once the menu container itself becomes visible. A live
+   * probe (2026-09-24, a Greenhouse "Degree" field) showed react-select can paint the menu
+   * wrapper one render pass before its option rows exist, so a wait keyed on container
+   * visibility alone can resolve against a container that is visible but still genuinely
+   * empty, reading zero options and mis-diagnosing a perfectly normal static list as needing
+   * the async type-to-filter fallback. */
+  function comboboxMenuHasContent(menu) {
+    if (!menu || !menu.querySelector) return false;
+    if (menu.querySelector('[role="option"], [class*="select__option" i], [class*="Select__option" i]')) return true;
+    return !!menu.querySelector('[class*="no-options" i], [class*="noresults" i], [class*="menu-notice" i]');
+  }
+
   /** Opens the menu per the ground truth: mouseup on "Toggle flyout", else ArrowDown keyup on
-   * the input itself. Returns a Promise of the now-open menu, or null if it never opened. */
+   * the input itself. Returns a Promise of the now-open, rendered menu, or null if it never
+   * opened / never finished rendering within budget. */
   function openCombobox(entry, doc) {
     var input = entry.input;
     var scope = comboboxFieldScope(input);
@@ -2329,7 +2368,7 @@
     }
     return waitFor(function () {
       var menu = resolveComboboxMenu(entry);
-      return (menu && isVisible(menu)) ? menu : null;
+      return (menu && isVisible(menu) && comboboxMenuHasContent(menu)) ? menu : null;
     }, 1500, doc);
   }
 
@@ -2397,35 +2436,48 @@
 
     return openCombobox(entry, doc).then(function (menu) {
       var els = comboboxOptionEls(menu);
-      var texts = els.map(optionAccessibleText);
-      var idx = matchChoiceOption(target, texts);
-      if (idx !== -1) return commitComboboxOption(entry, menu, els, idx, doc);
-
-      var query = comboboxFilterQuery(target);
-      if (!query) {
-        dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
-        return { ok: false, reason: 'no confident match for "' + target + '" among combobox options' };
+      // A live probe (2026-09-24, a Greenhouse "Degree" field) showed react-select can
+      // re-render the menu AGAIN right after the open-wait resolves (recalculating the
+      // focused/virtualized row), transiently clearing the options a tick after
+      // comboboxMenuHasContent() saw them and before this line runs. One short re-settle
+      // before concluding "genuinely empty" avoids mistaking that gap for an async catalog.
+      if (!els.length && menu) {
+        return waitFor(function () {
+          var els2 = comboboxOptionEls(menu);
+          return els2.length ? els2 : null;
+        }, 600, doc).then(function (settled) {
+          return matchAndCommitOrFilter(settled || []);
+        });
       }
-      setNativeValue(entry.input, query);
-      return waitFor(function () {
-        var m2 = resolveComboboxMenu(entry);
-        var e2 = comboboxOptionEls(m2);
-        return e2.length ? { menu: m2, els: e2 } : null;
-      }, 4000, doc).then(function (found) {
-        if (!found) {
+      return matchAndCommitOrFilter(els);
+
+      function matchAndCommitOrFilter(els) {
+        var texts = els.map(optionAccessibleText);
+        var idx = matchChoiceOption(target, texts);
+        if (idx !== -1) return commitComboboxOption(entry, menu, els, idx, doc);
+
+        var query = comboboxFilterQuery(target);
+        if (!query) {
           dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
-          setNativeValue(entry.input, '');
-          return { ok: false, reason: 'no options rendered while filtering for "' + query + '"' };
+          return { ok: false, reason: 'no confident match for "' + target + '" among combobox options' };
         }
-        var texts2 = found.els.map(optionAccessibleText);
-        var idx2 = matchChoiceOption(target, texts2);
-        if (idx2 === -1) {
-          dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
-          setNativeValue(entry.input, '');
-          return { ok: false, reason: 'no confident match for "' + target + '" among filtered options' };
-        }
-        return commitComboboxOption(entry, found.menu, found.els, idx2, doc);
-      });
+        setNativeValue(entry.input, query);
+        return waitForComboboxFilterResults(entry, doc).then(function (found) {
+          if (!found) {
+            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+            setNativeValue(entry.input, '');
+            return { ok: false, reason: 'no options rendered while filtering for "' + query + '"' };
+          }
+          var texts2 = found.els.map(optionAccessibleText);
+          var idx2 = matchChoiceOption(target, texts2);
+          if (idx2 === -1) {
+            dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
+            setNativeValue(entry.input, '');
+            return { ok: false, reason: 'no confident match for "' + target + '" among filtered options' };
+          }
+          return commitComboboxOption(entry, found.menu, found.els, idx2, doc);
+        });
+      }
     });
   }
 
@@ -3880,10 +3932,24 @@
     // because setNativeValue() was called).
     var target = String(value == null ? '' : value);
     var stuck;
-    if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'number') {
+    var elType = (el.type || '').toLowerCase();
+    if (el.tagName === 'INPUT' && elType === 'number') {
       var actualNum = parseFloat(el.value);
       var targetNum = parseFloat(target);
       stuck = !isNaN(actualNum) && !isNaN(targetNum) && actualNum === targetNum;
+    } else if (el.tagName === 'INPUT' && elType === 'tel') {
+      // A live probe (2026-09-24) showed Greenhouse's intl-tel-input widget reformat
+      // "+1 206 555 0147" to "+1 206-555-0147" on commit -- a cosmetic re-punctuation, not a
+      // dropped value. Compare by DIGITS ONLY, and accept either string ending in the other's
+      // digits (>= 7 digits, a full local number) so a widget that also drops/adds a leading
+      // country code still reads back as stuck, without ever accepting a trivial short match.
+      var actualDigits = String(el.value || '').replace(/\D/g, '');
+      var targetDigits = target.replace(/\D/g, '');
+      stuck = !!actualDigits && !!targetDigits && (
+        actualDigits === targetDigits ||
+        (actualDigits.length >= 7 && targetDigits.slice(-actualDigits.length) === actualDigits) ||
+        (targetDigits.length >= 7 && actualDigits.slice(-targetDigits.length) === targetDigits)
+      );
     } else {
       stuck = cleanText(el.value).toLowerCase() === cleanText(target).toLowerCase();
     }
