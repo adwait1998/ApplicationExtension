@@ -283,7 +283,7 @@ _MAX_LABEL_WORDS = 14
 def _label_rules_apply(field: FieldDescriptor) -> bool:
     ftype = (field.type or "").strip().lower()
     tag = (field.tag or "").strip().lower()
-    if tag == "textarea" or ftype in ("textarea", "checkbox", "radio", "file"):
+    if tag == "textarea" or ftype in ("textarea", "checkbox", "checkbox-group", "radio", "file"):
         return False
     return len((field.label or "").split()) <= _MAX_LABEL_WORDS
 
@@ -304,7 +304,8 @@ _QUESTION_LIKE_RE = re.compile(
 
 def _is_choice(field: FieldDescriptor) -> bool:
     return (bool(field.options) or (field.tag or "").strip().lower() == "select"
-            or (field.widget or "") == "wd-dropdown")
+            or (field.type or "").strip().lower() in ("checkbox-group", "radio")
+            or (field.widget or "") in ("wd-dropdown", "combobox", "button-group"))
 
 
 # Inside a work-history or education block, "Location"/"City" describe that

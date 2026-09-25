@@ -268,11 +268,17 @@ def _real_llm_fn(question: str, context: str) -> str:
 _PROSE_WORDS = 6
 
 
+# Scanner widget kinds that take one of a fixed set of answers even when the
+# options are not known at scan time (the menu only renders once opened).
+CHOICE_WIDGETS = ("wd-dropdown", "combobox", "button-group")
+
+
 def is_choice_field(field: FieldDescriptor) -> bool:
     t = (field.type or "").strip().lower()
-    return (bool(field.options) or t in ("radio", "checkbox", "select-one", "select-multiple")
+    return (bool(field.options)
+            or t in ("radio", "checkbox", "checkbox-group", "select-one", "select-multiple")
             or (field.tag or "").strip().lower() == "select"
-            or (field.widget or "") == "wd-dropdown")
+            or (field.widget or "") in CHOICE_WIDGETS)
 
 
 def _prefix_on_boundary(longer: str, shorter: str) -> bool:

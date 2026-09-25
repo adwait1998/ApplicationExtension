@@ -118,3 +118,23 @@ def test_unidentified_employer_answer_is_marked_for_review():
     r = answers.previously_employed_check(
         F(id="p", label="Have you previously been employed by this company?"), {}, url="")
     assert isinstance(r, FillResult) and r.value == "No" and r.draft is True
+
+
+@pytest.mark.parametrize("fd", [
+    F(id="c1", label="Are you open to relocation?", type="text", widget="combobox"),
+    F(id="c2", label="Are you open to relocation?", type="button-group", widget="button-group",
+      options=["Yes", "No"]),
+    F(id="c3", label="Are you open to relocation?", type="checkbox-group", options=["Yes", "No"]),
+])
+def test_new_widget_kinds_are_choice_fields(fd):
+    assert answers.is_choice_field(fd)
+    assert not answers.fits_choice("I know relocation can be hard, but I am open to it", fd)
+
+
+def test_combobox_still_gets_short_profile_values():
+    r = resolve.resolve_field(F(id="g", label="Gender", type="text", widget="combobox"), PROFILE)
+    assert isinstance(r, FillResult) and r.value == "Decline to self-identify"
+    r2 = resolve.resolve_field(F(id="c", label="Country", type="text", widget="combobox"), PROFILE)
+    assert isinstance(r2, FillResult) and r2.value == "United States"
+    r3 = resolve.resolve_field(F(id="e", label="Email", type="text", widget="combobox"), PROFILE)
+    assert not isinstance(r3, FillResult)   # an email address is never one of a menu's options
