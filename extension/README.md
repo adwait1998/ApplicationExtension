@@ -37,10 +37,13 @@ Every one of the guards above ALSO carries a hard, unconditional refusal for any
 own `data-automation-id` contains `bottom-navigation`, `submit`, `next`, or `save` — Workday's
 real "Submit"/"Next"/"Save and Continue" controls — regardless of how legitimate its shape
 otherwise looks. None of this runs on page load: every interaction above happens ONLY as part
-of an explicit "Scan & fill this page" click, and only while a capturing, document-level
-`submit` listener (`installSubmitShield()`) is installed for the ENTIRE fill (not just section
-expansion) to stop and report anything that slips through anyway — belt and braces on top of
-every guard above, not instead of them.
+of an explicit "Fill this page" click, and only while a single capturing, document-level
+`submit` listener (`installSubmitShield()`) is installed for the ENTIRE fill — repeating-section
+expansion, scanning, the `/resolve` round-trip, every field, and the résumé attach, in that
+order, with no gap between phases — to stop and report anything that slips through anyway —
+belt and braces on top of every guard above, not instead of them. A fill runs to completion in
+`content.js` regardless of whether the side panel is open, so this shield's lifetime is tied to
+the fill itself, never to the panel's UI.
 
 ## Loading it unpacked
 
@@ -48,7 +51,9 @@ every guard above, not instead of them.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select this `extension/` folder.
 4. Pin the extension (puzzle-piece icon in the toolbar → pin ApplyPilot Copilot) so it's easy
-   to reach.
+   to reach. Clicking the icon now opens the **side panel** (docked to the side of the window)
+   instead of a popup — see "Using it on a job application page" below for why.
+5. Requires Chrome 116 or newer (`chrome.sidePanel.setPanelBehavior`, added in 116).
 
 ## Connecting it to the local service
 
@@ -56,25 +61,33 @@ The extension talks to a companion service that runs on your machine (built sepa
 `src/applypilot/`, started with something like `applypilot serve-extension`). On first run
 that service prints a URL and a token.
 
-1. Right-click the extension icon → **Options** (or click **Settings** inside the popup).
+1. Right-click the extension icon → **Options** (or click **Settings** inside the side panel).
 2. Paste the **Service URL** (defaults to `http://127.0.0.1:8787` — it must always be
    `http://127.0.0.1`, the options page refuses anything else) and the **token**.
 3. Click **Save**, then **Test connection**. You should see which decision tiers the service
    reports (`canary`, `deterministic`, and — if the optional Laya model loaded — `laya`).
 
-If the service isn't running, or the token is wrong, the popup and options page show a plain
+If the service isn't running, or the token is wrong, the panel and options page show a plain
 error message instead of failing silently (see `background.js` — 401 → "token is wrong",
 fetch failure → "is the service running?", any other non-2xx → the status code and body).
 
 ## Using it on a job application page
 
+The review UI is a **side panel**, not a popup. This matters: Chrome destroys a popup's entire
+JS context the instant it loses focus, which used to kill a fill mid-way the moment a slow
+Workday page (or just clicking into DevTools) stole focus. The side panel's document stays alive
+across tab switches and focus changes, and a fill now runs independently of it anyway — see
+below.
+
 1. Open the application page and make sure it has loaded (React/Angular ATS pages often
    render the form async — wait for the fields to actually appear).
-2. Click the extension icon. It injects into **only this tab** (see "Permissions" below) and
-   reports how many fillable fields it can see — this is a cheap heuristic
-   (`content.js#detect`: 3+ fields, or 1+ field inside a `<form>`), not a real scan, and it
-   never fills anything by itself.
-3. Click **Scan & fill this page**. This is the only user action that writes to the DOM. It:
+2. Click the extension icon to open the panel (it opens once and stays docked — you don't need
+   to reopen it per tab or per page). **Nothing is injected into any page yet.** The panel
+   follows whichever tab is active in its window (`chrome.tabs.onActivated`/`onUpdated`), purely
+   to decide what to show you; it does not run anything on a tab just because you switched to
+   it.
+3. Click **Fill this page**. This is the only user action (besides **Report page**) that injects
+   the scanner into the tab, and the only one that writes to the DOM. It:
    - asks the local service how many `work_history`/`education` entries your profile has,
      and — only if that succeeds — clicks each repeating section's "Add Another" button
      (guarded, see above) just enough times to make room for them before scanning, capped at
@@ -86,35 +99,64 @@ fetch failure → "is the service running?", any other non-2xx → the status co
      single merged field and split back into both underlying controls on fill,
    - sends only the field metadata (labels, names, autocomplete, options — never page
      content, never your profile) to the local service,
-   - fills every field the service marked `auto_fill: true`, with a green outline and a
-     tooltip explaining what was filled and why,
+   - fills every field the service marked `auto_fill: true` **one at a time**, with a green
+     outline and a tooltip explaining what was filled and why, showing live progress in the
+     panel ("Filling 12/40 — Skills (adding 3/15)") as it goes,
    - leaves every other detected field alone, with an amber dashed outline and a tooltip
      explaining why it was skipped (e.g. a canary question like sponsorship or salary that
      has no safe automatic answer).
-4. Read the popup's Filled / Skipped list. **Review the page itself before submitting** —
-   the popup is a summary, not a substitute for looking at the actual form.
-5. If something's wrong, click **Undo fill** to restore every field's prior value.
+4. **This keeps running even if you close the panel, switch tabs, or the panel's window loses
+   focus.** The fill lives in the page's own content script, not in the panel — closing the
+   panel only stops you from watching it. Switch back (or reopen the panel) any time to see
+   where it's at, or the finished result.
+5. **Cancel** stops the fill between fields (and between items within a multi-value field like
+   Skills) — whatever was already filled stays filled and is reported; everything after that
+   point is reported as "not attempted — cancelled" so you know exactly what still needs doing.
+6. No single field can hang the fill: each one gets a ~12s timeout (reported as "timed out" and
+   skipped, not retried) and the whole fill gives up on any remaining fields after a ~120s
+   budget ("not attempted — time budget") rather than spinning forever on one stuck widget.
+7. Read the panel's Filled / Drafted / Need you / Could not fill lists. **Review the page itself
+   before submitting** — the panel is a summary, not a substitute for looking at the actual
+   form. Switching tabs and back shows that tab's own last result; if the tab has since
+   navigated to a different page, the panel says so ("from a previous page") rather than
+   presenting old results as current.
+8. If something's wrong, click **Undo** to restore every field's prior value. **Report page**
+   (unchanged) saves the form's structure — never values — for diagnosing a bad fill.
 
 ## Permissions, and why they're this narrow
 
-- `activeTab` + `scripting`: lets the popup inject `scanner.js`/`content.js` into the tab you
-  clicked the icon on, and only that tab, only after you clicked. There is **no**
-  `content_scripts` entry in `manifest.json` — the extension does not run on every page you
-  visit, and does not request `<all_urls>`.
-- `storage`: holds the service URL and token in `chrome.storage.local` (never synced).
-- `host_permissions`: `http://127.0.0.1/*` and `http://127.0.0.1:*/*` — the only host the
-  background worker is allowed to `fetch()`. It refuses to save a service URL that isn't
-  `127.0.0.1` (see `options.js`).
+- `activeTab` + `scripting`: lets the panel inject `scanner.js`/`capture.js`/`content.js` into a
+  tab, and only after you click **Fill this page** or **Report page** in it — never on load,
+  never just because you switched to that tab. There is **no** `content_scripts` entry in
+  `manifest.json` — the extension does not run on every page you visit.
+- `sidePanel`: lets `background.js` open the side panel when you click the toolbar icon
+  (`chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`) instead of the old
+  popup.
+- `host_permissions` — `http://127.0.0.1/*` and `http://127.0.0.1:*/*` (the only hosts the
+  background worker is allowed to `fetch()` — it refuses to save a service URL that isn't
+  `127.0.0.1`, see `options.js`), plus **`https://*/*` and `http://*/*`**. That second pair
+  looks broad, so it's worth explaining: because the panel is one persistent surface per
+  *window* rather than a popup you reopen per *tab*, it has to be able to draw the right UI
+  (and, once you click Fill, inject) for **whichever tab you switch to after opening it** — the
+  `activeTab` permission only ever covers the tab that was active at the moment of a click, and
+  cannot reach a tab you switch to afterwards. Declaring these two patterns is what makes that
+  possible. It does **not** widen when anything actually runs: injection is still 100%
+  on-demand, gated on a Fill/Report click, exactly as before — a broader `host_permissions` only
+  ever changes what the extension is *allowed* to be asked to do, never what it does
+  unprompted. `<all_urls>` itself is never requested.
+- `storage`: holds the service URL and token in `chrome.storage.local` (never synced), and is
+  also what backs `chrome.storage.session` — the per-tab fill-result store described below.
 
 ## Architecture / file map
 
 | File | Role |
 |---|---|
-| `manifest.json` | MV3 manifest — permissions, icons, popup, options page, service worker. |
+| `manifest.json` | MV3 manifest — permissions, icons, side panel, options page, service worker. |
 | `scanner.js` | Pure-DOM field scanning + filling logic. No `chrome.*` calls. Shared verbatim between the real content script and the offline Node self-test (see below). Exposes `ApplyPilotScanner` on the global object. |
-| `content.js` | The real content script. Loaded after `scanner.js` in the same isolated world. Listens for `DETECT` / `SCAN` / `APPLY_FILLS` / `UNDO` messages, owns the live element registry and the "prior value" snapshots used by Undo, and does all DOM highlighting. |
-| `background.js` | MV3 service worker. The only file that holds the token and calls `fetch()`. Talks to the local service's `/resolve` and `/health`. |
-| `popup.html` / `popup.js` / `popup.css` | The review panel: injects the content script, drives the scan → resolve → fill flow, renders Filled/Skipped/Failed, and the Undo button. |
+| `content.js` | The real content script. Loaded after `scanner.js` in the same isolated world. Listens for `START_FILL` / `CANCEL_FILL` / `DETECT` / `UNDO` / `CAPTURE` messages. Runs the ENTIRE fill pipeline itself (expand → scan → resolve → apply, one field at a time with a per-field timeout and an overall time budget → résumé attach) so it survives the side panel closing; reports live progress and the final result to `background.js` via `chrome.runtime.sendMessage`, never by returning a value the panel has to stay open to receive. Owns the live element registry and the "prior value" snapshots used by Undo, and does all DOM highlighting. |
+| `capture.js` | "Report page" structure capture — page furniture (tags, roles, labels, option lists) only, never field values. See "Field scanning notes" / privacy note in its own header. |
+| `background.js` | MV3 service worker. The only file that holds the token and calls `fetch()` (talks to the local service's `/resolve`, `/health`, `/profile/counts`, `/resume`), and the only file that writes `chrome.storage.session`. Sets `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` so the toolbar icon opens the panel. Persists every `FILL_STATE_UPDATE` from `content.js` into `chrome.storage.session` keyed `fillState_<tabId>` (per-tab writes are queued so two updates from the same tab can never race each other), and cleans that entry up on `chrome.tabs.onRemoved`. |
+| `sidepanel.html` / `sidepanel.js` / `sidepanel.css` | The review UI (replaces the old popup — see "Using it on a job application page"). A pure renderer: reads `chrome.storage.session` (plus `chrome.storage.onChanged` for live updates) for whichever tab is active in its window, and only ever tells `content.js` what to do (`START_FILL`/`CANCEL_FILL`/`UNDO`/`CAPTURE`) — it never writes fill-result state itself. Supports an optional `?tabId=` query parameter that pins it to a specific tab instead of following the active tab; this exists **only** for `scripts/chrome_panel_test.py` and must never change behavior when absent. |
 | `options.html` / `options.js` | Where you paste the service URL and token. |
 | `icons/` | `icon16.png` / `icon48.png` / `icon128.png` — generated with a tiny Node script using only the core `zlib` module (flat-color square + circle badge). No external assets. |
 | `test-page.html` | An offline mock application form exercising every label-resolution pattern, a select, a radio group with `<fieldset>/<legend>`, a textarea, deliberately-excluded fields (hidden, `aria-hidden`, `display:none`), an auto-generated-looking id, a simulated React-controlled input, and — in its own `#wd-form` — real-Workday-shaped fixtures for every widget in "Workday widget notes" below, plus a decoy `bottom-navigation-submit-button`. |
@@ -144,8 +186,9 @@ fetch failure → "is the service running?", any other non-2xx → the status co
 - Same-origin iframes are scanned too (`scanAll()` walks `document.querySelectorAll('iframe')`
   and recurses into any `contentDocument` it can reach without throwing). **Cross-origin
   iframes are skipped** — a normal content script cannot read into them, and rather than
-  guess, the extension reports how many frames it skipped (popup status line, and
-  `detect().skippedFrames`) so you know to fill those fields by hand. This matters in
+  guess, the extension reports how many frames it skipped (in the fill summary line, from
+  `state.skippedFrames`, once a fill runs — see `content.js#detect`/`scanAll`) so you know to
+  fill those fields by hand. This matters in
   practice: some ATS integrations (e.g. a Greenhouse or Lever form embedded via `<iframe>` on
   a company's own careers page, hosted from `boards.greenhouse.io`/`jobs.lever.co`) are
   cross-origin from the parent page and will be skipped for this reason.
@@ -226,7 +269,7 @@ natively), matched against each radio's resolved label text.
 
 Before writing any field, `content.js` snapshots its current value (`getCurrentValue()`) —
 text, select value, checkbox boolean, or checked radio's value/none — keyed by field id.
-**Undo fill** replays those snapshots through the same `applyFill()` path used to fill them
+**Undo** replays those snapshots through the same `applyFill()` path used to fill them
 (so it survives React's controlled-input re-renders the same way filling does) and removes
 every highlight it added.
 
@@ -236,8 +279,9 @@ every highlight it added.
   real-world gap, since several ATS platforms are commonly embedded this way.
 - **Multi-step / dynamically-inserted forms**: if a form renders new fields after you click
   "Next" without a full page navigation (common in Workday and some Greenhouse flows), you
-  need to re-open the popup and click "Scan & fill" again for the newly-visible step — the
-  extension only scans what's in the DOM at the moment you click, on purpose (no
+  need to click "Fill this page" again (the panel is already open — no need to reopen it) for the
+  newly-visible step — the extension only scans what's in the DOM at the moment you click, on
+  purpose (no
   MutationObserver auto-fill, per the "nothing runs automatically" rule). It DOES now handle
   the narrower "Add Another" case within a single step (Workday's "My Experience" repeating
   work-history/education blocks) — see "The one rule that matters" above — but only for the
@@ -262,13 +306,17 @@ every highlight it added.
 
 ## Verifying this without a live browser
 
-I do not have a way to drive a real Chrome instance or a live ATS page from here. What I could
-and did verify:
+Live ATS pages (real Greenhouse/Workday/etc. applications behind a login, mid-application state)
+are still out of reach from here — see "Manual verification in a real browser" below for those.
+Everything else has moved to real, automated verification over time
+(`scripts/chrome_load_test.py`, `scripts/chrome_panel_test.py` — real Chromium via Playwright,
+`--load-extension` and all); what follows is what's checked, split between what a live browser
+can prove and what a plain offline check already covers:
 
 - `node --check` on every `.js` file.
 - `manifest.json` parses as JSON and has the required MV3 keys (`manifest_version: 3`,
-  `background.service_worker`, `action.default_popup`, `options_page`, narrow
-  `permissions`/`host_permissions`).
+  `background.service_worker`, `side_panel.default_path`, `options_page`, narrow
+  `permissions`/`host_permissions`, no `action.default_popup` — see `chrome_panel_test.py`).
 - The three generated PNG icons have valid PNG signatures and the declared dimensions
   (16/48/128).
 - **`selftest.js`**, run under Node with `jsdom` (installed only in a scratch/dev directory,
@@ -298,9 +346,26 @@ and did verify:
   `DragEvent` (so the résumé attach's actual file assignment, Workday's own File-consuming
   behavior, and the drop-zone dispatch are untestable end-to-end here), no `chrome.*` APIs (so
   none of `content.js`'s message handling, its whole-fill submit-shield install/removal, or
-  `popup.js` can be exercised by this harness at all — only `scanner.js`'s exported functions
-  are), and no real network — is called out inline in that file's comments and confirmed
-  separately via `scripts/chrome_load_test.py` instead.
+  the side panel can be exercised by this harness at all — only `scanner.js`'s exported
+  functions are), and no real network — is called out inline in that file's comments and
+  confirmed separately via `scripts/chrome_load_test.py` instead.
+- **`scripts/chrome_panel_test.py`** (same real-Chromium-via-Playwright approach as
+  `chrome_load_test.py`, `--load-extension` and all) exercises everything this README's
+  "Using it on a job application page" section above describes that `chrome_load_test.py`
+  cannot: it asserts the manifest has no `default_popup` and does declare `side_panel`; that the
+  panel page itself loads; that clicking **Fill this page** in a real panel drives a real fill
+  against a tiny stub of the local service (no live `applypilot serve-extension` needed — the
+  stub binds an OS-assigned free port so it can never collide with a real one) and that the
+  result lands in `chrome.storage.session` keyed per tab; that a second tab gets independent
+  state (and that filling it never disturbs the first tab's stored result); that
+  `chrome.storage.onChanged` actually fires multiple times with advancing progress while a fill
+  is running; that **Cancel** stops a fill partway through (some fields filled and kept, the
+  rest reported as "not attempted — cancelled"), well before the fill would have finished on its
+  own; that a field patched (via `chrome.scripting.executeScript`, from outside the extension —
+  no source file is modified) to never resolve is reported as "timed out" without stalling the
+  other 30+ fields on the same page; that closing a tab clears its `chrome.storage.session`
+  entry; and that none of the above ever submits the mock form. Run it the same way as
+  `chrome_load_test.py` (below).
 - A separate ad hoc script (not committed — it lived in the scratch directory) exercised the
   **filling** path against the same jsdom page: confirmed `applyFill()` on the simulated
   React-controlled input survives the page's own revert-on-re-render loop (while a raw
@@ -311,17 +376,20 @@ and did verify:
 
 ### Manual verification in a real browser
 
-Not yet done — no live Chrome session available here. To finish verifying by hand:
+Most of this is now covered automatically by `scripts/chrome_load_test.py` and
+`scripts/chrome_panel_test.py` (real Chromium via Playwright — see above): the scanner against a
+real layout engine, every Workday widget, the submit shield, and now the side panel itself
+(manifest wiring, per-tab state, live progress, Cancel, the per-field timeout, zero
+submissions). What's left is genuinely manual — things automation on a mock page can't tell you:
 
-1. Load the extension unpacked (see above), open `test-page.html` directly (`file://.../
-   extension/test-page.html`), and confirm the popup detects the expected field count.
-2. Without a running local service, click **Scan & fill this page** and confirm the popup
-   shows a clear "service unreachable" message rather than failing silently or throwing.
-3. Start a stub or real `/resolve` service, click **Scan & fill this page**, and visually
-   confirm: green outlines on filled fields with correct tooltips, amber on skipped fields,
-   the `react_input` field's value actually sticks (open DevTools and watch it survive the
-   page's `setInterval`), the select's chosen option is visibly selected, the radio group
-   shows the correct option checked, and **Undo fill** restores everything.
+1. Load the extension unpacked (see above), open a real job application page, click the toolbar
+   icon, and confirm the side panel opens docked to the window (not a popup) and stays open when
+   you click into DevTools or switch tabs and back.
+2. Without a running local service, click **Fill this page** and confirm the panel shows a clear
+   "service unreachable" message rather than failing silently or throwing.
+3. Start the real `applypilot serve-extension`, click **Fill this page** on a real page, and
+   visually confirm: green outlines on filled fields with correct tooltips, amber on skipped
+   fields, live progress text while it runs, and **Undo** restores everything.
 4. Try it against a real Greenhouse/Lever/Ashby/Workday application page to see how the label
    heuristics and selector generation hold up outside the mock page — this is exactly the
    class of thing the mock page can't fully substitute for.

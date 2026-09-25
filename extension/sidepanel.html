@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>ApplyPilot Copilot</title>
-<link rel="stylesheet" href="popup.css">
+<link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
   <header>
@@ -16,13 +16,24 @@
 
   <div class="reminder">
     You review and submit. This extension never clicks submit and never navigates — it only
-    fills fields and highlights what it did.
+    fills fields and highlights what it did. This panel stays open across tab switches; nothing
+    runs on a page until you click Fill or Report on that tab.
   </div>
+
+  <div id="staleBanner" class="stale-banner" hidden></div>
 
   <div id="statusBox" class="status"></div>
 
+  <div id="progressBox" class="progress-box" hidden>
+    <div class="progress-label" id="progressLabel"></div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
   <div class="actions">
     <button id="scanBtn" class="primary">Fill this page</button>
+    <button id="cancelBtn" class="secondary cancel" hidden>Cancel</button>
+  </div>
+  <div class="actions">
     <button id="undoBtn" class="secondary" disabled>Undo</button>
     <button id="reportBtn" class="secondary" title="Save this page's form structure (no values) to diagnose a bad fill">Report page</button>
   </div>
@@ -36,6 +47,6 @@
     <span id="tiersLine"></span>
   </footer>
 
-  <script src="popup.js"></script>
+  <script src="sidepanel.js"></script>
 </body>
 </html>

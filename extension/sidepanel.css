@@ -58,8 +58,15 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  height: 100%;
+}
+
 body {
-  width: 360px;
+  /* A side panel is resized by the user, not fixed like a popup — flex to whatever width
+     Chrome gives it (with a sane floor) instead of the old fixed 360px popup width. */
+  width: 100%;
+  min-width: 280px;
   margin: 0;
   font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   font-size: 13px;
@@ -117,6 +124,17 @@ header {
   line-height: 1.4;
 }
 
+.stale-banner {
+  margin: 8px 12px 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn);
+}
+
 .status {
   margin: 10px 12px 0;
   font-size: 12px;
@@ -125,11 +143,39 @@ header {
 }
 .status.err { color: var(--err); }
 
+/* -- live fill progress: shown only while a fill is running in the page, driven entirely by
+   chrome.storage.session updates written by background.js on content.js's behalf -- */
+.progress-box {
+  margin: 8px 12px 0;
+}
+.progress-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent-strong);
+  transition: width 0.2s ease;
+}
+
 .actions {
   display: flex;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 12px 0;
 }
+.actions:last-of-type { padding-bottom: 12px; }
 
 button.primary, button.secondary {
   flex: 1;
@@ -158,6 +204,11 @@ button.secondary {
 }
 button.secondary:hover { background: var(--card-2); }
 button.secondary:disabled { color: var(--text-faint); cursor: not-allowed; }
+button.secondary.cancel {
+  color: var(--err);
+  border-color: var(--err-border);
+}
+button.secondary.cancel:hover { background: var(--err-bg); }
 
 /* -- result summary: the one line that tells the operator what happened -- */
 .fill-summary {
@@ -185,7 +236,7 @@ button.secondary:disabled { color: var(--text-faint); cursor: not-allowed; }
 
 /* -- drafts nudge: shown under "Need you" when an open-ended question was left for the
    human and drafts are off. Blue, matching the "draft" palette used elsewhere in this
-   popup, since it's pointing at the same feature. -- */
+   panel, since it's pointing at the same feature. -- */
 .draft-hint {
   margin: 8px 0 4px;
   padding: 7px 8px;
@@ -198,7 +249,7 @@ button.secondary:disabled { color: var(--text-faint); cursor: not-allowed; }
 }
 
 .results {
-  max-height: 340px;
+  max-height: 60vh;
   overflow-y: auto;
   padding: 0 12px 8px;
 }

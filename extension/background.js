@@ -4,13 +4,57 @@
  * This is the ONLY place that talks to the local ApplyPilot service. It holds the token
  * (read from chrome.storage.local — never synced to a Google account) and makes the fetch
  * calls, which keeps the token out of every page's JS context. Content scripts and the
- * popup only ever talk to this worker via chrome.runtime.sendMessage.
+ * side panel only ever talk to this worker via chrome.runtime.sendMessage.
  *
  * This file never fetches, clicks, or navigates any tab. It only ever calls the local
  * 127.0.0.1 service.
+ *
+ * This is also the ONLY place that writes chrome.storage.session (content scripts default to
+ * NO access to chrome.storage.session, and this file never grants them any via
+ * setAccessLevel() — every fill-progress/result write below arrives here as a
+ * FILL_STATE_UPDATE message FROM content.js and is persisted keyed by that sender tab's id, so
+ * a fill result survives the side panel closing, a tab switch, or this worker itself being
+ * restarted — see content.js's file header and README.md).
  */
 
 var DEFAULT_SERVICE_URL = 'http://127.0.0.1:8787';
+
+// Clicking the toolbar icon opens the side panel directly (no popup) — set at top level so it
+// takes effect as soon as this worker first registers, per chrome.sidePanel's own docs. Guarded
+// for environments (e.g. an older Chrome hitting this file directly) where the API is absent.
+if (self.chrome && chrome.sidePanel && typeof chrome.sidePanel.setPanelBehavior === 'function') {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(function () {});
+}
+
+// ---------------------------------------------------------------------
+// per-tab fill state — chrome.storage.session, keyed by tab id
+// ---------------------------------------------------------------------
+//
+// One key per tab (rather than one shared object) so two tabs filling at the same time can
+// never race each other's read-modify-write, and so a listing/cleanup never has to parse a
+// giant shared blob. Content.js sends the FULL current snapshot on every update (never a
+// partial patch), so writing here is always a plain overwrite — no merge, so no lost-update
+// race with the browser's own storage IPC either.
+function tabStateKey(tabId) {
+  return 'fillState_' + tabId;
+}
+
+// Per-tab promise chain so that if two FILL_STATE_UPDATE messages from the SAME tab are ever
+// dispatched to this listener before the first one's storage.session.set() resolves, the writes
+// still land in the order they were sent rather than however their underlying promises happen
+// to settle.
+var tabWriteQueues = Object.create(null);
+function queueTabWrite(tabId, fn) {
+  var prev = tabWriteQueues[tabId] || Promise.resolve();
+  var next = prev.then(fn, fn);
+  tabWriteQueues[tabId] = next.catch(function () {});
+  return next;
+}
+
+chrome.tabs.onRemoved.addListener(function (tabId) {
+  delete tabWriteQueues[tabId];
+  chrome.storage.session.remove(tabStateKey(tabId)).catch(function () {});
+});
 
 function getConfig() {
   return chrome.storage.local.get(['serviceUrl', 'token']).then(function (data) {
@@ -202,6 +246,25 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'PROFILE_COUNTS') {
     callProfileCounts().then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'FILL_STATE_UPDATE') {
+    // Only ever sent by content.js, whose sender.tab is always populated (a real tab, never
+    // the side panel or options page). Silently ignored otherwise rather than throwing.
+    if (!sender || !sender.tab || typeof sender.tab.id !== 'number') {
+      sendResponse({ ok: false, error: 'no sender tab' });
+      return false;
+    }
+    var tabId = sender.tab.id;
+    queueTabWrite(tabId, function () {
+      var obj = {};
+      obj[tabStateKey(tabId)] = msg.state;
+      return chrome.storage.session.set(obj);
+    }).then(function () {
+      sendResponse({ ok: true });
+    }, function (e) {
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+    });
     return true;
   }
   return false;
