@@ -322,6 +322,25 @@
   #profileEditor.disabled { opacity: 0.5; pointer-events: none; }
 
   .save-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+
+  /* -- skills editor (profile.skills_boundary) -------------------------- */
+  .skills-category {
+    border: 1px solid var(--border-soft); border-radius: 8px;
+    padding: 10px 12px 12px; margin-bottom: 10px; background: var(--card-2);
+  }
+  .skills-category-head { display: flex; gap: 8px; align-items: center; }
+  .skills-category-name { flex: 1; font-weight: 600; }
+  .skills-chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; min-height: 0; }
+  .skill-chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+    padding: 4px 4px 4px 10px; border-radius: 999px; background: var(--card);
+    border: 1px solid var(--border); color: var(--text);
+  }
+  .skill-chip-remove {
+    border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 999px;
+  }
+  .skill-chip-remove:hover { color: var(--err); filter: none; }
 </style>
 </head>
 <body>
@@ -663,6 +682,17 @@
           <div><label for="s_howheard">How did you hear about us?</label>
             <input type="text" id="s_howheard" data-path="screening.how_heard" placeholder="e.g. LinkedIn"></div>
         </div>
+      </div>
+    </details>
+
+    <details class="section" id="sectionSkills">
+      <summary><span class="section-title">Skills</span></summary>
+      <div class="section-body">
+        <div class="hint" style="margin-top:4px;">
+          Filled into Skills fields and used to pick skill tags on Workday. Remove anything that isn't yours.
+        </div>
+        <div id="skillsCategoryList"></div>
+        <button type="button" class="secondary small" id="addSkillCategoryBtn">+ Add category</button>
       </div>
     </details>
 

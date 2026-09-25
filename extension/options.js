@@ -471,6 +471,7 @@
 
     renderRepeatable(workHistoryListEl, workHistoryTemplate, profileData.work_history || [], 'Position');
     renderRepeatable(educationListEl, educationTemplate, profileData.education || [], 'Education');
+    renderSkills();
 
     applyProvenanceMarks();
     updateSectionMeta();
@@ -558,6 +559,155 @@
     return out;
   }
 
+  // -- skills editor (profile.skills_boundary: {category: [skill, ...]}) --------
+  //
+  // Category names are free-form (a résumé import writes things like
+  // "languages", "data_platform", or "skills") so, unlike work_history/education,
+  // this isn't a fixed template repeated per item — each category gets its own
+  // block with an editable name, a list of removable skill chips, and an
+  // add-skill input. Rendered from profileData.skills_boundary on load/switch;
+  // collectSkillsIntoProfileData() rebuilds the whole object fresh from the DOM
+  // on every input/change and on Save, the same "DOM is the source of truth at
+  // save time" pattern collectRepeatable() uses above.
+
+  var skillsCategoryListEl = document.getElementById('skillsCategoryList');
+  var addSkillCategoryBtn = document.getElementById('addSkillCategoryBtn');
+
+  function addSkillChip(chipListEl, skill) {
+    skill = String(skill == null ? '' : skill).trim();
+    if (!skill) return;
+    var exists = Array.prototype.some.call(chipListEl.querySelectorAll('.skill-chip'), function (c) {
+      return c.getAttribute('data-skill') === skill;
+    });
+    if (exists) return;
+
+    var chip = document.createElement('span');
+    chip.className = 'skill-chip';
+    chip.setAttribute('data-skill', skill);
+
+    var label = document.createElement('span');
+    label.textContent = skill;
+
+    var rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'skill-chip-remove';
+    rm.setAttribute('aria-label', 'Remove ' + skill);
+    rm.textContent = '×';
+    rm.addEventListener('click', function () {
+      chip.remove();
+      updateCompleteness();
+    });
+
+    chip.appendChild(label);
+    chip.appendChild(rm);
+    chipListEl.appendChild(chip);
+  }
+
+  function addSkillCategoryBlock(name, skills) {
+    var block = document.createElement('div');
+    block.className = 'skills-category';
+
+    var head = document.createElement('div');
+    head.className = 'skills-category-head';
+
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'skills-category-name';
+    nameInput.value = name || '';
+    nameInput.placeholder = 'category name, e.g. languages';
+    nameInput.autocomplete = 'off';
+    nameInput.spellcheck = false;
+    nameInput.setAttribute('aria-label', 'Skill category name');
+
+    var removeCatBtn = document.createElement('button');
+    removeCatBtn.type = 'button';
+    removeCatBtn.className = 'danger small';
+    removeCatBtn.textContent = 'Remove category';
+    removeCatBtn.addEventListener('click', function () {
+      block.remove();
+      updateCompleteness();
+    });
+
+    head.appendChild(nameInput);
+    head.appendChild(removeCatBtn);
+
+    var chipList = document.createElement('div');
+    chipList.className = 'skills-chip-list';
+    (skills || []).forEach(function (s) { addSkillChip(chipList, s); });
+
+    var addRow = document.createElement('div');
+    addRow.className = 'row';
+
+    var newSkillInput = document.createElement('input');
+    newSkillInput.type = 'text';
+    newSkillInput.placeholder = 'add a skill and press Enter';
+    newSkillInput.autocomplete = 'off';
+    newSkillInput.spellcheck = false;
+
+    var addSkillBtn = document.createElement('button');
+    addSkillBtn.type = 'button';
+    addSkillBtn.className = 'secondary small';
+    addSkillBtn.textContent = 'Add';
+
+    function commitNewSkill() {
+      addSkillChip(chipList, newSkillInput.value);
+      newSkillInput.value = '';
+      newSkillInput.focus();
+      updateCompleteness();
+    }
+    addSkillBtn.addEventListener('click', commitNewSkill);
+    newSkillInput.addEventListener('keydown', function (evt) {
+      if (evt.key === 'Enter') { evt.preventDefault(); commitNewSkill(); }
+    });
+
+    addRow.appendChild(newSkillInput);
+    addRow.appendChild(addSkillBtn);
+
+    block.appendChild(head);
+    block.appendChild(chipList);
+    block.appendChild(addRow);
+    skillsCategoryListEl.appendChild(block);
+  }
+
+  function renderSkills() {
+    skillsCategoryListEl.innerHTML = '';
+    var boundary = profileData.skills_boundary;
+    if (boundary && typeof boundary === 'object') {
+      Object.keys(boundary).forEach(function (cat) {
+        var v = boundary[cat];
+        addSkillCategoryBlock(cat, Array.isArray(v) ? v : []);
+      });
+    }
+  }
+
+  addSkillCategoryBtn.addEventListener('click', function () {
+    addSkillCategoryBlock('', []);
+    var names = skillsCategoryListEl.querySelectorAll('.skills-category-name');
+    var last = names[names.length - 1];
+    if (last) last.focus();
+    updateCompleteness();
+  });
+
+  function collectSkillsIntoProfileData() {
+    var out = {};
+    skillsCategoryListEl.querySelectorAll('.skills-category').forEach(function (block) {
+      var name = (block.querySelector('.skills-category-name').value || '').trim();
+      if (!name) return; // an unnamed category is dropped rather than saved as ""
+      var skills = Array.prototype.map.call(
+        block.querySelectorAll('.skill-chip'),
+        function (c) { return c.getAttribute('data-skill'); }
+      );
+      if (out[name]) {
+        // Two categories renamed to the same name: merge rather than let the
+        // second silently clobber the first.
+        skills.forEach(function (s) { if (out[name].indexOf(s) === -1) out[name].push(s); });
+      } else {
+        out[name] = skills;
+      }
+    });
+    profileData.skills_boundary = out;
+  }
+
   // -- saving -------------------------------------------------------------------
 
   function collectFormIntoProfileData() {
@@ -580,6 +730,7 @@
       workHistoryListEl, ['title', 'company', 'location', 'start', 'end', 'current', 'description']);
     profileData.education = collectRepeatable(
       educationListEl, ['school', 'degree', 'field', 'start', 'end']);
+    collectSkillsIntoProfileData();
   }
 
   saveProfileBtn.addEventListener('click', function () {
