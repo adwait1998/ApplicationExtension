@@ -194,6 +194,24 @@ and résumé, against the job behind the page you're looking at:
    against", or the draft was refused because it claimed experience the profile doesn't have — see
    `grounding.py`) is shown **verbatim** — the service's own `detail` text, not a generic failure.
 
+## Remember my answers
+
+After a fill, if it left anything for you to answer yourself, the panel shows a **Remember my
+answers** button. Clicking it (never automatic):
+
+1. `content.js` reads the CURRENT value of exactly the fields that fill's "needs you" list named
+   (by field id) — non-empty only, and never a password or file field, regardless of what's typed
+   into one.
+2. `background.js` sends each one to `POST /answers/learn` with that field's own resolved label as
+   the question, then the panel shows what was **saved** and what was **skipped** (with the
+   reason the service gave — a canary question, a screening attestation, something
+   company-specific, ...; see `answer_memory.py`).
+3. Saved answers join the active profile's own answer bank, so the answer-bank tier fills them
+   automatically next time the same (or a very similarly worded) question comes up.
+
+If nothing you were left with has an answer typed in yet, clicking the button says so and makes no
+service call at all.
+
 ## Fill every frame
 
 About a quarter of real job postings are a company's own careers page embedding the actual

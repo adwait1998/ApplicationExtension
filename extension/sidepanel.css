@@ -300,6 +300,31 @@ button.secondary.cancel:hover { background: var(--err-bg); }
 }
 .cover-letter-box .actions { padding: 10px 0 0; }
 
+/* -- remember my answers (item 3) -- */
+.remember-box { padding: 0 12px 8px; }
+.remember-box .actions { padding: 0 0 8px; }
+.remember-status {
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info);
+}
+.remember-status.error { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+.remember-status.ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
+.remember-details { display: flex; flex-direction: column; gap: 4px; }
+.remember-row {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.remember-row.saved { background: var(--ok-bg); border: 1px solid var(--ok-border); }
+.remember-row.skipped { background: var(--warn-bg); border: 1px solid var(--warn-border); }
+
 .results {
   max-height: 60vh;
   overflow-y: auto;

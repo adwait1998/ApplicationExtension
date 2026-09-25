@@ -465,6 +465,70 @@ function callCoverLetter(urls, pageText) {
 }
 
 // ---------------------------------------------------------------------
+// REMEMBER MY ANSWERS (item 3) — POST /answers/learn {items:[{question,answer}]} ->
+// {saved:[question...], skipped:[{question, reason}...]}. Never automatic — only ever called
+// from rememberAnswersForTab() below, itself only ever triggered by the panel's own click.
+// ---------------------------------------------------------------------
+function callAnswersLearnRaw(items) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/answers/learn', { items: items || [] }, handleResponseVerbatim);
+  });
+}
+function callAnswersLearn(items) {
+  return requestWithAutoConnect(function () { return callAnswersLearnRaw(items); });
+}
+
+/**
+ * "Remember my answers": rereads the CURRENT value of every field this tab's last fill left for
+ * the human (state.needsYou — qualified ids, see applyFrameReport()), grouped by the frame each
+ * one actually lives in (exactly one READ_FIELDS_FOR_ANSWERS round trip per frame that has any),
+ * and hands the non-empty ones to /answers/learn with that field's own resolved label as the
+ * question. content.js is what enforces "non-empty only, never passwords/files" (see
+ * readFieldsForAnswers() there) — this function only routes to the right frames and re-attaches
+ * each answer to the label the fill already worked out, since content.js's reply is just
+ * {id -> value}, not full field metadata.
+ */
+function rememberAnswersForTab(tabId) {
+  return chrome.storage.session.get(tabStateKey(tabId)).then(function (stored) {
+    var state = stored[tabStateKey(tabId)];
+    var needsYou = (state && state.needsYou) || [];
+    var byFrame = {}; // frameId -> [{ localId, label }]
+    needsYou.forEach(function (n) {
+      var parts = splitQualifiedId(n.id);
+      if (!parts) return;
+      byFrame[parts.frameId] = byFrame[parts.frameId] || [];
+      byFrame[parts.frameId].push({ localId: parts.localId, label: n.label || '' });
+    });
+    var frameIds = Object.keys(byFrame);
+    if (!frameIds.length) {
+      return { ok: true, data: { saved: [], skipped: [] }, noAnswersFound: true };
+    }
+    return Promise.all(frameIds.map(function (frameIdStr) {
+      var frameId = parseInt(frameIdStr, 10);
+      var localIds = byFrame[frameIdStr].map(function (e) { return e.localId; });
+      return chrome.tabs.sendMessage(tabId, { type: 'READ_FIELDS_FOR_ANSWERS', ids: localIds }, { frameId: frameId })
+        .then(function (resp) { return { frameIdStr: frameIdStr, values: (resp && resp.values) || {} }; })
+        .catch(function () { return { frameIdStr: frameIdStr, values: {} }; });
+    })).then(function (perFrame) {
+      var items = [];
+      perFrame.forEach(function (pf) {
+        (byFrame[pf.frameIdStr] || []).forEach(function (e) {
+          var val = pf.values[e.localId];
+          if (val != null && String(val).trim() !== '') {
+            items.push({ question: e.label, answer: String(val) });
+          }
+        });
+      });
+      if (!items.length) {
+        return { ok: true, data: { saved: [], skipped: [] }, noAnswersFound: true };
+      }
+      return callAnswersLearn(items);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
 // cross-frame coordination — see the file header.
 // ---------------------------------------------------------------------
 
@@ -887,6 +951,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'DRAFT_COVER_LETTER') {
     callCoverLetter(msg.urls, msg.pageText).then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'REMEMBER_ANSWERS') {
+    rememberAnswersForTab(msg.tabId).then(sendResponse, function (e) {
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+    });
     return true;
   }
   if (msg.type === 'FILL_STATE_UPDATE') {

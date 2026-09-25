@@ -1080,6 +1080,35 @@
     });
   }
 
+  // ---------------------------------------------------------------------
+  // REMEMBER MY ANSWERS (item 3) — background.js's rememberAnswersForTab() asks this frame to
+  // read back the CURRENT value of specific fields (by LOCAL id — background.js has already
+  // stripped the frame qualifier off before sending this) once the operator has typed answers
+  // into whatever a fill left for them and clicks the panel's button. Never automatic. Deliberately
+  // excludes anything password/file-shaped and anything still empty — those are simply left out
+  // of the returned map rather than included as "" or a placeholder value.
+  // ---------------------------------------------------------------------
+  function readFieldsForAnswers(ids) {
+    var values = {};
+    (ids || []).forEach(function (id) {
+      var entry = registry[id];
+      if (!entry) return;
+      var els = entryElements(entry);
+      var isSensitive = els.some(function (el) {
+        if (!el || el.tagName !== 'INPUT') return false;
+        var t = String(el.type || '').toLowerCase();
+        return t === 'password' || t === 'file';
+      });
+      if (isSensitive) return;
+      var val;
+      try { val = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { return; }
+      if (val == null || typeof val === 'boolean') return; // a checkbox's true/false isn't answer text
+      var text = String(val).trim();
+      if (text) values[id] = text;
+    });
+    return values;
+  }
+
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || typeof msg !== 'object') return false;
 
@@ -1216,6 +1245,10 @@
       if (msg.type === 'INSERT_COVER_LETTER') {
         insertCoverLetterDraft(msg.fieldId, String(msg.text || '')).then(sendResponse);
         return true; // async response
+      }
+      if (msg.type === 'READ_FIELDS_FOR_ANSWERS') {
+        sendResponse({ ok: true, values: readFieldsForAnswers(msg.ids) });
+        return false;
       }
     } catch (e) {
       sendResponse({ error: String(e && e.message ? e.message : e) });

@@ -59,6 +59,12 @@
   var coverLetterDownloadBtn = document.getElementById('coverLetterDownloadBtn');
   var coverLetterInsertBtn = document.getElementById('coverLetterInsertBtn');
 
+  // -- remember my answers (item 3) --
+  var rememberBoxEl = document.getElementById('rememberBox');
+  var rememberBtn = document.getElementById('rememberBtn');
+  var rememberStatusEl = document.getElementById('rememberStatus');
+  var rememberDetailsEl = document.getElementById('rememberDetails');
+
   // TEST-ONLY: "?tabId=<id>" pins this panel instance to a specific tab for its whole lifetime
   // instead of following chrome.tabs.onActivated/onUpdated in its own window. This exists
   // purely so scripts/chrome_panel_test.py can point two independent panel page loads at two
@@ -438,6 +444,7 @@
       fillSummaryEl.hidden = true;
       resumeLineEl.hidden = true;
       resultsBox.innerHTML = '';
+      rememberBoxEl.hidden = true;
       return;
     }
 
@@ -450,6 +457,11 @@
     fillSummaryEl.textContent = line;
     renderResumeLine(state.resume);
     await renderResults(state);
+
+    // "Remember my answers" (item 3) only makes sense once there's at least one field a fill
+    // left for the operator to answer themselves, on a result that's actually current for this
+    // page (never a stale, previous-page result — see `stale` above).
+    rememberBoxEl.hidden = stale || !((state.needsYou || []).length > 0);
   }
 
   function setActiveTab(tabId) {
@@ -459,6 +471,9 @@
     coverLetterFieldForTab = null;
     coverLetterBoxEl.hidden = true;
     setCoverLetterStatus('');
+    // Likewise, a "Saved N answers" confirmation is specific to whichever tab/fill produced it.
+    setRememberStatus('');
+    rememberDetailsEl.innerHTML = '';
     renderForTab(tabId);
   }
 
@@ -755,6 +770,63 @@
       setCoverLetterStatus('Could not insert the draft: ' + (e && e.message ? e.message : e), 'error');
     } finally {
       coverLetterInsertBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // REMEMBER MY ANSWERS (item 3). Never automatic — only ever runs on this click. All the actual
+  // work (reading the right frames' current field values, filtering, calling /answers/learn)
+  // happens in background.js's rememberAnswersForTab(); this is a thin renderer for its result.
+  // ---------------------------------------------------------------------
+  function setRememberStatus(text, kind) {
+    if (!text) { rememberStatusEl.hidden = true; rememberStatusEl.textContent = ''; return; }
+    rememberStatusEl.hidden = false;
+    rememberStatusEl.textContent = text;
+    rememberStatusEl.className = 'remember-status' + (kind ? ' ' + kind : '');
+  }
+
+  function renderRememberDetails(saved, skipped) {
+    rememberDetailsEl.innerHTML = '';
+    (saved || []).forEach(function (q) {
+      var row = document.createElement('div');
+      row.className = 'remember-row saved';
+      row.textContent = 'Saved: ' + q;
+      rememberDetailsEl.appendChild(row);
+    });
+    (skipped || []).forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'remember-row skipped';
+      row.textContent = (s.question || '(no question text)') + ' — ' + (s.reason || 'skipped');
+      rememberDetailsEl.appendChild(row);
+    });
+  }
+
+  rememberBtn.addEventListener('click', async function () {
+    if (activeTabId == null) return;
+    rememberBtn.disabled = true;
+    setRememberStatus('Saving…');
+    rememberDetailsEl.innerHTML = '';
+    try {
+      var resp = await chrome.runtime.sendMessage({ type: 'REMEMBER_ANSWERS', tabId: activeTabId });
+      if (!resp || !resp.ok) {
+        setRememberStatus((resp && (resp.detail || resp.message)) || 'Could not save your answers.', 'error');
+        return;
+      }
+      if (resp.noAnswersFound) {
+        setRememberStatus('Nothing to remember yet — none of the fields left for you have an answer typed in.');
+        return;
+      }
+      var data = resp.data || {};
+      var saved = data.saved || [];
+      var skipped = data.skipped || [];
+      var line = 'Saved ' + saved.length + (saved.length === 1 ? ' answer' : ' answers');
+      if (skipped.length) line += ', skipped ' + skipped.length + (skipped.length === 1 ? ' question' : ' questions');
+      setRememberStatus(line, 'ok');
+      renderRememberDetails(saved, skipped);
+    } catch (e) {
+      setRememberStatus('Could not save your answers: ' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      rememberBtn.disabled = false;
     }
   });
 

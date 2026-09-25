@@ -104,6 +104,7 @@ check("manifest has a pinned \"key\" that derives to the native host's allowed e
 # ---------------------------------------------------------------------------
 resolve_calls = []  # (url, [field names requested]) — lets a check below prove RESOLVE ran
 cover_letter_calls = []  # every /cover-letter request body — item 2
+answers_learn_calls = []  # every /answers/learn request's `items` list — item 3
 
 
 def value_for_field(f):
@@ -126,11 +127,18 @@ def build_fills(fields):
     for f in fields:
         widget = f.get("widget") or ""
         ftype = (f.get("type") or "").lower()
+        name = f.get("name") or ""
         # Keep the stub's own logic trivial: leave Workday's own popup/prompt widgets and
         # anything unfillable to the "needs you" pile. The timeout/cancel tabs below control
         # timing by patching applyFill() directly, not by relying on any particular widget's
-        # real timing, so nothing here needs to touch wd-dropdown/wd-prompt at all.
-        if widget in ("wd-prompt", "wd-dropdown") or ftype in ("hidden", "file", "submit", "button", "image", "reset"):
+        # real timing, so nothing here needs to touch wd-dropdown/wd-prompt at all. "password" is
+        # skipped the same way file/hidden/etc. always were (matches content.js's own "remember my
+        # answers" exclusion — see item 3). Anything named "remember_test_*" is ALSO always left
+        # for the human regardless of type — the REMEMBER MY ANSWERS fixture below relies on this
+        # to get plain text fields into the "needs you" pile on demand.
+        if (widget in ("wd-prompt", "wd-dropdown")
+                or ftype in ("hidden", "file", "submit", "button", "image", "reset", "password")
+                or name.startswith("remember_test_")):
             skipped.append({"id": f["id"], "reason": "test stub: left for you"})
             continue
         fills.append({
@@ -227,6 +235,32 @@ COVER_LETTER_PAGE_BYTES = b"""<!DOCTYPE html>
 </body></html>
 """
 
+# A tiny fixture for item 3 (Remember my answers): three fields the stub's build_fills() always
+# leaves as "needs you" (name prefix "remember_test_", plus the password field via its real
+# type) regardless of what's typed into them — so this test can simulate the operator answering
+# a fill's leftover questions themselves, then click "Remember my answers", without depending on
+# any particular widget being left unfilled for real reasons elsewhere on test-page.html.
+REMEMBER_ANSWERS_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Remember Answers Fixture</title></head>
+<body>
+<form id="ra-form">
+  <label for="notice_period">What is your notice period?</label>
+  <input type="text" id="notice_period" name="remember_test_skip_notice">
+  <label for="salary_expect">Desired salary</label>
+  <input type="text" id="salary_expect" name="remember_test_skip_salary">
+  <label for="fake_password">Set a password for this portal (optional)</label>
+  <input type="password" id="fake_password" name="fake_password">
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('ra-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+</script>
+</body></html>
+"""
+
 
 class StubHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -271,6 +305,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/remember-answers-page.html"):
+            body = REMEMBER_ANSWERS_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/health":
             self._json(200, {"tiers_available": ["test-stub"]})
         elif self.path == "/profile/counts":
@@ -309,6 +350,23 @@ class StubHandler(BaseHTTPRequestHandler):
                     "provider": "test-stub-llm",
                     "job": {"title": "Test Engineer", "company": "Great Company", "source": "page text"},
                 })
+        elif self.path == "/answers/learn":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            items = body.get("items") or []
+            answers_learn_calls.append(items)
+            # Trivial stand-in for the real canary/screening rules (see answer_memory.py) —
+            # just enough to prove BOTH a saved and a skipped item render distinctly, with the
+            # skipped one's reason shown. Real classification is that Python module's job, not
+            # this stub's — see docs/... / tests/test_extension_answer_memory.py for that.
+            saved, skipped = [], []
+            for it in items:
+                q = it.get("question", "")
+                if "salary" in q.lower():
+                    skipped.append({"question": q, "reason": "test stub: comes from your profile"})
+                else:
+                    saved.append(q)
+            self._json(200, {"saved": saved, "skipped": skipped})
         else:
             self._json(404, {"detail": "not found"})
 
@@ -1041,6 +1099,73 @@ with sync_playwright() as p:
             tab_err.close()
 
         # =====================================================================
+        # TAB 11 — REMEMBER MY ANSWERS (item 3): the box only appears once a fill left something
+        #          for the operator; clicking it before typing anything reports nothing to
+        #          remember (and makes no service call); after typing real answers, exactly one
+        #          /answers/learn call carries the CURRENT values keyed by each field's own
+        #          label, a password field is NEVER included even though it was also left as
+        #          "needs you", and the panel shows both a saved and a skipped result (with its
+        #          reason) distinctly.
+        # =====================================================================
+        tab11 = ctx.new_page()
+        tab11.goto(f"{SERVICE_URL}/remember-answers-page.html#t=11")
+        tab11_id = find_tab_id(helper, "#t=11")
+        check("found tab 11's chrome tab id", tab11_id is not None)
+
+        panel11 = ctx.new_page()
+        panel11.goto(f"{panel_url}?tabId={tab11_id}")
+        panel11.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel11.click("#scanBtn")
+        state11 = wait_for_done(helper, tab11_id, timeout_s=20)
+        check("tab 11's fill reached a terminal status",
+              state11 is not None and state11.get("status") == "done", str(state11)[:200])
+        check("the Remember my answers box is shown because this fill left fields for the operator",
+              panel11.eval_on_selector("#rememberBox", "el => el.hidden") is False)
+
+        panel11.click("#rememberBtn")
+        panel11.wait_for_function(
+            "() => !document.getElementById('rememberStatus').hidden && "
+            "document.getElementById('rememberStatus').textContent.length > 0", timeout=5000)
+        empty_status = panel11.eval_on_selector("#rememberStatus", "el => el.textContent")
+        check("clicking Remember before typing any answers reports nothing to remember yet",
+              "nothing to remember" in (empty_status or "").lower(), repr(empty_status))
+        check("no /answers/learn call was made when nothing had been typed",
+              len(answers_learn_calls) == 0, json.dumps(answers_learn_calls))
+
+        # Simulate the operator answering the fields a fill left blank, AND typing into the
+        # password field too (which must never be sent — see content.js's readFieldsForAnswers()).
+        tab11.fill("#notice_period", "Two weeks")
+        tab11.fill("#salary_expect", "120000")
+        tab11.fill("#fake_password", "hunter2")
+
+        panel11.click("#rememberBtn")
+        panel11.wait_for_function(
+            "() => (document.getElementById('rememberStatus').textContent || "
+            "'').toLowerCase().includes('saved')", timeout=5000)
+        remember_status = panel11.eval_on_selector("#rememberStatus", "el => el.textContent")
+        check("the panel reports how many answers were saved and how many were skipped",
+              "Saved 1" in (remember_status or "") and "skipped 1" in (remember_status or ""),
+              repr(remember_status))
+
+        check("exactly one /answers/learn call was made", len(answers_learn_calls) == 1,
+              json.dumps(answers_learn_calls))
+        qas = {i["question"]: i["answer"] for i in answers_learn_calls[0]} if answers_learn_calls else {}
+        check("the notice-period answer sent matches what was typed after the fill",
+              qas.get("What is your notice period?") == "Two weeks", json.dumps(qas))
+        check("the salary answer sent matches what was typed after the fill",
+              qas.get("Desired salary") == "120000", json.dumps(qas))
+        check("the password field's value was NEVER sent to /answers/learn, even though it was "
+              "also left as \"needs you\" and had text typed into it",
+              "hunter2" not in json.dumps(qas) and len(qas) == 2, json.dumps(qas))
+
+        details_text = panel11.eval_on_selector("#rememberDetails", "el => el.textContent")
+        check("the details list shows the saved question",
+              "What is your notice period?" in (details_text or ""), repr(details_text))
+        check("the details list shows the skipped question together with its reason",
+              "Desired salary" in (details_text or "") and "profile" in (details_text or ""),
+              repr(details_text))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -1051,7 +1176,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))
