@@ -75,21 +75,41 @@ highlights what it deliberately left alone.
 > that re-checks the target at the point of action and refuses anything submit-, next- or
 > save-shaped. A capturing submit shield also blocks any form submission for the whole fill.
 
-Start the local service (it binds `127.0.0.1` only and prints a token):
+**One-time setup (no terminal needed afterwards):**
 
 ```powershell
-& $PY -m applypilot serve-extension            # default port 8787
+& $PY -m applypilot extension install-host     # registers the native host (per user, no admin)
 ```
 
-Then load the extension once: Chrome → `chrome://extensions` → enable **Developer mode** →
-**Load unpacked** → select `E:\auto-apply-pipeline\extension`. Open its **Options**, paste the
-token the command printed, and hit **Test Connection**.
+Then load the extension: Chrome → `chrome://extensions` → **Developer mode** → **Load unpacked** →
+`E:\auto-apply-pipeline\extension` (or click **Reload** if it was loaded before — its ID is now
+pinned to `noooclaijfiejnfgabkemnpabcbdnaac`, so a previously pasted token is no longer needed).
+From then on the extension starts the local service itself (detached, no window, logging to
+`<data dir>\logs\extension-service.log`) and fetches its token through the native host. Settings
+→ Connection says "Connected automatically". Without `install-host`, the old way still works:
+run `& $PY -m applypilot serve-extension` and paste the printed token into Settings.
 
-Day to day: open an application and click the ApplyPilot icon — it opens Chrome's **side panel**,
-which stays open as you switch tabs and keeps each tab's last result. Click **Fill this page**;
-progress shows live and **Cancel** stops between fields. Green means filled, amber means
-deliberately left for you — the panel lists why. **Undo** reverts the fields this fill changed;
-check them afterwards (a site can re-render a field on its own).
+**Day to day:** open an application and click the ApplyPilot icon (or **Alt+Shift+F**) — Chrome's
+**side panel** opens and stays open as you switch tabs, keeping each tab's last result. Click
+**Fill this page** (or **Alt+Shift+G**). The first time on a site Chrome asks for permission for
+that site and for any embedded form's site (e.g. a company page embedding Greenhouse) — nothing
+runs on a page until you click. Progress shows live; **Cancel** stops between fields.
+
+What the panel shows, per field: **verified** (read back from the page), **draft** (generated
+text — review it), **left for you** (with the reason), **kept your value** (it was already there
+before the fill), **didn't stick** (the site reverted it), **failed**. Required fields that still
+need you are listed first; click a row to jump to the field. **Undo** reverts what this fill
+changed and reports how many it could restore.
+
+More in the panel: **Draft cover letter** (a DRAFT from the posting and your résumé; copy,
+download, or insert into a cover-letter box), **Remember my answers** (saves what you typed into
+the fields it left for you, so next time they fill), **Mark as applied** (the application log in
+Settings; CSV export), **Export fill report** (labels/statuses only, never values — send this when
+a page fills badly), and an opt-in **Keep filling as I go through steps** for multi-step forms
+like Workday (off by default; never clicks Next; stops if the site changes).
+
+**When a page fills badly:** click **Export fill report** (and **Report page** for the form's
+structure) and send both — they contain no values.
 
 How each field is decided, first match wins:
 
