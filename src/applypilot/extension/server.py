@@ -31,7 +31,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -601,7 +601,9 @@ def create_app(
 
     @app.post("/profile/import-resume")
     async def import_resume_endpoint(
-        file: UploadFile = File(...), _: None = Depends(_require_token)
+        file: UploadFile = File(...),
+        allow_identity_change: bool = Form(False),
+        _: None = Depends(_require_token),
     ) -> dict:
         """Multipart upload (field name "file"), .pdf/.docx/.txt. Extracts
         text, runs the deterministic + LLM passes, saves the résumé (and a
@@ -633,7 +635,17 @@ def create_app(
                 data=data,
                 existing_profile=existing,
                 profile_dir=path.parent,
+                allow_identity_change=allow_identity_change,
             )
+        except resume_import.IdentityMismatch as exc:
+            # 409 with a structured body so the extension can offer the two
+            # honest choices (switch/create a profile, or replace knowingly).
+            raise HTTPException(status_code=409, detail={
+                "code": "identity_mismatch",
+                "resume_name": exc.resume_name,
+                "profile_name": exc.profile_name,
+                "message": str(exc),
+            }) from exc
         except resume_import.ResumeImportError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 -- fail soft, never leak a stack trace

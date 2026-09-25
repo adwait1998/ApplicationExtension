@@ -602,6 +602,8 @@ def test_merge_preserves_fields_the_resume_does_not_mention(tmp_path):
         existing_profile=existing,
         profile_dir=tmp_path,
         llm_fn=_fake_llm_fn,
+        # a different person's résumé: merge semantics, identity change opted into
+        allow_identity_change=True,
     )
     assert result.draft_profile["personal"]["city"] == "Chicago"
     assert result.draft_profile["experience"]["target_role"] == "PM"
@@ -615,6 +617,8 @@ def test_merge_overwrites_matched_fields_with_resume_values(tmp_path):
         existing_profile=existing,
         profile_dir=tmp_path,
         llm_fn=_fake_llm_fn,
+        # a different person's résumé: merge semantics, identity change opted into
+        allow_identity_change=True,
     )
     assert result.draft_profile["personal"]["full_name"] == "Jane Doe"
     assert result.draft_profile["personal"]["email"] == "jane.doe@example.com"
@@ -628,6 +632,8 @@ def test_merge_never_touches_password(tmp_path):
         existing_profile=existing,
         profile_dir=tmp_path,
         llm_fn=_fake_llm_fn,
+        # a different person's résumé: merge semantics, identity change opted into
+        allow_identity_change=True,
     )
     assert result.draft_profile["personal"]["password"] == "hunter2"
 
@@ -878,6 +884,9 @@ def test_import_resume_endpoint_never_writes_profile_json(tmp_path, monkeypatch)
         "/profile/import-resume",
         headers={"X-ApplyPilot-Token": token},
         files={"file": ("resume.pdf", RESUME_PDF_BYTES, "application/pdf")},
+        # "Jane Doe" over "Original Name": opt into the identity change, so
+        # this still proves the endpoint never writes profile.json itself.
+        data={"allow_identity_change": "true"},
     )
     assert resp.status_code == 200
     # The uploaded résumé claims "Jane Doe" -- if profile.json had been

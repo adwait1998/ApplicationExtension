@@ -71,6 +71,25 @@ class ResumeImportError(Exception):
     """A user-facing, safe-to-display import failure. Never a stack trace."""
 
 
+class IdentityMismatch(ResumeImportError):
+    """The résumé names a different person than the active profile.
+
+    Uploading a résumé writes resume.pdf/resume.txt into the ACTIVE
+    profile's directory and drafts that person's profile from it. Uploading
+    someone else's résumé therefore replaced one person's identity with
+    another's — on a single-profile install, the very files the autonomous
+    pipeline applies with. Raised before anything is written."""
+
+    def __init__(self, resume_name: str, profile_name: str):
+        self.resume_name = resume_name
+        self.profile_name = profile_name
+        super().__init__(
+            f"This résumé is for {resume_name}, but the active profile is {profile_name}. "
+            f"Uploading it would replace {profile_name}'s résumé and details with "
+            f"{resume_name}'s. Create or switch to a profile for {resume_name} instead — "
+            "or confirm that you want to replace this profile's identity.")
+
+
 # ---------------------------------------------------------------------------
 # Upload validation
 # ---------------------------------------------------------------------------
@@ -220,6 +239,43 @@ def _guess_name(text: str) -> str:
             continue
         return candidate
     return ""
+
+
+_NAME_TOKEN_RE = re.compile(r"^[^\W\d_](?:[^\W\d_]|['’.-])*$")
+# Words that make a first line a heading or a job title, not a name.
+_NOT_NAME_WORDS = {
+    "resume", "résumé", "curriculum", "vitae", "cv", "portfolio", "profile", "summary",
+    "senior", "junior", "lead", "principal", "staff", "intern", "engineer", "developer",
+    "designer", "manager", "analyst", "scientist", "consultant", "specialist", "director",
+    "architect", "administrator", "product", "data", "software", "ux", "ui", "research",
+}
+
+
+def _name_tokens(name: str) -> list[str]:
+    return [t for t in re.split(r"[\s,]+", (name or "").lower().replace(".", " ")) if t]
+
+
+def looks_like_person_name(name: str) -> bool:
+    """2-5 alphabetic tokens — enough to trust _guess_name's first line as a
+    name rather than a heading like "RESUME" or "Product Designer Portfolio"
+    (a guard that fires on a heading would block legitimate uploads)."""
+    toks = (name or "").split()
+    return (2 <= len(toks) <= 5 and all(_NAME_TOKEN_RE.match(t) for t in toks)
+            and not any(t.lower().strip(".") in _NOT_NAME_WORDS for t in toks))
+
+
+def same_person(a: str, b: str) -> bool:
+    """Lenient: same first name and same (or initial-compatible) last name,
+    or one name's tokens contained in the other's (middle names)."""
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    if not ta or not tb:
+        return True  # nothing to compare — never block on missing data
+    if set(ta) <= set(tb) or set(tb) <= set(ta):
+        return True
+    if ta[0] != tb[0]:
+        return False
+    la, lb = ta[-1], tb[-1]
+    return la == lb or (len(la) == 1 and lb.startswith(la)) or (len(lb) == 1 and la.startswith(lb))
 
 
 def deterministic_extract(text: str) -> dict[str, str]:
@@ -761,6 +817,7 @@ def import_resume(
     existing_profile: dict,
     profile_dir: Path,
     llm_fn: Callable[[str], str] | None = None,
+    allow_identity_change: bool = False,
 ) -> ImportResult:
     """Full résumé-import pipeline. Never writes profile.json -- the caller
     (server.py) is responsible for returning ``draft_profile`` to the
@@ -774,6 +831,13 @@ def import_resume(
     """
     ext = validate_upload(filename, data)
     text = extract_text(data, ext)
+
+    if not allow_identity_change:
+        resume_name = _guess_name(text)
+        profile_name = str(((existing_profile or {}).get("personal") or {}).get("full_name") or "").strip()
+        if (profile_name and looks_like_person_name(resume_name)
+                and not same_person(resume_name, profile_name)):
+            raise IdentityMismatch(resume_name, profile_name)
 
     profile_dir = Path(profile_dir)
     profile_dir.mkdir(parents=True, exist_ok=True)
