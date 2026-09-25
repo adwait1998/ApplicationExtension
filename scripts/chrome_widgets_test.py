@@ -127,6 +127,37 @@ with sync_playwright() as p:
               r.get("ok") is True and r.get("committed") == "Austin", str(r))
 
         # -----------------------------------------------------------------------------------
+        # 2b. Combobox fill: 2026-09-24 live-probe fixes -- Oura's 'State*' (bare 2-letter codes,
+        # the profile's full state NAME must cross-match), Robinhood's 'Degree*' (Greenhouse's
+        # own standard list renders BOTH "Bachelors" and "Bachelor's Degree" as separate options),
+        # and Robinhood's "have you ever worked here" screening question (no literal Yes/No
+        # option at all). See extension/selftest.js for the matching jsdom fixtures and the full
+        # rationale; this just confirms real Chrome (real react-select mount timing, real
+        # mousedown-commit semantics) agrees with jsdom.
+        # -----------------------------------------------------------------------------------
+        r = fill_combobox("State*", "Washington")
+        check("State combobox (real Chrome, bare 2-letter codes, first read forced empty by the fixture): "
+              "'Washington' resolves to 'WA' via the US state cross-match + clear-and-recheck-unfiltered recovery",
+              r.get("ok") is True and r.get("committed") == "WA", str(r))
+        r_bad = fill_combobox("State*", "Mars")
+        check("NEGATIVE CONTROL (real Chrome): 'Mars' is not a state -> stays refused even after the recovery attempt",
+              r_bad.get("ok") is False, str(r_bad))
+
+        r = fill_combobox("Degree*", "Bachelor of Design")
+        check("Degree combobox (real Chrome, simple generic levels): 'Bachelor of Design' resolves to \"Bachelor's Degree\" on the first unfiltered read, no typing needed",
+              r.get("ok") is True and r.get("committed") == "Bachelor's Degree", str(r))
+
+        r = fill_combobox("Degree (Robinhood shape)*", "Bachelor of Design")
+        check("Degree combobox (real Chrome, Robinhood shape -- 'Bachelors' AND \"Bachelor's Degree\" both render): "
+              "resolves to the fuller \"Bachelor's Degree\", never the bare duplicate",
+              r.get("ok") is True and r.get("committed") == "Bachelor's Degree", str(r))
+
+        r = fill_combobox("Have you ever worked for Robinhood as an employee, intern or contractor?*", "No")
+        check("screening combobox (real Chrome, no literal Yes/No option in the whole list): "
+              "'No' resolves to the one flat-denial sentence, 'I have never worked at Robinhood'",
+              r.get("ok") is True and r.get("committed") == "I have never worked at Robinhood", str(r))
+
+        # -----------------------------------------------------------------------------------
         # 3. Ashby button groups: scoped clicks, decoy submit never clicked, real no-form shape
         # -----------------------------------------------------------------------------------
         bg_fields = [f for f in fields if f.get("widget") == "button-group"]

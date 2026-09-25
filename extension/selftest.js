@@ -2032,6 +2032,55 @@ pending.push((async () => {
     Scanner.matchCityStateOption('Seattle, Washington', DIFFERENT_TEXT_CATALOG) === -1);
 })();
 
+// --- matchChoiceOption: US state cross-match, degree bare-stem duplicates, and the "no
+//     literal Yes/No option" screening fallback -- pure-function unit checks (live probe,
+//     2026-09-24: job-boards.greenhouse.io/oura's 'State*' and boards.greenhouse.io/robinhood's
+//     'Degree*'/"Have you ever worked..." fields). The end-to-end combobox fixtures below also
+//     exercise these through the full open/type/clear flow; these are the fast, direct checks. -
+(() => {
+  expect('matchChoiceOption: US state cross-match -- a full state name resolves against a bare 2-letter-code list',
+    Scanner.matchChoiceOption('Washington', ['AL', 'AK', 'AZ', 'WA']) === 3);
+  expect('matchChoiceOption: US state cross-match works in the OTHER direction too -- a 2-letter code resolves against full state names',
+    Scanner.matchChoiceOption('WA', ['Alabama', 'Alaska', 'Arizona', 'Washington']) === 3);
+  expect('matchChoiceOption: US state cross-match never fires for a value that is not a recognised state at all',
+    Scanner.matchChoiceOption('Wakanda', ['AL', 'AK', 'AZ', 'WA']) === -1);
+
+  // Ground truth: Greenhouse's own standard "Degree" field lists BOTH a bare level noun
+  // ("Bachelors") AND its fuller phrasing ("Bachelor's Degree") as separate options -- neither
+  // contains "Bachelor of Design"'s own specific token, so the existing "exactly one specific
+  // match" tier finds nothing; treated as the same level (bare stems collapse identically) and
+  // resolved to the fuller, unambiguous "...Degree" phrasing.
+  const ROBINHOOD_DEGREE_OPTIONS = ['High School', 'Associates', "Associate's Degree", 'Bachelors',
+    "Bachelor's Degree", 'Masters', "Master's Degree", 'Doctorate'];
+  expect('matchChoiceOption: "Bachelors" vs "Bachelor\'s Degree" -- same level under two spellings, resolves to the fuller "...Degree" phrasing',
+    Scanner.matchChoiceOption('Bachelor of Design', ROBINHOOD_DEGREE_OPTIONS) === 4);
+  expect('matchChoiceOption: the SAME duplicate-spelling tie-break applies to a different family too ("Masters" vs "Master\'s Degree")',
+    Scanner.matchChoiceOption('Master of Design', ROBINHOOD_DEGREE_OPTIONS) === 6);
+  // Negative control (no regression): several GENUINELY DIFFERENT specific titles must still
+  // refuse rather than being swept up by the new bare-stem tie-break (their stems differ).
+  const SPECIFIC_MASTER_TITLES = ['Master of Arts', 'Master of Science', 'Master of Business Administration'];
+  expect('matchChoiceOption: bare-stem tie-break never fires for genuinely DIFFERENT specific titles -- "MS" still refuses (no regression)',
+    Scanner.matchChoiceOption('MS', SPECIFIC_MASTER_TITLES) === -1);
+
+  // Ground truth: a "have you ever worked here" screening question can render with NO literal
+  // "Yes"/"No" option at all -- every choice is a full first-person sentence.
+  const ROBINHOOD_WORKED_HERE_OPTIONS = [
+    'I currently work at Robinhood as a full-time employee or intern',
+    'I have previously worked at Robinhood as a full-time employee or intern (Hoodie Alumni)',
+    'I currently work at Robinhood in a contractor role',
+    'I have previously worked at Robinhood in a contractor role',
+    'I have never worked at Robinhood'
+  ];
+  expect('matchChoiceOption: a plain "No" resolves to the one flat-denial sentence when no option literally starts with "No"',
+    Scanner.matchChoiceOption('No', ROBINHOOD_WORKED_HERE_OPTIONS) === 4);
+  expect('matchChoiceOption: the same fallback never fires for "Yes" (unchanged, no fitting option to guess at)',
+    Scanner.matchChoiceOption('Yes', ROBINHOOD_WORKED_HERE_OPTIONS) === -1);
+  // Negative control: a "never"-shaped fallback must still refuse when it would be ambiguous.
+  const TWO_NEVER_OPTIONS = ['I have never worked here', 'I have never lived here'];
+  expect('matchChoiceOption: "no" -> "never" fallback still refuses when TWO options both read as a flat denial (never guesses)',
+    Scanner.matchChoiceOption('No', TWO_NEVER_OPTIONS) === -1);
+})();
+
 // --- combobox / button-group / Lever-location: async fill + verify behavior, run STRICTLY
 //     SEQUENTIALLY (same reasoning as the Workday dropdown/prompt block above: shared timers
 //     and MutationObservers on one document behave most predictably one step at a time). -----
@@ -2094,6 +2143,73 @@ pending.push((async () => {
     // /resolve round trip can still try), but the fill itself still correctly refuses above.
     expect('combobox ambiguous negative control: entry._lastOptions still carries both (different) option texts',
       JSON.stringify(entry._lastOptions) === JSON.stringify(['Software Engineer', 'Site Engineer']));
+  }
+
+  // ---- combobox: Greenhouse "State", static list rendered as bare 2-letter codes, first read
+  // forced empty (live probe, 2026-09-24, job-boards.greenhouse.io/oura's 'State*' field) --
+  // proves BOTH halves of the fix together: the US state cross-match (matchChoiceOption), and
+  // the clear-and-recheck-the-unfiltered-list recovery after a typed filter renders nothing
+  // (fillComboboxOne) -- `emptyOnFirstOpen` means the recovery path is the ONLY way to ever see
+  // the real list here. ----
+  {
+    const field = fieldByLabel('State*');
+    expect('State combobox scanned as a combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Washington');
+    expect('State combobox: "Washington" resolves to "WA" -- typing it first filters the real react-select mock to nothing, then the clear-and-recheck fallback finds it in the restored unfiltered list',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'WA');
+
+    // NEGATIVE CONTROL, same fixture: a value that matches nothing at all -- not a state, not a
+    // code -- must still fail honestly even after the recovery attempt, with a reason listing
+    // the real (recovered) option texts, never the attempted value.
+    const okBad = await Scanner.applyFill(entry, 'Mars');
+    expect('State combobox negative control: "Mars" is not a state -> false even after recovery, the earlier commit is untouched',
+      okBad === false && Scanner.getComboboxCommittedValue(entry) === 'WA');
+    expect('State combobox negative control: the failure reason names real recovered option texts, never quotes the attempted "Mars"',
+      /saw: /.test(entry._lastReason) && !entry._lastReason.includes('Mars'));
+    // reasonWithOptions() truncates the human-readable SENTENCE to 8 options, but
+    // entry._lastOptions (structured data for content.js's second-chance /resolve round trip)
+    // carries the actual FULL recovered list -- proof the recovery reached the real "WA" option,
+    // not just whichever 8 happened to be first alphabetically.
+    expect('State combobox negative control: entry._lastOptions carries the full RECOVERED unfiltered list (all 51 codes), including "WA"',
+      Array.isArray(entry._lastOptions) && entry._lastOptions.length === 51 && entry._lastOptions.includes('WA'));
+  }
+
+  // ---- combobox: Greenhouse "Degree", simple generic-level shape (one option per family, e.g.
+  // SoFi's real embed field) -- resolves via the degree-family match on the very first
+  // unfiltered read, no typing ever needed. ----
+  {
+    const field = fieldByLabel('Degree*');
+    expect('Degree (simple) combobox scanned as a combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Bachelor of Design');
+    expect('Degree combobox (simple generic levels): "Bachelor of Design" resolves to "Bachelor\'s Degree" via the degree-family match, no typing needed',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === "Bachelor's Degree");
+  }
+
+  // ---- combobox: Greenhouse "Degree", the REAL Robinhood shape -- BOTH "Bachelors" and
+  // "Bachelor's Degree" render as separate options (live probe, 2026-09-24,
+  // boards.greenhouse.io/robinhood's 'Degree*' field). Proves the bare-stem duplicate-spelling
+  // tie-break end to end, not just as a pure-function check. ----
+  {
+    const field = fieldByLabel('Degree (Robinhood shape)*');
+    expect('Degree (Robinhood shape) combobox scanned as a combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Bachelor of Design');
+    expect('Degree combobox (Robinhood shape): "Bachelor of Design" resolves to the fuller "Bachelor\'s Degree", never the bare "Bachelors" duplicate',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === "Bachelor's Degree");
+  }
+
+  // ---- combobox: Greenhouse screening question with NO literal Yes/No option -- the real
+  // Robinhood shape (live probe, 2026-09-24, boards.greenhouse.io/robinhood's "Have you ever
+  // worked for Robinhood...?" field): every option is a full first-person sentence. ----
+  {
+    const field = fieldByLabel('Have you ever worked for Robinhood as an employee, intern or contractor?*');
+    expect('Robinhood-shape screening combobox scanned as a combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'No');
+    expect('screening combobox: "No" resolves to the one flat-denial sentence ("I have never worked at Robinhood"), never fails just because no option literally starts with "No"',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'I have never worked at Robinhood');
   }
 
   // ---- combobox: async/filtered catalog (School) -- ground truth: "No options" is shown

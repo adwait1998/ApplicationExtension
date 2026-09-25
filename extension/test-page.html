@@ -1259,6 +1259,96 @@
     </div>
   </div>
 
+  <!-- Greenhouse "State" react-select, STATIC option list rendered as bare 2-letter codes
+       (live probe, 2026-09-24, job-boards.greenhouse.io/oura's 'State*' field: options are
+       literally "AL","AK",...,"WA",... -- never the spelled-out state name). The profile sends
+       the full name ("Washington"); typing it filters react-select's own literal label match
+       down to nothing (no code contains the substring "washington"), which used to fail outright
+       ("no options rendered while filtering") even though "WA" was right there in the unfiltered
+       list the whole time. `emptyOnFirstOpen` faithfully reproduces the OTHER live-observed half
+       of this bug (a live "Degree" field showed the menu can paint with nothing in it a tick
+       before its rows exist) -- the first read is forced empty, so the fix's clear-and-recheck-
+       the-unfiltered-list fallback is the ONLY path that can ever reach the real list here. -->
+  <div class="select" id="gh_state_field">
+    <label id="gh_state_label">State<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_state_value">
+          <input type="text" role="combobox" id="gh_state_input" class="select__input"
+                 aria-labelledby="gh_state_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_state_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_state_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Greenhouse "Degree" react-select, the SIMPLE generic-level shape (one option per family,
+       e.g. SoFi's real embed field) -- resolves on the very first unfiltered read via the
+       existing degree-family match, no typing ever needed. -->
+  <div class="select" id="gh_degree_simple_field">
+    <label id="gh_degree_simple_label">Degree<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_degree_simple_value">
+          <input type="text" role="combobox" id="gh_degree_simple_input" class="select__input"
+                 aria-labelledby="gh_degree_simple_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_degree_simple_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_degree_simple_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Greenhouse "Degree" react-select, the REAL Robinhood shape (live probe, 2026-09-24,
+       boards.greenhouse.io/robinhood): Greenhouse's own standard degree list carries BOTH a bare
+       level noun ("Bachelors") AND its fuller phrasing ("Bachelor's Degree") as two SEPARATE
+       options -- "Bachelor of Design" matches the bachelor family on both, and narrows to
+       neither by specific title, so this is a genuinely different (and harder) case than the
+       simple field above. -->
+  <div class="select" id="gh_degree_dup_field">
+    <label id="gh_degree_dup_label">Degree (Robinhood shape)<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_degree_dup_value">
+          <input type="text" role="combobox" id="gh_degree_dup_input" class="select__input"
+                 aria-labelledby="gh_degree_dup_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_degree_dup_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_degree_dup_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Greenhouse screening-question react-select, the REAL Robinhood shape (live probe,
+       2026-09-24, boards.greenhouse.io/robinhood's "Have you ever worked for Robinhood...?"
+       field): every option is a full first-person sentence -- NONE of them is a literal
+       "Yes"/"No" -- so a plain "No" profile answer must resolve to the one option phrased as a
+       flat denial ("I have never worked at Robinhood"), never fail just because no option starts
+       with "No" (and typing "No" filters react-select's own list to nothing either, since none
+       of these sentences contain that substring). -->
+  <div class="select" id="gh_screening_never_field">
+    <label id="gh_screening_never_label">Have you ever worked for Robinhood as an employee, intern or contractor?<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_screening_never_value">
+          <input type="text" role="combobox" id="gh_screening_never_input" class="select__input"
+                 aria-labelledby="gh_screening_never_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_screening_never_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_screening_never_menu" style="display:none;"></div>
+    </div>
+  </div>
+
   <!-- Generic ARIA combobox, no react-select classes at all -- aria-controls wires the input
        directly to its role=listbox popup. -->
   <div id="generic_combo_field">
@@ -1424,6 +1514,17 @@
     var committed = cfg.initial ? [cfg.initial] : [];
     var mousedownArmed = null;
     var openCount = 0;
+    // `cfg.emptyOnFirstOpen`: the FIRST time this static list would show its full unfiltered
+    // options, render nothing instead (a real "No options" notice) -- ground truth (live probe,
+    // 2026-09-24, a Greenhouse "Degree" field): react-select can paint its menu one render pass
+    // before its option rows exist. Every call after that first one behaves normally. This lets
+    // a fixture prove the fix's own clear-and-recheck-the-unfiltered-list fallback is what finds
+    // the option, not just that the option was there to find on the very first look.
+    var unfilteredPrimed = !cfg.emptyOnFirstOpen;
+    function unfilteredOptions() {
+      if (!unfilteredPrimed) { unfilteredPrimed = true; return []; }
+      return cfg.options;
+    }
 
     function renderValue() {
       Array.prototype.slice.call(valueContainer.querySelectorAll('.select__single-value,.select__multi-value')).forEach(function (n) { n.remove(); });
@@ -1497,12 +1598,12 @@
 
     toggle.addEventListener('mouseup', function () {
       if (menu.style.display === 'block') { closeMenu(); return; }
-      renderOptions(cfg.async ? [] : cfg.options);
+      renderOptions(cfg.async ? [] : unfilteredOptions());
       openMenu();
     });
     toggle.addEventListener('click', function (e) { e.preventDefault(); }); // real react-select: a bare click alone does nothing
     input.addEventListener('keyup', function (e) {
-      if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(cfg.async ? [] : cfg.options); openMenu(); }
+      if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(cfg.async ? [] : unfilteredOptions()); openMenu(); }
     });
     input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
 
@@ -1518,7 +1619,7 @@
           renderOptions(cfg.options.filter(function (o) { return o.toLowerCase().indexOf(q) !== -1; }));
         }, cfg.filterDelayMs || 250);
       } else {
-        renderOptions(q ? cfg.options.filter(function (o) { return o.toLowerCase().indexOf(q) !== -1; }) : cfg.options);
+        renderOptions(q ? cfg.options.filter(function (o) { return o.toLowerCase().indexOf(q) !== -1; }) : unfilteredOptions());
         openMenu();
       }
     });
@@ -1562,6 +1663,40 @@
     options: ['English', 'Spanish', 'French', 'Mandarin Chinese'], multi: true, async: false });
   makeReactSelect({ inputId: 'gh_ambiguous_input', toggleId: 'gh_ambiguous_toggle', menuId: 'gh_ambiguous_menu', valueId: 'gh_ambiguous_value',
     options: ['Software Engineer', 'Site Engineer'], multi: false, async: false });
+
+  // ---- Greenhouse "State" combobox: real Oura option set (2026-09-24 live capture), rendered
+  // as bare 2-letter codes -- see the field's own HTML comment above for the bug this proves.
+  // `emptyOnFirstOpen` forces the very first read to come back empty, so only the fix's
+  // clear-and-recheck-the-unfiltered-list fallback can ever reach the real list here.
+  makeReactSelect({ inputId: 'gh_state_input', toggleId: 'gh_state_toggle', menuId: 'gh_state_menu', valueId: 'gh_state_value',
+    options: ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DC', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+      'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY',
+      'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'],
+    multi: false, async: false, emptyOnFirstOpen: true });
+
+  // ---- Greenhouse "Degree" combobox, simple generic-level shape (e.g. SoFi's real embed field:
+  // exactly one option per family) -- resolves on the first unfiltered read, no typing needed.
+  makeReactSelect({ inputId: 'gh_degree_simple_input', toggleId: 'gh_degree_simple_toggle', menuId: 'gh_degree_simple_menu', valueId: 'gh_degree_simple_value',
+    options: ["High School", "Bachelor's Degree", "Master's Degree"], multi: false, async: false });
+
+  // ---- Greenhouse "Degree" combobox, the REAL Robinhood option set (2026-09-24 live capture,
+  // trimmed to the families that matter): note BOTH "Bachelors" and "Bachelor's Degree" render
+  // as separate options -- see the field's own HTML comment above.
+  makeReactSelect({ inputId: 'gh_degree_dup_input', toggleId: 'gh_degree_dup_toggle', menuId: 'gh_degree_dup_menu', valueId: 'gh_degree_dup_value',
+    options: ['High School', 'Associates', "Associate's Degree", 'Bachelors', "Bachelor's Degree",
+      'Masters', "Master's Degree", 'Doctorate'],
+    multi: false, async: false });
+
+  // ---- Greenhouse screening-question combobox, the REAL Robinhood option set (2026-09-24 live
+  // capture, verbatim) -- see the field's own HTML comment above for the bug this proves.
+  makeReactSelect({ inputId: 'gh_screening_never_input', toggleId: 'gh_screening_never_toggle', menuId: 'gh_screening_never_menu', valueId: 'gh_screening_never_value',
+    options: [
+      'I currently work at Robinhood as a full-time employee or intern',
+      'I have previously worked at Robinhood as a full-time employee or intern (Hoodie Alumni)',
+      'I currently work at Robinhood in a contractor role',
+      'I have previously worked at Robinhood in a contractor role',
+      'I have never worked at Robinhood'
+    ], multi: false, async: false });
 
   // ---- generic ARIA combobox (no react-select classes) -----------------------------------
   // Spec-compliant ARIA 1.2 combobox behavior, deliberately distinguishing HIGHLIGHT from
