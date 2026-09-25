@@ -445,7 +445,7 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
         if "cover" in label:
             why = "cover letter upload — attach one yourself (a résumé is never put here)"
         elif any(w in label for w in ("resume", "résumé", "cv")):
-            why = "résumé upload — handled by the résumé step, not by field filling"
+            why = "résumé upload — attached by the résumé step (see the résumé line), not by field filling"
         else:
             why = "file upload — attach this yourself"
         return SkipResult(id=field.id, source="deterministic", reason=why, auto_fill=False)
