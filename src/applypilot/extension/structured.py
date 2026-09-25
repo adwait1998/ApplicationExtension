@@ -151,6 +151,11 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
+_QUESTION_LIKE_RE = re.compile(
+    r"\?|^\W*(what|which|who|where|when|why|how|do|does|did|are|is|have|has|will|would|can|could|"
+    r"please|before|tell|describe)\b", re.I)
+
+
 def _kind_for(field: FieldDescriptor, haystack: str) -> str | None:
     section = field.section or ""
     if section:
@@ -159,7 +164,14 @@ def _kind_for(field: FieldDescriptor, haystack: str) -> str | None:
         if _EDU_SECTION_RE.search(section):
             return "education"
         return None  # a section heading exists but names neither kind
-    # No section context at all: only an unambiguous slot can establish kind.
+    # No section context at all: only an unambiguous slot can establish kind —
+    # and only on a field-name-shaped label. A QUESTION that mentions a
+    # company ("Before seeing this job posting, how familiar were you with
+    # Faire as a company?", "Have you worked at or been a consultant for
+    # SoFi?") is not a work-history "Company" box; both got the applicant's
+    # current employer on real forms.
+    if _QUESTION_LIKE_RE.search(field.label or "") or len((field.label or "").split()) > 8:
+        return None
     is_work = bool(_WORK_KIND_HINT_RE.search(haystack))
     is_edu = bool(_EDU_KIND_HINT_RE.search(haystack))
     if is_work and not is_edu:

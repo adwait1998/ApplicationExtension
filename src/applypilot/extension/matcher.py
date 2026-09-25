@@ -50,6 +50,10 @@ AUTOCOMPLETE_MAP: dict[str, str] = {
 # generic full-name pattern, which must be checked before nothing (there is
 # no other name-shaped catch-all).
 _NAME_LABEL_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Before first/full name: "Preferred Name (if different from legal name)"
+    # contains "legal name" and used to get the full legal name.
+    (re.compile(r"\b(preferred|nick)\s*(first\s*)?name\b|\bname\s+you\s+go\s+by\b", re.I),
+     "personal.preferred_name"),
     (re.compile(r"\b(first\s*name|given\s*name|fname)\b", re.I), "personal.full_name#first"),
     (re.compile(r"\b(last\s*name|family\s*name|surname|lname)\b", re.I), "personal.full_name#last"),
     (
@@ -72,7 +76,14 @@ _NAME_LABEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?<!please )\b(state|province)\b(?!\s+(why|how|what|whether|which|your|the|any|if|"
                 r"briefly|in\s+detail|clearly|below|here)\b)", re.I), "personal.province_state"),
     (re.compile(r"\bcountry\b", re.I), "personal.country"),
-    (re.compile(r"\bcurrent\s*(company|employer)\b", re.I), "experience.current_company"),
+    # "Location" / "Current location" / "What is your location?" — where the
+    # applicant is, as "City, State". Not a job-location preference.
+    (re.compile(r"(?<!preferred )(?<!desired )(?<!office )(?<!work )(?<!job )\b(current\s+)?location\b"
+                r"(?!\s+(preference|you\s+are\s+applying|of\s+(the|this)\s+(role|job|position)))", re.I),
+     "personal.location"),
+    (re.compile(r"\bcurrent\s*(company|employer)\b"
+                r"|\bwhere\s+(are|were)\s+you\s+(currently\s+|most\s+recently\s+)?(employed|working)\b", re.I),
+     "experience.current_company"),
     (re.compile(r"\bcurrent\s*(title|role|job\s*title)\b", re.I), "experience.current_job_title"),
 ]
 
@@ -261,7 +272,7 @@ def _split_name(full_name: str) -> tuple[str, str]:
 # "How did you hear about us? (LinkedIn, ...)") must never get a profile
 # value, and a choice field can only take a value that is one of its
 # options (locations are the one family worth trying there).
-_LOCATION_KEYS = {"personal.city", "personal.province_state", "personal.country"}
+_LOCATION_KEYS = {"personal.city", "personal.province_state", "personal.country", "personal.location"}
 _URL_KEYS = {"personal.linkedin_url", "personal.github_url", "personal.portfolio_url", "personal.website_url"}
 _ESSAY_PROMPT_RE = re.compile(
     r"\b(why|describe|explain|tell\s+us|share\s+(a|an|your)\s+(time|example|story)|how\s+did\s+you|"
@@ -277,11 +288,40 @@ def _label_rules_apply(field: FieldDescriptor) -> bool:
     return len((field.label or "").split()) <= _MAX_LABEL_WORDS
 
 
+# A question whose subject is something else, that merely mentions a profile
+# keyword: "What is your notice period to your current employer?" got the
+# employer's name; "How may we pronounce your name?" got the full name.
+_OTHER_SUBJECT_RE = re.compile(
+    r"\b(notice\s+period|how\s+(long|many|much|familiar|may\s+we|do\s+we|should\s+we)|years?\s+of|why|"
+    r"reason|relocat\w*|commut\w*|travel\w*|visa|salary|compensation|start\s+date|availab\w+|when|"
+    r"pronounc\w*|spell\w*|referr\w*|refer\s+you|hear\s+about|familiar)\b", re.I)
+
+
+_QUESTION_LIKE_RE = re.compile(
+    r"\?|^\W*(what|which|who|where|when|why|how|do|does|did|are|is|have|has|will|would|can|could|please)\b",
+    re.I)
+
+
+def _is_choice(field: FieldDescriptor) -> bool:
+    return (bool(field.options) or (field.tag or "").strip().lower() == "select"
+            or (field.widget or "") == "wd-dropdown")
+
+
+# Inside a work-history or education block, "Location"/"City" describe that
+# job or school — the structured tier's to fill, never the applicant's own.
+_HISTORY_SECTION_RE = re.compile(
+    r"\b(work\s*experience|employment|job\s*history|experience|education|academic|school)\b", re.I)
+
+
 def _label_rule_fits(path: str, field: FieldDescriptor, haystack: str) -> bool:
     base = path.split("#", 1)[0]
-    is_choice = bool(field.options) or (field.tag or "").strip().lower() == "select" \
-        or (field.widget or "") == "wd-dropdown"
-    if is_choice and base not in _LOCATION_KEYS:
+    if base in _LOCATION_KEYS and (field.section_index is not None
+                                   or _HISTORY_SECTION_RE.search(field.section or "")):
+        return False
+    label = field.label or ""
+    if _QUESTION_LIKE_RE.search(label) and _OTHER_SUBJECT_RE.search(label):
+        return False
+    if _is_choice(field) and base not in _LOCATION_KEYS:
         return False
     if base in _URL_KEYS and _ESSAY_PROMPT_RE.search(field.label or ""):
         return False
@@ -315,6 +355,33 @@ _START_AVAILABILITY_RE = re.compile(
 )
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# "Today's Date of Application (MM/DD/YY Format)" — a plain fact, filled in
+# the format the label asks for. A date next to a signature is part of the
+# signature (the attestation tier leaves those for the applicant).
+_TODAY_RE = re.compile(r"\b(today'?s|todays|current)\s+date\b|\bdate\s+of\s+application\b|\bapplication\s+date\b",
+                       re.I)
+
+
+def _match_todays_date(field: FieldDescriptor) -> FillResult | None:
+    label = field.label or ""
+    if not _TODAY_RE.search(label) or field.section_index is not None:
+        return None
+    import datetime as _dt
+    d = _dt.date.today()
+    ftype = (field.type or "").strip().lower()
+    if ftype == "date":
+        value = d.isoformat()
+    elif re.search(r"\bdd\s*/\s*mm\b", label, re.I):
+        value = d.strftime("%d/%m/%Y")
+    elif re.search(r"\bmm\s*/\s*dd\s*/\s*yy\b(?!yy)", label, re.I):
+        value = d.strftime("%m/%d/%y")
+    elif re.search(r"\byyyy\s*-\s*mm\s*-\s*dd\b", label, re.I):
+        value = d.isoformat()
+    else:
+        value = d.strftime("%m/%d/%Y")
+    return FillResult(id=field.id, value=value, source="deterministic", profile_key="today",
+                      confidence=1.0, auto_fill=True, reason="today's date")
+
 
 def _match_start_availability(field: FieldDescriptor, haystack: str, profile: dict) -> FillResult | SkipResult | None:
     if field.section_index is not None or not _START_AVAILABILITY_RE.search(haystack):
@@ -345,6 +412,10 @@ def _match_start_availability(field: FieldDescriptor, haystack: str, profile: di
 def value_for_key(key: str, profile: dict) -> str | None:
     """Resolve a profile path (optionally suffixed ``#first``/``#last``) to
     a string value, or None if unset/blank."""
+    if key == "personal.location" and not _dig(profile, key):
+        parts = [_dig(profile, "personal.city"), _dig(profile, "personal.province_state")]
+        joined = ", ".join(str(x) for x in parts if x)
+        return joined or None
     if key.endswith("#first") or key.endswith("#last"):
         base = key.split("#", 1)[0]
         full = _dig(profile, base)
@@ -391,6 +462,10 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
     if start is not None:
         return start
 
+    today = _match_todays_date(field)
+    if today is not None:
+        return today
+
     autocomplete = (field.autocomplete or "").strip().lower()
     if autocomplete:
         # autocomplete can carry multiple tokens ("shipping given-name") —
@@ -426,6 +501,10 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
                 continue
             base_path = path.split("#", 1)[0]
             value = value_for_key(path, profile)
+            if base_path == "personal.location" and _is_choice(field):
+                # An option list of places ("Seattle, WA") is matched by the
+                # city — "Seattle, Washington" is in none of them verbatim.
+                value = value_for_key("personal.city", profile)
             if value:
                 return FillResult(
                     id=field.id,

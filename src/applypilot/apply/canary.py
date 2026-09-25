@@ -119,11 +119,36 @@ def _yn(flag: bool) -> str:
 # Which part of an address a label is asking for. Checked in order: the most
 # specific component wins, because "Zip/Postal Code" also contains the generic
 # word that made it an address canary in the first place.
-_ADDR_POSTAL = re.compile(r"\b(zip|postal|post\s*code|postcode)\b", re.I)
+_ADDR_POSTAL = re.compile(r"\b(zip|postal|post\s*code|postcode|cep)\b", re.I)
+_ADDR_CITY = re.compile(r"\b(city|town|municipality)\b", re.I)
+_ADDR_STATE = re.compile(r"\b(state|province|region)\b", re.I)
+_ADDR_COUNTRY = re.compile(r"\bcountry\b", re.I)
+# "(Brazil Only)", "(US only)": a field for some other country's applicants.
+_ADDR_ONLY_FOR = re.compile(r"\(([^()]{2,40}?)\s+only\)", re.I)
 _ADDR_LINE2 = re.compile(
     r"\b(address\s*(line)?\s*2|address\s*line\s*two|line\s*2|apt|apartment|suite|unit)\b", re.I)
 _ADDR_FULL = re.compile(
     r"\b(full|complete|mailing|home|current|permanent|residential)\s+address\b", re.I)
+
+
+_COUNTRY_ALIASES = {
+    "united states": ("united states", "usa", "us", "u.s.", "u.s.a.", "america"),
+    "united states of america": ("united states", "usa", "us", "u.s.", "u.s.a.", "america"),
+    "usa": ("united states", "usa", "us", "u.s.", "america"),
+    "united kingdom": ("united kingdom", "uk", "u.k.", "britain", "great britain", "england"),
+    "uk": ("united kingdom", "uk", "u.k.", "britain", "england"),
+}
+
+
+def _country_named(country: str, text: str) -> bool:
+    """Does `text` ("Brazil", "US", "U.S. applicants") name the applicant's country?"""
+    c = country.strip().lower()
+    if not c:
+        return False
+    for alias in _COUNTRY_ALIASES.get(c, (c,)):
+        if re.search(r"(?<![a-z])" + re.escape(alias) + r"(?![a-z])", text.lower()):
+            return True
+    return False
 
 
 def _address_component(question: str, per: dict) -> str | None:
@@ -136,12 +161,26 @@ def _address_component(question: str, per: dict) -> str | None:
     bare "Address" means the street line; only an explicitly full/mailing
     address gets the joined form.
     """
+    only_for = _ADDR_ONLY_FOR.search(question)
+    if only_for and not _country_named(str(per.get("country") or ""), only_for.group(1)):
+        return None  # e.g. "Home Address CEP (Brazil Only)" for a US applicant
     if _ADDR_POSTAL.search(question):
         return per.get("postal_code") or None
     if _ADDR_LINE2.search(question):
         # The profile holds a single street line. The honest answer to a
         # second-line field is "leave it blank", never a copy of line one.
         return None
+    # A component named alongside "Home Address" ("Home Address City") asks
+    # for that component — the joined address went into City, State and
+    # Country on a real form before these were checked first.
+    if _ADDR_CITY.search(question):
+        return per.get("city") or None
+    if _ADDR_STATE.search(question):
+        return per.get("province_state") or None
+    if _ADDR_COUNTRY.search(question):
+        return per.get("country") or None
+    if re.search(r"\b(line\s*1|line\s*one|street)\b", question, re.I):
+        return per.get("address") or None
     if _ADDR_FULL.search(question):
         parts = [per.get("address"), per.get("city"), per.get("province_state"),
                  per.get("postal_code"), per.get("country")]

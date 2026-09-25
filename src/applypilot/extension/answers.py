@@ -344,6 +344,13 @@ _PREV_EMPLOYED_MARKERS: tuple[re.Pattern, ...] = (
     re.compile(r"any\s+of\s+its\s+(?:subsidiaries|affiliates)", re.I),
     re.compile(r"former\s+employee", re.I),
     re.compile(r"(?:now,?\s+)?(?:or\s+)?have\s+you\s+ever\s+(?:worked|been\s+employed)", re.I),
+    # Seen on real forms: "Have you worked at or been a consultant for SoFi
+    # or any of its affiliates?" / "Are you currently employed with or have
+    # been employed by SoFi..." / "Are you currently a SoFi employee?"
+    re.compile(r"have\s+you\s+(?:ever\s+)?(?:worked|been\s+(?:employed|a\s+(?:consultant|contractor|"
+               r"intern|temp)))\s+(?:at|for|with|by)\b", re.I),
+    re.compile(r"\b(?:currently|previously|ever)\s+(?:been\s+)?employed\s+(?:with|by)\b", re.I),
+    re.compile(r"\bare\s+you\s+(?:currently\s+)?(?:a|an)\s+[^?]{1,60}?\b(?:employee|contractor)\b", re.I),
 )
 
 # A company name volunteered directly in the question text itself --
@@ -357,6 +364,13 @@ _COMPANY_IN_QUESTION_RE = re.compile(
 )
 _WORKED_AT_QUESTION_RE = re.compile(
     r"worked\s+(?:at|for)\s+(?P<name>[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})"
+)
+_NAME = r"(?P<name>[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})"
+# More phrasings seen on real forms.
+_MORE_COMPANY_IN_QUESTION_RES = (
+    re.compile(r"(?:consultant|contractor|intern|employee)\s+(?:for|of|at|with)\s+" + _NAME),
+    re.compile(r"employed\s+with\s+(?:or\s+[^?]{0,40}?\s+)?" + _NAME),
+    re.compile(r"\b(?:a|an)\s+(?:current\s+|former\s+)?" + _NAME + r"(?:\s+or\s+[^?]{0,60}?)?\s+employee\b"),
 )
 
 # Host labels that identify the ATS platform, not the employer -- stripped
@@ -387,7 +401,7 @@ def _company_from_question(question: str) -> str:
     any -- the strongest possible signal, since it needs no guessing at
     all. Empty string when the question only uses a generic phrase like
     "employed by our company"."""
-    for pattern in (_COMPANY_IN_QUESTION_RE, _WORKED_AT_QUESTION_RE):
+    for pattern in (_COMPANY_IN_QUESTION_RE, _WORKED_AT_QUESTION_RE) + _MORE_COMPANY_IN_QUESTION_RES:
         m = pattern.search(question or "")
         if m:
             name = (m.group("name") or "").strip(" ,.'\"")
