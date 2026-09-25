@@ -88,6 +88,12 @@ check("minimum_chrome_version bumped to 116 (chrome.sidePanel.setPanelBehavior n
 # --- item 1: auto-connect via native messaging ---
 check("manifest requests the nativeMessaging permission (auto-connect)",
       "nativeMessaging" in (manifest.get("permissions") or []))
+# Without "tabs", Chrome hides a tab's URL from the extension until its site is
+# granted, so on every real (not-yet-granted) job site the panel said "Open a job
+# application page" and never reached the permission prompt — caught by the
+# operator on the first real run. It reads URLs only; host access stays optional.
+check("manifest requests the tabs permission (read the active tab's URL before any grant)",
+      "tabs" in (manifest.get("permissions") or []))
 
 
 def _chrome_extension_id_from_key(b64_key: str) -> str:
@@ -1424,6 +1430,9 @@ KEPT_VALUES_URL = f"{SERVICE_URL}/kept-values-page.html"
 # ---------------------------------------------------------------------------
 # helpers shared by the browser-driven checks below
 # ---------------------------------------------------------------------------
+TEST_ABSENT_HOST = "com.applypilot.copilot.test_absent"
+
+
 def find_tab_id(helper_page, marker, timeout_s=5):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -1781,6 +1790,9 @@ with sync_playwright() as p:
         if not sw:
             raise SystemExit("cannot continue without the extension's service worker")
         ext_id = sw.url.split("/")[2]
+        # Before ANY extension page loads (each one checks the service): never the
+        # operator's real native host — see TEST_ABSENT_HOST.
+        sw.evaluate("(h) => chrome.storage.local.set({ nativeHostNameOverride: h })", TEST_ABSENT_HOST)
         panel_url = f"chrome-extension://{ext_id}/sidepanel.html"
 
         # --- helper: an ordinary (unpinned) panel page used purely to drive chrome.* API
@@ -1815,10 +1827,13 @@ with sync_playwright() as p:
             return port
 
         UNREACHABLE_URL = f"http://127.0.0.1:{_unused_local_port()}"
+        # A host name no one registers: the suite must never reach the operator's REAL
+        # installed host (and through it the real service and data) on this machine — a
+        # Playwright Chrome build reads the same Google Chrome registration.
         helper.evaluate(
             "(cfg) => chrome.storage.local.set(cfg).then(() => "
             "chrome.storage.local.remove(['token', 'serviceConnection']))",
-            {"serviceUrl": UNREACHABLE_URL},
+            {"serviceUrl": UNREACHABLE_URL, "nativeHostNameOverride": TEST_ABSENT_HOST},
         )
 
         panel0 = ctx.new_page()
@@ -1849,7 +1864,7 @@ with sync_playwright() as p:
         # token is already stored and calls keep succeeding (see requestWithAutoConnect).
         helper.evaluate(
             "(cfg) => chrome.storage.local.set(cfg)",
-            {"serviceUrl": SERVICE_URL, "token": "test-token"},
+            {"serviceUrl": SERVICE_URL, "token": "test-token", "nativeHostNameOverride": TEST_ABSENT_HOST},
         )
 
         # Record every chrome.storage.session write, keyed by tabId, straight from
@@ -1870,6 +1885,74 @@ with sync_playwright() as p:
                 }
             });
         }""")
+
+        # =====================================================================
+        # TAB 0 — a page on a site the extension has NOT been granted (localhost
+        #         is not in host_permissions; only 127.0.0.1 is). The panel must
+        #         still see it as a fillable page and offer Fill, which is what
+        #         leads to Chrome's per-site permission prompt.
+        # =====================================================================
+        tab0 = ctx.new_page()
+        tab0.goto(f"http://localhost:{stub_port}/test-page.html#t=0-ungranted")
+        tab0_id = find_tab_id(helper, "#t=0-ungranted")
+        check("found the ungranted tab's id (its URL is readable)", tab0_id is not None)
+        panel0 = ctx.new_page()
+        panel0.goto(f"{panel_url}?tabId={tab0_id}")
+        panel0.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        status0 = panel0.eval_on_selector("#statusBox", "el => el.textContent") or ""
+        check("an ungranted https/http page is NOT reported as 'open a job application page'",
+              "Open a job application page" not in status0, status0)
+        check("Fill is offered on an ungranted page (leading to Chrome's permission prompt)",
+              panel0.eval_on_selector("#scanBtn", "el => el.disabled") is False)
+
+        # Clicking Fill here reaches the REAL chrome.permissions.request() for localhost, whose
+        # native prompt Playwright can't click -- so the panel's own reference to it is swapped
+        # for a stub per case. Every case must end in a visible line on the panel and no fill:
+        # a request that rejects or throws (Chrome refusing to show its prompt at all) used to
+        # leave the click silently doing nothing.
+        def click_fill_with_request(stub_js, expect):
+            panel0.evaluate(stub_js)
+            panel0.evaluate("() => { document.querySelector('#statusBox').textContent = ''; }")
+            panel0.click("#scanBtn")
+            try:
+                panel0.wait_for_function(
+                    "(t) => (document.querySelector('#statusBox').textContent || '').includes(t)",
+                    arg=expect, timeout=5000)
+            except Exception:
+                pass
+            return panel0.eval_on_selector("#statusBox", "el => el.textContent") or ""
+
+        resolves_before0 = len(resolve_calls)
+        line0 = click_fill_with_request(
+            "() => { window.__permCalls = []; chrome.permissions.request = (arg) => {"
+            " window.__permCalls.push(arg);"
+            " return Promise.reject(new Error('Could not find an active window.')); }; }",
+            "did not show its permission prompt")
+        perm_calls0 = panel0.evaluate("() => window.__permCalls")
+        # Exactly the page's origin, port included -- never a wider "any port" grant.
+        check("Fill on an ungranted page asks Chrome for exactly that site's origin",
+              perm_calls0 == [{"origins": [f"http://localhost:{stub_port}/*"]}], json.dumps(perm_calls0))
+        check("a permission request Chrome REJECTS shows a line with Chrome's reason (never a silent click)",
+              f"did not show its permission prompt for localhost:{stub_port} (Could not find an active window.)"
+              in line0, line0)
+        check("...and names the no-prompt route (Alt+Shift+G)", "Alt+Shift+G" in line0, line0)
+        line0b = click_fill_with_request(
+            "() => { chrome.permissions.request = () => { throw new Error('request threw'); }; }",
+            "did not show its permission prompt")
+        check("a permission request that THROWS shows the same line, with its reason",
+              f"did not show its permission prompt for localhost:{stub_port} (request threw)" in line0b,
+              line0b)
+        line0c = click_fill_with_request(
+            "() => { chrome.permissions.request = () => Promise.resolve(false); }",
+            "needs permission")
+        check("a real Deny names the site and says nothing runs",
+              line0c == f"ApplyPilot needs permission to fill forms on localhost:{stub_port} — nothing runs until you allow it.",
+              line0c)
+        check("no ungranted-page case reached /resolve or wrote a fill state",
+              len(resolve_calls) == resolves_before0 and not (get_state(helper, tab0_id) or {}).get("counts"),
+              f"resolve calls +{len(resolve_calls) - resolves_before0}")
+        panel0.close()
+        tab0.close()
 
         # =====================================================================
         # TAB 1 — basic fill through the REAL panel button, proving per-tab state

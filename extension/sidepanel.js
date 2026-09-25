@@ -191,14 +191,41 @@
   /**
    * Synchronous by design: reads the cache refreshOriginInfo() already populated and, if
    * anything is missing, calls chrome.permissions.request() immediately — the caller (a click
-   * handler) must invoke this with NO `await` beforehand. Returns { requested, promise }, never
-   * itself a Promise, so calling it can never itself introduce an await.
+   * handler) must invoke this with NO `await` beforehand. Returns { requested, error, promise },
+   * never itself a Promise, so calling it can never itself introduce an await.
    */
   function gatePermissions(tabId) {
     var info = originInfoByTab[tabId];
     var missing = info ? info.missing : [];
     if (!missing.length) return { requested: [], promise: Promise.resolve(true) };
-    return { requested: missing, promise: chrome.permissions.request({ origins: missing }) };
+    // Never throws, never rejects: when Chrome refuses to show its prompt at all (an error, not
+    // a "Deny"), the promise resolves false and gate.error keeps Chrome's reason, so every
+    // caller's not-granted branch says what happened instead of the click silently doing nothing.
+    var gate = { requested: missing, error: null, promise: null };
+    try {
+      gate.promise = chrome.permissions.request({ origins: missing }).then(function (granted) {
+        return !!granted;
+      }, function (e) {
+        gate.error = (e && e.message) || String(e);
+        return false;
+      });
+    } catch (e) {
+      gate.error = (e && e.message) || String(e);
+      gate.promise = Promise.resolve(false);
+    }
+    return gate;
+  }
+
+  // The line a not-granted gate shows: a real "Deny" names the sites; a prompt Chrome would not
+  // show at all says so, with Chrome's own reason and the way through that needs no prompt.
+  function permissionLine(gate, doing) {
+    var hosts = gate.requested.map(hostFromPattern).join(', ');
+    if (gate.error) {
+      return 'Chrome did not show its permission prompt for ' + hosts + ' (' + gate.error + '). ' +
+        'Click again, or press Alt+Shift+G on the page, which needs no prompt unless the form ' +
+        'is embedded from another site.';
+    }
+    return 'ApplyPilot needs permission to ' + doing + ' on ' + hosts + ' — nothing runs until you allow it.';
   }
 
   function setStatus(text, isError) {
@@ -709,8 +736,7 @@
     var gate = gatePermissions(tabId);
     gate.promise.then(async function (granted) {
       if (!granted) {
-        setStatus('ApplyPilot needs permission to fill forms on ' +
-          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', true);
+        setStatus(permissionLine(gate, 'fill forms'), true);
         return;
       }
       var tab = await safeGetTab(tabId);
@@ -772,8 +798,7 @@
     gate.promise.then(async function (granted) {
       if (!granted) {
         continuationToggle.checked = false;
-        setStatus('ApplyPilot needs permission to keep filling on ' +
-          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', true);
+        setStatus(permissionLine(gate, 'keep filling'), true);
         return;
       }
       var tab = await safeGetTab(tabId);
@@ -820,8 +845,7 @@
     var gate = gatePermissions(tabId);
     gate.promise.then(async function (granted) {
       if (!granted) {
-        setStatus('ApplyPilot needs permission to read this page on ' +
-          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', true);
+        setStatus(permissionLine(gate, 'read this page'), true);
         return;
       }
       reportBtn.disabled = true;
@@ -989,8 +1013,7 @@
     var gate = gatePermissions(tabId);
     gate.promise.then(async function (granted) {
       if (!granted) {
-        setCoverLetterStatus('ApplyPilot needs permission to read this page on ' +
-          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', 'error');
+        setCoverLetterStatus(permissionLine(gate, 'read this page'), 'error');
         return;
       }
       var tab = await safeGetTab(tabId);
@@ -1130,8 +1153,7 @@
     var gate = gatePermissions(tabId);
     gate.promise.then(async function (granted) {
       if (!granted) {
-        setTailorResumeStatus('ApplyPilot needs permission to read this page on ' +
-          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', 'error');
+        setTailorResumeStatus(permissionLine(gate, 'read this page'), 'error');
         return;
       }
       var tab = await safeGetTab(tabId);

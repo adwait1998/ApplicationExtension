@@ -112,6 +112,11 @@ try:
                     pass
             check("extension loaded (MV3 service worker registered)", sw is not None)
             ext_id = sw.url.split("/")[2]
+            # Never the operator's REAL installed native host (it would auto-connect this test
+            # to the real service and real profile): point the extension at a host name no one
+            # registers, before any extension page loads.
+            sw.evaluate("(h) => chrome.storage.local.set({ nativeHostNameOverride: h })",
+                        "com.applypilot.copilot.test_absent")
 
             page = ctx.new_page()
             # Seed the extension's storage the way the operator would via Options.

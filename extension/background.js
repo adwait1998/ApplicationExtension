@@ -71,18 +71,30 @@ if (self.chrome && chrome.sidePanel && typeof chrome.sidePanel.setPanelBehavior 
 // ---------------------------------------------------------------------
 var NATIVE_HOST_NAME = 'com.applypilot.copilot';
 
+// TEST-ONLY: chrome.storage.local.nativeHostNameOverride points the extension at a
+// different host name, so the automated tests can never reach an operator's REAL,
+// installed host (and through it the real service and data) on the machine they run
+// on — the test sets a name no host is registered under. Absent in normal use.
+function nativeHostName() {
+  return chrome.storage.local.get('nativeHostNameOverride').then(function (r) {
+    return (r && r.nativeHostNameOverride) || NATIVE_HOST_NAME;
+  }, function () { return NATIVE_HOST_NAME; });
+}
+
 function sendNativeMessage(message) {
-  return new Promise(function (resolve) {
-    try {
-      if (!chrome.runtime.sendNativeMessage) { resolve({ ok: false, error: 'nativeMessaging unavailable in this browser' }); return; }
-      chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, function (response) {
-        var err = chrome.runtime.lastError;
-        if (err) { resolve({ ok: false, error: (err && err.message) || String(err) }); return; }
-        resolve(response && typeof response === 'object' ? response : { ok: false, error: 'empty response from the native host' });
-      });
-    } catch (e) {
-      resolve({ ok: false, error: String(e && e.message ? e.message : e) });
-    }
+  return nativeHostName().then(function (hostName) {
+    return new Promise(function (resolve) {
+      try {
+        if (!chrome.runtime.sendNativeMessage) { resolve({ ok: false, error: 'nativeMessaging unavailable in this browser' }); return; }
+        chrome.runtime.sendNativeMessage(hostName, message, function (response) {
+          var err = chrome.runtime.lastError;
+          if (err) { resolve({ ok: false, error: (err && err.message) || String(err) }); return; }
+          resolve(response && typeof response === 'object' ? response : { ok: false, error: 'empty response from the native host' });
+        });
+      } catch (e) {
+        resolve({ ok: false, error: String(e && e.message ? e.message : e) });
+      }
+    });
   });
 }
 

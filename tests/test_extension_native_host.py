@@ -70,8 +70,10 @@ def test_install_pins_the_id_writes_host_files_and_registers(tmp_path):
     (ext / "manifest.json").write_text(json.dumps({"manifest_version": 3, "name": "X"}), encoding="utf-8")
     key = base64.b64encode(b"k" * 40).decode()
     reg = {}
+    deleted = []  # never the real registry in a test
     r = native_install.install(ext, tmp_path / "data", python_exe=r"C:\Py\python.exe",
-                               env={"APPLYPILOT_DIR": r"E:\data"}, reg_set=reg.__setitem__, keygen=lambda: key)
+                               env={"APPLYPILOT_DIR": r"E:\data"}, reg_set=reg.__setitem__,
+                               reg_delete=deleted.append, keygen=lambda: key)
     assert json.loads((ext / "manifest.json").read_text(encoding="utf-8"))["key"] == key
     assert r["extension_id"] == native_install.extension_id_from_key(key)
     host = json.loads((tmp_path / "data" / "native_host" / "com.applypilot.copilot.json").read_text())
@@ -79,9 +81,11 @@ def test_install_pins_the_id_writes_host_files_and_registers(tmp_path):
     bat = (tmp_path / "data" / "native_host" / "applypilot_host.bat").read_text()
     assert r'set "APPLYPILOT_DIR=E:\data"' in bat and "applypilot.extension.native_host" in bat
     assert set(reg) == {base + r"\com.applypilot.copilot" for base in native_install.REGISTRY_PATHS}
+    assert set(reg) == {r"Software\Google\Chrome\NativeMessagingHosts\com.applypilot.copilot"}  # Chrome only
+    assert r"Software\Chromium\NativeMessagingHosts\com.applypilot.copilot" in deleted  # legacy entry removed
     # A second install keeps the same key (and so the same ID).
     native_install.install(ext, tmp_path / "data", python_exe="py", env={}, reg_set=reg.__setitem__,
-                           keygen=lambda: "different")
+                           reg_delete=deleted.append, keygen=lambda: "different")
     assert json.loads((ext / "manifest.json").read_text(encoding="utf-8"))["key"] == key
 
 

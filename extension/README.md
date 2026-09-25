@@ -447,6 +447,14 @@ are never written into the fill-report export (see "Export fill report" below).
   frames a tab currently has, so it knows which origins a fill will need (see below) and so
   `background.js` can find and message each one by its own frame id (see "Fill every frame").
   It never lets this extension see browsing history beyond the current tab's own frame tree.
+- `tabs`: lets the panel read the URL of the tab it is showing *before* you have allowed that
+  site. Without it Chrome hides `tab.url` for every site the extension has no host permission
+  for, so the panel could not tell a job page from a `chrome://` page — it showed "Open a job
+  application page (http/https) in this tab…" on every real site and never offered Fill (and so
+  never reached the per-site prompt below). Chrome words this permission as "Read your browsing
+  history" because it technically exposes every open tab's URL and title; the extension only
+  ever reads the one tab the panel is showing, and only to decide whether Fill applies and
+  which origins to ask for. Nothing about it is stored or sent anywhere until you click Fill.
 - `host_permissions` is **only** `http://127.0.0.1/*` and `http://127.0.0.1:*/*` — the local
   service, and nothing else. That is the *only* host this extension can ever act on without
   asking you first. There is no static grant for `https://*/*`, `http://*/*`, or `<all_urls>` —
@@ -466,7 +474,10 @@ are never written into the fill-report export (see "Export fill report" below).
   - You're asked **once per site** (Chrome remembers the grant — see `chrome://extensions` → this
     extension → "Site access" — and it's revocable there any time); if you decline, the panel
     shows one line — "ApplyPilot needs permission to fill forms on \<hosts\> — nothing runs until
-    you allow it." — and **nothing is injected, nothing runs**.
+    you allow it." — and **nothing is injected, nothing runs**. If Chrome refuses to show the
+    prompt at all (an error, not a Deny), the line says so instead, with Chrome's own reason and
+    the no-prompt route (Alt+Shift+G, see "Keyboard shortcuts") — the click never silently does
+    nothing.
   - A 127.0.0.1 test/dev page never triggers this prompt at all — it's already covered by the
     static `host_permissions` above.
   - None of this widens what the extension does *unprompted*: injection is still 100% gated on a

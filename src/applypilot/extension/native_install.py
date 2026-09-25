@@ -8,7 +8,7 @@ What ``applypilot extension install-host`` does:
    ``python -m applypilot.extension.native_host`` with this install's data
    directory, and com.applypilot.copilot.json, the host manifest naming the
    launcher and allowing ONLY that extension ID;
-3. registers the manifest for Chrome (and Chromium) under
+3. registers the manifest for Google Chrome (only) under
    HKCU\\Software\\<browser>\\NativeMessagingHosts\\com.applypilot.copilot.
 
 Everything is per-user and reversible with ``uninstall-host``.
@@ -25,8 +25,15 @@ from typing import Callable
 
 from applypilot.extension.native_host import HOST_NAME
 
+# Google Chrome only. Registering for Chromium too let the test suite's own
+# (Playwright) Chromium find the operator's real host and talk to the real,
+# live service; nobody runs the extension in plain Chromium day to day.
 REGISTRY_PATHS = (
     r"Software\Google\Chrome\NativeMessagingHosts",
+)
+# Registered by the first version of this installer; removed on (re)install
+# and uninstall.
+LEGACY_REGISTRY_PATHS = (
     r"Software\Chromium\NativeMessagingHosts",
 )
 
@@ -99,6 +106,7 @@ def _winreg_delete(subkey: str) -> None:
 def install(extension_dir: Path, app_dir: Path, *, python_exe: str | None = None,
             env: dict[str, str] | None = None,
             reg_set: Callable[[str, str], None] = _winreg_set,
+            reg_delete: Callable[[str], None] | None = None,
             keygen: Callable[[], str] = _new_public_key_b64) -> dict:
     ext_id = ensure_manifest_key(Path(extension_dir) / "manifest.json", keygen=keygen)
     env = dict(os.environ if env is None else env)
@@ -106,11 +114,13 @@ def install(extension_dir: Path, app_dir: Path, *, python_exe: str | None = None
     manifest = write_host_files(Path(app_dir) / "native_host", ext_id, python_exe or sys.executable, env)
     for base in REGISTRY_PATHS:
         reg_set(base + "\\" + HOST_NAME, str(manifest))
+    for base in LEGACY_REGISTRY_PATHS:
+        (reg_delete or _winreg_delete)(base + "\\" + HOST_NAME)
     return {"extension_id": ext_id, "manifest": str(manifest)}
 
 
 def uninstall(app_dir: Path, *, reg_delete: Callable[[str], None] = _winreg_delete) -> None:
-    for base in REGISTRY_PATHS:
+    for base in REGISTRY_PATHS + LEGACY_REGISTRY_PATHS:
         reg_delete(base + "\\" + HOST_NAME)
     host_dir = Path(app_dir) / "native_host"
     for name in ("applypilot_host.bat", f"{HOST_NAME}.json"):

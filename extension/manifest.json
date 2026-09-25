@@ -27,6 +27,7 @@
     "activeTab",
     "storage",
     "scripting",
+    "tabs",
     "sidePanel",
     "webNavigation",
     "nativeMessaging"
