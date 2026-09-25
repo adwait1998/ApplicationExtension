@@ -844,6 +844,41 @@
   <button id="ats_widgets_submit_btn">Submit</button>
 </form>
 
+<!-- ===================================================================
+     Ashby's REAL markup shape, verbatim (live-probe capture, 2026-09-24, jobs.ashbyhq.com):
+     Ashby's application page has NO <form> element at all (ancestors are plain divs +
+     div[role=tabpanel]), and every button -- including its own "Submit Application" -- carries
+     NO type="" attribute, so el.type reports "submit" by default and el.form is null. Kept
+     OUTSIDE any <form> on purpose so isChoiceButtonSafe()'s type=submit-but-no-form-owner
+     relaxation is exercised against the SAME shape the real page has, not a stand-in. The
+     decoy "Submit Application" button is ALSO type-less with no form (so it cannot submit
+     anything natively either) and is "submitted" only via its own JS click handler --
+     confirming a click never reaches it is a genuine proof, not a vacuous one.
+     =================================================================== -->
+<div id="ashby-no-form-container">
+  <div class="ashby-application-form-field-entry" id="ashby_noform_entry">
+    <label class="ashby-application-form-question-title">Are you legally authorized to work in this country?</label>
+    <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" id="ashby_noform_yes">Yes</button>
+    <button class="_container_pjyt6_1 _option_1svni_32  ashby-application-form-input-yesno-option" id="ashby_noform_no">No</button>
+  </div>
+  <button id="ashby_noform_submit">Submit Application</button>
+</div>
+<script>
+(function () {
+  var yes = document.getElementById('ashby_noform_yes');
+  var no = document.getElementById('ashby_noform_no');
+  [yes, no].forEach(function (b) {
+    b.addEventListener('click', function () {
+      [yes, no].forEach(function (o) { o.classList.remove('_option_1svni_32--selected_9xk2'); });
+      b.classList.add('_option_1svni_32--selected_9xk2'); // Ashby-style hashed "selected" class
+    });
+  });
+  document.getElementById('ashby_noform_submit').addEventListener('click', function () {
+    window.__ASHBY_NOFORM_SUBMIT_COUNT__ = (window.__ASHBY_NOFORM_SUBMIT_COUNT__ || 0) + 1;
+  });
+})();
+</script>
+
 <!-- Hidden fixtures for DIRECT function calls only (never through scanFields()'s whole-page
      scan -- same convention as #eeo_matcher_fixtures below), so adding them here never
      perturbs the sitewide "radio group captured as ONE field" count. Covers the Lever

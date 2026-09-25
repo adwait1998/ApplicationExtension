@@ -1958,20 +1958,48 @@
    * text must not read as a submit/next/save-shaped action — a decoy submit button sitting
    * right next to the group must never be clicked.
    */
-  function isChoiceButtonSafe(el, container) {
+  /**
+   * `optionTexts` (this group's own known option texts, e.g. ["Yes", "No"]) is required ONLY
+   * to unlock the type=submit relaxation below; the type=button path never needs it, so
+   * existing callers that only care about that path may omit it.
+   */
+  function isChoiceButtonSafe(el, container, optionTexts) {
     if (!el || el.nodeType !== 1 || el.tagName !== 'BUTTON') return false;
-    if (String(el.type || '').toLowerCase() !== 'button') return false;
     if (!container || !container.contains(el)) return false;
     if (el.closest && el.closest('nav, header, footer')) return false;
     if (!isVisible(el)) return false;
     if (el.disabled) return false;
     if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
-    if (ADD_BUTTON_DENY_RE.test(accessibleControlText(el))) return false;
-    return true;
+    var text = accessibleControlText(el);
+    if (ADD_BUTTON_DENY_RE.test(text)) return false;
+
+    var effectiveType = String(el.type || '').toLowerCase();
+    if (effectiveType === 'button') return true;
+    // Real Ashby markup (live capture, 2026-09-24): every option button, including its OWN
+    // "Submit Application" button, carries NO type="" attribute at all -- which the DOM
+    // reports as the default type "submit" -- but Ashby's whole application has no <form>
+    // element whatsoever, so a click on such a button cannot submit anything natively (there
+    // is nothing for it to submit). Relaxed ONLY for that specific, structurally safe shape:
+    // no form owner, AND the button's own text is EXACTLY one of THIS group's known option
+    // texts (re-checked here independently of whatever the caller already matched, so a bug
+    // upstream still cannot turn this into "click any type-less button in the container") --
+    // a decoy "Submit Application" button never has a matching option text, so it is refused
+    // by this same check regardless of type or form ownership.
+    if (effectiveType === 'submit' && !el.form) {
+      if (!optionTexts || !optionTexts.length) return false;
+      var norm = cleanText(text).toLowerCase();
+      for (var i = 0; i < optionTexts.length; i++) {
+        if (cleanText(optionTexts[i]).toLowerCase() === norm) return true;
+      }
+      return false;
+    }
+    return false;
   }
 
   /** Selected-state per the ground truth: aria-pressed/aria-checked, a data-state/class
-   * change, or (Ashby's own real markup) a hidden checkbox mirror inside the same container. */
+   * change (Ashby's real classes are hashed CSS-modules names, e.g. "_option_1svni_32", so
+   * this matches "selected"/"active" etc. as a bare substring rather than a whole word), or
+   * (Ashby's own real markup) a hidden checkbox mirror inside the same container. */
   function isChoiceButtonSelected(button) {
     if (!button) return false;
     var ariaPressed = ((button.getAttribute && button.getAttribute('aria-pressed')) || '').toLowerCase();
@@ -1981,7 +2009,7 @@
     var dataState = ((button.getAttribute && button.getAttribute('data-state')) || '').toLowerCase();
     if (dataState === 'checked' || dataState === 'selected' || dataState === 'active' || dataState === 'on') return true;
     var cls = String(button.className || '').toLowerCase();
-    if (/\b(active|selected|is-checked|is-selected)\b/.test(cls)) return true;
+    if (/active|selected|is-checked|is-selected/.test(cls)) return true;
     return false;
   }
 
@@ -1993,7 +2021,8 @@
 
   /** Matches `value` against the group's own button texts (matchChoiceOption — never the
    * first of several) and clicks the match through isChoiceButtonSafe. A decoy submit button
-   * beside the group is never even considered: it is not one of `entry.buttons`. */
+   * beside the group is never even considered a candidate: it is not one of `entry.buttons`,
+   * and even if it were, its text would not equal a known option (see isChoiceButtonSafe). */
   function fillButtonGroup(entry, value, doc) {
     var target = String(value == null ? '' : value).trim();
     if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
@@ -2003,7 +2032,7 @@
       return Promise.resolve({ ok: false, reason: 'no confident match for "' + target + '" among button options' });
     }
     var button = entry.buttons[idx];
-    if (!isChoiceButtonSafe(button, entry.container)) {
+    if (!isChoiceButtonSafe(button, entry.container, texts)) {
       return Promise.resolve({ ok: false, reason: 'matched button failed the safety guard' });
     }
     button.click();

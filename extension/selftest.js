@@ -1552,8 +1552,8 @@ pending.push((async () => {
   const doc = dom.window.document;
   const scanned = Scanner.scanFields(doc);
   const bgFields = scanned.fields.filter(f => f.widget === 'button-group');
-  expect('button groups detected: work-authorization, sponsorship, and the decoy-adjacent relocation question',
-    bgFields.length === 3);
+  expect('button groups detected: work-authorization, sponsorship, the decoy-adjacent relocation question, and the no-form real-shape group',
+    bgFields.length === 4);
 
   const workauth = bgFields.find(f => /permanently authorized/i.test(f.label));
   const sponsor = bgFields.find(f => /require sponsorship/i.test(f.label));
@@ -1585,6 +1585,25 @@ pending.push((async () => {
   expect('isChoiceButtonSafe REFUSES a type=submit button even with matching option TEXT ("Yes")',
     Scanner.isChoiceButtonSafe(submitTypeBtn, container) === false);
   container.removeChild(submitTypeBtn);
+
+  // --- real Ashby shape: no <form> anywhere, every button (including the decoy) is type-less
+  //     (el.type reports "submit" by default, el.form is null) ---
+  const noFormYes = doc.getElementById('ashby_noform_yes');
+  const noFormNo = doc.getElementById('ashby_noform_no');
+  const noFormContainer = doc.getElementById('ashby_noform_entry');
+  const noFormDecoy = doc.getElementById('ashby_noform_submit');
+  expect('fixture sanity: the no-form option buttons really are type-less (type reports "submit")',
+    noFormYes.type === 'submit' && noFormNo.type === 'submit');
+  expect('fixture sanity: the no-form option buttons truly have no form owner', noFormYes.form === null);
+  expect('fixture sanity: the decoy "Submit Application" is ALSO type-less with no form owner',
+    noFormDecoy.type === 'submit' && noFormDecoy.form === null);
+
+  expect('isChoiceButtonSafe allows a type-less (submit-by-default), form-less Ashby option button whose text matches a known option',
+    Scanner.isChoiceButtonSafe(noFormYes, noFormContainer, ['Yes', 'No']) === true);
+  expect('isChoiceButtonSafe REFUSES the type-less, form-less DECOY "Submit Application" button -- its text is not a known option',
+    Scanner.isChoiceButtonSafe(noFormDecoy, noFormContainer, ['Yes', 'No']) === false);
+  expect('isChoiceButtonSafe REFUSES a type-less, form-less button when no optionTexts are supplied at all (never relaxes blind)',
+    Scanner.isChoiceButtonSafe(noFormYes, noFormContainer) === false);
 })();
 
 // --- combobox / button-group / Lever-location: async fill + verify behavior, run STRICTLY
@@ -1696,6 +1715,18 @@ pending.push((async () => {
       (dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0) === before);
   }
 
+  // ---- real Ashby shape: no <form> at all, every button (including the decoy) type-less ----
+  {
+    const field = fieldByLabel('Are you legally authorized to work in this country?');
+    expect('the no-form Ashby button group is scanned like any other button group', !!field && field.widget === 'button-group');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'No');
+    expect('real-shape (type-less, no <form>) Ashby button group: "No" clicked and verified selected via its hashed "selected" class',
+      ok === true && byId('ashby_noform_no').className.indexOf('selected') !== -1);
+    expect('the type-less DECOY "Submit Application" beside it (also no form) was NEVER clicked',
+      !dom.window.__ASHBY_NOFORM_SUBMIT_COUNT__);
+  }
+
   // ---- Lever location type-ahead ----
   {
     const field = fieldByLabel('Current location');
@@ -1735,6 +1766,12 @@ pending.push((async () => {
     byId('ashby_decoy_submit').click();
     expect('bypassing every guard and clicking the decoy submit button directly DOES fire its form\'s submit handler',
       (dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0) === before + 1);
+  }
+  {
+    const before = dom.window.__ASHBY_NOFORM_SUBMIT_COUNT__ || 0;
+    byId('ashby_noform_submit').click();
+    expect('bypassing every guard and clicking the type-less, form-less decoy directly DOES fire its own click handler (a genuine trap, not vacuous)',
+      (dom.window.__ASHBY_NOFORM_SUBMIT_COUNT__ || 0) === before + 1);
   }
 })());
 
