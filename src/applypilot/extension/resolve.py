@@ -223,6 +223,21 @@ def resolve_field(
     if canary.is_canary(label):
         answer = canary.resolve_canary(label, profile)
         category = _canary_category(label)
+        options = [o for o in (field.options or []) if o and o.strip()]
+        if answer and options and (category in ("workauth", "sponsorship")
+                                   or answer == canary._EEO_DECLINE):
+            # The options may bundle facts ("Yes, I am a U.S. citizen or
+            # permanent resident" vs "Yes, ... will require sponsorship"):
+            # send the ONE option consistent with the whole profile, or
+            # leave the question for the applicant.
+            chosen, why = canary.choose_option(label, options, profile)
+            if not chosen:
+                return SkipResult(id=field.id, source="canary",
+                                  reason=f"canary:{category} — {why}", auto_fill=False)
+            answer = chosen
+        if answer and category == "salary" and (field.type or "").strip().lower() == "number":
+            digits = re.sub(r"[^\d.]", "", answer.split()[0] if answer.split() else "")
+            answer = digits or None  # a number input takes the number, not "120000 USD"
         if answer:
             return FillResult(
                 id=field.id,
