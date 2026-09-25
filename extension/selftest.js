@@ -683,11 +683,24 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('Workday masked single-input dateInputWrapper (no aria-label Month/Year at all) is ALSO scanned, widget "wd-date-my"',
     !!maskedField);
 
+  // Every Workday date-part input on the whole page, across every fixture (My, Y, masked, MDY,
+  // async, yearclear, hidden, localized) -- none of these may ALSO turn up as a plain 'element'
+  // field. This caught a real bug during development: dayEl (Self-Identify's third part) was
+  // never added to the consumed-elements set, so it was scanned a second time as an ordinary
+  // text field alongside being part of the merged wd-date-mdy field.
+  const allWdDatePartIds = [
+    'wd_start_month', 'wd_start_year', 'wd_edu_from_year', 'wd_cert_masked',
+    'wd_async_month', 'wd_async_year', 'wd_yearclear_month', 'wd_yearclear_year',
+    'wd_hidden_month', 'wd_hidden_year', 'wd_selfid_month', 'wd_selfid_day', 'wd_selfid_year',
+    'wd_monat_month', 'wd_monat_year'
+  ];
+  const allWdDatePartEls = allWdDatePartIds.map(id => doc.getElementById(id));
   const strayWd = scanned.fields.filter(f => {
     const e = scanned.registry[f.id];
-    return e && e.kind === 'element' && (e.el === monthEl || e.el === yearEl || e.el === eduYearEl || e.el === maskedEl);
+    return e && e.kind === 'element' && allWdDatePartEls.indexOf(e.el) !== -1;
   });
-  expect('Workday spinner/masked date inputs are never ALSO scanned as ordinary text fields', strayWd.length === 0);
+  expect('Workday spinner/masked date inputs (every fixture, including MDY\'s Day) are never ALSO scanned as ordinary text fields',
+    strayWd.length === 0);
 
   const degreeBtn = doc.getElementById('wd_degree_button');
   const degreeField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-dropdown'
@@ -707,59 +720,79 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
     return e && e.kind === 'element' && (e.el === fosInput || e.el === skillsInput);
   });
   expect('the prompts\' inner <input>s are never ALSO scanned as ordinary text fields', strayPromptInputs.length === 0);
+
+  // --- Month+Day+Year (Self-Identify "Date") ------------------------------------------------
+  const selfidMonth = doc.getElementById('wd_selfid_month');
+  const selfidDay = doc.getElementById('wd_selfid_day');
+  const selfidYear = doc.getElementById('wd_selfid_year');
+  const mdyField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-date-mdy'
+    && scanned.registry[f.id].dayEl === selfidDay);
+  expect('Workday Month+Day+Year dateInputWrapper is scanned as ONE field with widget "wd-date-mdy" (never mistaken for Month+Year)',
+    !!mdyField && mdyField.widget === 'wd-date-mdy');
+  const mdyEntry = mdyField && scanned.registry[mdyField.id];
+  expect('the wd-date-mdy registry entry carries month/day/year elements',
+    mdyEntry && mdyEntry.monthEl === selfidMonth && mdyEntry.dayEl === selfidDay && mdyEntry.yearEl === selfidYear);
+
+  // --- a localized tenant (aria-label="Monat"/"Jahr") is STILL detected, via data-automation-id ---
+  const monatField = scanned.fields.find(f => scanned.registry[f.id] && scanned.registry[f.id].kind === 'wd-date-my'
+    && scanned.registry[f.id].monthEl === doc.getElementById('wd_monat_month'));
+  expect('a localized aria-label ("Monat") does not block detection -- data-automation-id is the locale-independent hook',
+    !!monatField);
+
+  // --- Self-Identify disability CheckboxGroup (CC-305) --------------------------------------
+  const cgField = scanned.fields.find(f => f.type === 'checkbox-group');
+  expect('the disabilityStatus CheckboxGroup is scanned as ONE field with type "checkbox-group"', !!cgField);
+  expect('...labelled from its own <legend>', cgField && cgField.label === 'Please check one of the boxes below:');
+  expect('...options are the three CC-305 option texts, in document order', cgField && JSON.stringify(cgField.options) === JSON.stringify([
+    'Yes, I have a disability, or have had one in the past',
+    'No, I do not have a disability and have not had one in the past',
+    'I do not want to answer'
+  ]));
+  const cgEntry = cgField && scanned.registry[cgField.id];
+  const strayDisabilityBoxes = scanned.fields.filter(f => {
+    const e = scanned.registry[f.id];
+    return e && e.kind === 'element' && cgEntry && cgEntry.boxes.indexOf(e.el) !== -1;
+  });
+  expect('the group\'s own checkboxes are never ALSO scanned as independent boolean fields', strayDisabilityBoxes.length === 0);
+
+  // --- the terms/consent checkbox is NEVER offered as a fillable field at all ---------------
+  const agreementCb = doc.getElementById('wd_agreement_checkbox');
+  const agreementScanned = scanned.fields.some(f => scanned.registry[f.id] && scanned.registry[f.id].el === agreementCb);
+  expect('agreementCheckbox (terms/consent) is never scanned as a fillable field, not even a plain checkbox (hard-deny)',
+    agreementScanned === false);
+  expect('hasWorkdayHardDenyAutomationId recognises agreementCheckbox directly',
+    Scanner.hasWorkdayHardDenyAutomationId(agreementCb) === true);
 })();
 
 // --- spinner dates: the ArrowUp technique, its retry-once path, and the masked fallback ----
+// setWorkdaySpinnerValue()/setWorkdayDateValue() are now ASYNCHRONOUS (a real yield is exactly
+// the fix for the "hangs on dates" report -- see the project brief), so applyFill() on any
+// wd-date-* entry now returns a Promise instead of a plain boolean. All date-value testing
+// below therefore lives in the sequential async block further down, alongside the
+// dropdown/prompt/résumé tests it already had to run strictly sequentially for the same reason.
 (() => {
   const doc = dom.window.document;
   const scanned = Scanner.scanFields(doc);
   const monthEl = doc.getElementById('wd_start_month');
-  const yearEl = doc.getElementById('wd_start_year');
-  const myEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-date-my' && e.monthEl === monthEl);
-  expect('found the Work Experience "From" wd-date-my registry entry', !!myEntry);
 
   // Prove the mock is genuinely adversarial: the WRONG (previously-shipped) technique —
-  // plain value + input/change — really is ignored, not just assumed to be.
+  // plain value + input/change — really is ignored, not just assumed to be. This part alone
+  // stays synchronous: the mock's revert-on-input/change listener fires (and un-fires) within
+  // the same tick, well before any real spinner value could ever legitimately change.
   monthEl.value = '07';
   monthEl.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
   monthEl.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   expect('the mock Workday spinner genuinely IGNORES plain value+input/change (proves the mock, not just the fix)',
     monthEl.value !== '07');
+  expect('...and the "-display" div never moved off its placeholder either (truth lives only in -display/aria-valuetext)',
+    doc.getElementById('wd_start_month-display').textContent === 'MM');
 
-  const ok = Scanner.applyFill(myEntry, '09/2020');
-  expect('applyFill commits "09/2020" into the Month/Year spinner pair via the set-then-ArrowUp technique', ok === true);
-  expect('month spinner reads back 9', parseInt(monthEl.value, 10) === 9);
-  expect('year spinner reads back 2020', parseInt(yearEl.value, 10) === 2020);
-  expect('getCurrentValue reassembles the pair as "09/2020" (zero-padded month)', Scanner.getCurrentValue(myEntry) === '09/2020');
-
-  const okBad = Scanner.applyFill(myEntry, 'not-a-date');
-  expect('a non-MM/YYYY value is refused rather than guessed at', okBad === false);
-
-  // Year-only field whose mock spinner deliberately needs ArrowUp TWICE per unit.
-  const eduYearEl = doc.getElementById('wd_edu_from_year');
-  const yEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-date-y' && e.yearEl === eduYearEl);
-  expect('found the Education "From" wd-date-y registry entry', !!yEntry);
-  const okY = Scanner.applyFill(yEntry, '2016');
-  expect('setWorkdaySpinnerValue\'s retry-once path commits a year into a spinner that needs ArrowUp TWICE per unit', okY === true);
-  expect('year-only spinner reads back 2016', parseInt(eduYearEl.value, 10) === 2016);
-
-  const okY2 = Scanner.applyFill(yEntry, '05/2017');
-  expect('a "MM/YYYY" value sent to a wd-date-y field uses ONLY the year part',
-    okY2 === true && parseInt(eduYearEl.value, 10) === 2017);
-
-  // Masked single-input fallback (ankitsharma38).
-  const maskedEl = doc.getElementById('wd_cert_masked');
-  const maskedEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-date-my' && e.maskedEl === maskedEl);
-  expect('found the masked single-input wd-date-my registry entry', !!maskedEntry);
-
-  maskedEl.value = '11/2025'; // plain write, no preceding keydown at all
-  maskedEl.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
-  expect('the mock masked field genuinely IGNORES plain value+input with no preceding keydown',
-    maskedEl.value !== '11/2025');
-
-  const okMasked = Scanner.applyFill(maskedEntry, '03/2021');
-  expect('typeMaskedTextField types "03/2021" character by character (keydown/keypress/input/keyup per char)', okMasked === true);
-  expect('masked field reads back "03/2021"', maskedEl.value === '03/2021');
+  // An invalid value short-circuits with no DOM side effects at all (see setWorkdayDateValue),
+  // so this proves the Promise-returning contract without touching the shared document's state
+  // ahead of the sequential async block below.
+  const myEntryForShapeCheck = Object.values(scanned.registry).find(e => e.kind === 'wd-date-my' && e.monthEl === monthEl);
+  expect('setWorkdaySpinnerValue/setWorkdayDateValue now return a Promise (asynchronous, per the project brief)',
+    typeof Scanner.setWorkdayDateValue(myEntryForShapeCheck, 'not-a-date').then === 'function');
 })();
 
 // --- Workday guards: hard-deny-by-automation-id + never-an-arbitrary-element scope checks ---
@@ -882,11 +915,27 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('isWorkdaySpinnerInputSafe REFUSES an aria-label=Month input that is NOT inside a dateInputWrapper',
     Scanner.isWorkdaySpinnerInputSafe(outsideMonth) === false);
 
+  // Day is now a RECOGNISED part (Self-Identify and similar Month+Day+Year fields) -- the v6
+  // guard refused it outright, which is exactly the bug that would have silently dropped the
+  // Day part of an MDY date.
+  const dayGuardIn = doc.createElement('input');
+  dayGuardIn.setAttribute('aria-label', 'Day');
+  wrapper.appendChild(dayGuardIn);
+  expect('isWorkdaySpinnerInputSafe allows input[aria-label=Day] inside dateInputWrapper (MDY support)',
+    Scanner.isWorkdaySpinnerInputSafe(dayGuardIn) === true);
+
   const wrongLabel = doc.createElement('input');
-  wrongLabel.setAttribute('aria-label', 'Day');
+  wrongLabel.setAttribute('aria-label', 'Duration');
   wrapper.appendChild(wrongLabel);
-  expect('isWorkdaySpinnerInputSafe REFUSES aria-label values other than exactly "Month"/"Year"',
+  expect('isWorkdaySpinnerInputSafe REFUSES an aria-label/automation-id that names no recognised date part at all',
     Scanner.isWorkdaySpinnerInputSafe(wrongLabel) === false);
+
+  const monatIn = doc.createElement('input');
+  monatIn.setAttribute('aria-label', 'Monat'); // localized -- no English aria-label at all
+  monatIn.setAttribute('data-automation-id', 'dateSectionMonth-input');
+  wrapper.appendChild(monatIn);
+  expect('isWorkdaySpinnerInputSafe allows a localized aria-label when data-automation-id names the part (locale-independent hook)',
+    Scanner.isWorkdaySpinnerInputSafe(monatIn) === true);
 
   const trapWrapper = doc.createElement('div');
   trapWrapper.setAttribute('data-automation-id', 'dateInputWrapper');
@@ -1092,6 +1141,40 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
     Scanner.degreeFamilyOf('Master of Human-Computer Interaction') === 'master');
 })();
 
+// --- matchWorkdayPromptOption: exact/acronym-only matching (skills), and the tie rule ------
+(() => {
+  const mwpo = Scanner.matchWorkdayPromptOption;
+  expect('exact (case-insensitive) match wins', mwpo('python', ['Python', 'PySpark']) === 0);
+  expect('the "(ACRONYM)" form matches', mwpo('sql', ['Structured Query Language (SQL)', 'NoSQL']) === 0);
+  expect('NEVER a prefix/startsWith match: "java" does not match "JavaScript"', mwpo('java', ['JavaScript']) === -1);
+  expect('NEVER a substring match: "script" does not match "JavaScript"', mwpo('script', ['JavaScript']) === -1);
+  expect('a TIE on exact match (two options normalising the same) fails rather than guessing',
+    mwpo('python', ['Python', 'python']) === -1);
+  expect('a TIE on the acronym form also fails rather than guessing',
+    mwpo('sql', ['Structured Query Language (SQL)', 'Some Query Locator (SQL)']) === -1);
+  expect('no match at all is -1', mwpo('cobol', ['Python', 'Java']) === -1);
+  expect('an empty term is always -1', mwpo('', ['Python']) === -1);
+})();
+
+// --- findWorkdayDateSectionDisplay: the id-suffix-swap lookup path (the main fixtures all
+//     exercise the OTHER path -- a same-parent data-automation-id sibling -- so this proves the
+//     id-based path independently, on an isolated scratch fixture). ------------------------
+(() => {
+  const doc = dom.window.document;
+  const scratch = doc.createElement('div');
+  scratch.innerHTML =
+    '<div data-automation-id="dateInputWrapper">' +
+    '  <input id="idswap-dateSectionMonth-input" data-automation-id="dateSectionMonth-input" aria-label="Month">' +
+    '  <div id="idswap-dateSectionMonth-display" data-automation-id="dateSectionMonth-display">MM</div>' +
+    '</div>';
+  doc.body.appendChild(scratch);
+  const input = doc.getElementById('idswap-dateSectionMonth-input');
+  const display = Scanner.findWorkdayDateSectionDisplay(input);
+  expect('findWorkdayDateSectionDisplay resolves via the id-suffix swap ("-input" -> "-display") when the ids follow that convention',
+    display && display.id === 'idswap-dateSectionMonth-display');
+  scratch.remove();
+})();
+
 // --- end-to-end: setSelectValue / setRadioValue through the real fill path, via the hidden
 //     EEO fixtures on test-page.html (see the comment there). Also a negative control where the
 //     only options are Yes/No and the field must stay completely untouched.
@@ -1140,6 +1223,91 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
 pending.push((async () => {
   const doc = dom.window.document;
 
+  // ---- dates: async commit, yield-between-parts, wrapper-visibility gating, MDY, localized --
+  {
+    const scanned = Scanner.scanFields(doc);
+    const byKind = (kind, match) => Object.values(scanned.registry).find(e => e.kind === kind && match(e));
+
+    const myEntry = byKind('wd-date-my', e => e.monthEl === doc.getElementById('wd_start_month'));
+    expect('found the Work Experience "From" wd-date-my registry entry', !!myEntry);
+    const okMy = await Scanner.applyFill(myEntry, '09/2020');
+    expect('applyFill commits "09/2020" into the Month/Year pair via the async set-then-ArrowUp technique', okMy === true);
+    expect('month spinner reads back 9', parseInt(doc.getElementById('wd_start_month').value, 10) === 9);
+    expect('year spinner reads back 2020', parseInt(doc.getElementById('wd_start_year').value, 10) === 2020);
+    expect('the "-display" divs show the committed values (zero-padded for month)',
+      doc.getElementById('wd_start_month-display').textContent === '09'
+      && doc.getElementById('wd_start_year-display').textContent === '2020');
+    expect('getCurrentValue reassembles "09/2020" via -display/aria-valuetext', Scanner.getCurrentValue(myEntry) === '09/2020');
+
+    doc.getElementById('wd_start_month').value = '99'; // a raw write with NO commit at all
+    expect('TRUTH-LIVES-ONLY-IN-DISPLAY proof: a raw, uncommitted .value write is never trusted as the field\'s value',
+      Scanner.getCurrentValue(myEntry) === '09/2020');
+    Scanner.setNativeValue(doc.getElementById('wd_start_month'), '09'); // restore, via the mock's own revert path
+
+    const okBad = await Scanner.applyFill(myEntry, 'not-a-date');
+    expect('a non-MM/YYYY value is refused rather than guessed at', okBad === false);
+
+    const yEntry = byKind('wd-date-y', e => e.yearEl === doc.getElementById('wd_edu_from_year'));
+    expect('found the Education "From" wd-date-y registry entry', !!yEntry);
+    const okY = await Scanner.applyFill(yEntry, '2016');
+    expect('setWorkdaySpinnerValue\'s retry-once path commits a year into a spinner needing ArrowUp TWICE per unit', okY === true);
+    expect('year-only spinner reads back 2016 via -display', Scanner.getCurrentValue(yEntry) === '2016');
+    const okY2 = await Scanner.applyFill(yEntry, '05/2017');
+    expect('a "MM/YYYY" value sent to a wd-date-y field uses ONLY the year part', okY2 === true && Scanner.getCurrentValue(yEntry) === '2017');
+
+    const maskedEl = doc.getElementById('wd_cert_masked');
+    const maskedEntry = byKind('wd-date-my', e => e.maskedEl === maskedEl);
+    expect('found the masked single-input wd-date-my registry entry', !!maskedEntry);
+    maskedEl.value = '11/2025';
+    maskedEl.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    expect('the mock masked field genuinely IGNORES plain value+input with no preceding keydown', maskedEl.value !== '11/2025');
+    const okMasked = await Scanner.applyFill(maskedEntry, '03/2021');
+    expect('typeMaskedTextField types "03/2021" character by character', okMasked === true && maskedEl.value === '03/2021');
+
+    // NEGATIVE CONTROL: asynchronous commit (setTimeout 0) -- the actual "hangs on dates" fix.
+    const asyncMonthEl = doc.getElementById('wd_async_month');
+    asyncMonthEl.value = '5';
+    asyncMonthEl.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect('ASYNC-COMMIT proof: a synchronous read-back right after ArrowUp does NOT yet see a setTimeout(0)-deferred commit',
+      asyncMonthEl.value !== '6');
+    await new Promise(resolve => setTimeout(resolve, 30)); // let the deferred mock commit settle first
+    const asyncEntry = byKind('wd-date-my', e => e.monthEl === asyncMonthEl);
+    const okAsync = await Scanner.applyFill(asyncEntry, '08/2019');
+    expect('a real fill still succeeds against an asynchronously-committing spinner',
+      okAsync === true && Scanner.getCurrentValue(asyncEntry) === '08/2019');
+
+    // NEGATIVE CONTROL: "one model per wrapper" -- committing Year right after Month clears Month.
+    const yearclearMonthEl = doc.getElementById('wd_yearclear_month');
+    const yearclearYearEl = doc.getElementById('wd_yearclear_year');
+    yearclearMonthEl.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    yearclearYearEl.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); // no yield at all
+    expect('YEAR-CLEARS-MONTH proof: committing Year immediately after Month (no yield) genuinely clears Month back out',
+      yearclearMonthEl.value === '');
+    const yearclearEntry = byKind('wd-date-my', e => e.monthEl === yearclearMonthEl);
+    const okYearclear = await Scanner.applyFill(yearclearEntry, '07/2025');
+    expect('a real fill YIELDS between parts and survives the adversarial clear -- Month is still 7 after Year is set',
+      okYearclear === true && Scanner.getCurrentValue(yearclearEntry) === '07/2025');
+
+    // NEGATIVE CONTROL: the spinbutton input itself is invisible behind its own visible display.
+    const hiddenMonthEl = doc.getElementById('wd_hidden_month');
+    expect('HIDDEN-INPUT proof: the spinbutton input is genuinely invisible via isVisible()', Scanner.isVisible(hiddenMonthEl) === false);
+    const hiddenEntry = byKind('wd-date-my', e => e.monthEl === hiddenMonthEl);
+    const okHidden = await Scanner.applyFill(hiddenEntry, '04/2018');
+    expect('a fill still succeeds when the input is invisible but its dateInputWrapper is visible (gate on the wrapper, not the input)',
+      okHidden === true && Scanner.getCurrentValue(hiddenEntry) === '04/2018');
+
+    const mdyEntry = byKind('wd-date-mdy', e => e.dayEl === doc.getElementById('wd_selfid_day'));
+    expect('found the Self-Identify Month+Day+Year registry entry', !!mdyEntry);
+    const okMdy = await Scanner.applyFill(mdyEntry, '07/04/2026');
+    expect('Month+Day+Year fills all three parts and reassembles "07/04/2026" (Day is never dropped)',
+      okMdy === true && Scanner.getCurrentValue(mdyEntry) === '07/04/2026');
+
+    const monatEntry = byKind('wd-date-my', e => e.monthEl === doc.getElementById('wd_monat_month'));
+    const okMonat = await Scanner.applyFill(monatEntry, '03/2022');
+    expect('LOCALIZED-TENANT proof: a German aria-label ("Monat"/"Jahr") still fills correctly via data-automation-id',
+      okMonat === true && Scanner.getCurrentValue(monatEntry) === '03/2022');
+  }
+
   // ---- dropdown: degree/country synonyms, no-blind-first-option, Escape-to-close ----
   {
     const scanned = Scanner.scanFields(doc);
@@ -1182,10 +1350,19 @@ pending.push((async () => {
     const okCountry = await Scanner.applyFill(countryEntry, 'USA');
     expect('Country dropdown filled by alias "USA" resolves to "United States of America"',
       okCountry === true && doc.getElementById('wd_country_button_text').textContent === 'United States of America');
+
+    // The country listbox only renders a window of 5 at a time out of 57 -- "United States of
+    // America" sits at index 51, well past what's visible on open, so the assertion above only
+    // passed because the scroll/ArrowDown collection loop actually ran and worked. Reopen it
+    // fresh (a click toggles __scrollIndex back to the initial window) to prove that directly.
+    doc.getElementById('wd_country_button').click(); // open, back to the INITIAL render window
+    const initialCountryRender = Array.from(doc.getElementById('wd_country_listbox').querySelectorAll('[role="option"]')).map(li => li.textContent);
+    doc.getElementById('wd_country_button').click(); // close again
+    expect('...confirmed: the window that renders on open does not include the target at all',
+      !initialCountryRender.includes('United States of America'));
   }
 
-  // ---- prompt: exact/acronym/startsWith/substring matching, no-blind-first-result,
-  //      the Skills LIST (skip-and-continue on a per-term basis) ----
+  // ---- prompt: Field of Study -- portalled popup, loose fixed-list "live search" -----------
   {
     const scanned = Scanner.scanFields(doc);
     const fosInput = doc.getElementById('wd_fos_input');
@@ -1194,28 +1371,112 @@ pending.push((async () => {
     const fosSelected = () => Array.from(doc.querySelectorAll('#wd_fos_selected li')).map(li => li.textContent);
 
     const ok = await Scanner.applyFill(fosEntry, 'Computer Science');
-    expect('Field of Study: exact match "Computer Science" is added to the selected item list',
+    expect('Field of Study: exact match is added, found in the PORTALLED popup (not inside the field)',
       ok === true && fosSelected().includes('Computer Science'));
     expect('the prompt input is cleared after a successful add', fosInput.value === '');
+    expect('the popup is closed (Escape) after a successful add', doc.getElementById('wd_fos_popup').style.display !== 'block');
 
     const okBad = await Scanner.applyFill(fosEntry, 'Zoology');
     expect('Field of Study: a term with NO confident match among the (non-empty) results selects NOTHING',
       okBad === false && fosSelected().length === 1 && !fosSelected().includes('Zoology'));
-    expect('the typed text is cleared (not left sitting in the field) after no confident match', fosInput.value === '');
+    expect('the typed text is cleared after no confident match', fosInput.value === '');
+  }
 
+  // ---- prompt: Skills -- the adversarial suite from the project brief §2.3 (the most likely
+  //      cause of the reported "hangs on ... skills" bug) --------------------------------------
+  {
+    const scanned = Scanner.scanFields(doc);
     const skillsInput = doc.getElementById('wd_skills_input');
     const skillsEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-prompt' && e.input === skillsInput);
+    expect('found the Skills wd-prompt registry entry', !!skillsEntry);
     const skillsSelected = () => Array.from(doc.querySelectorAll('#wd_skills_selected li')).map(li => li.textContent);
-    const okSkills = await Scanner.applyFill(skillsEntry, ['SQL', 'Excel', 'Python']);
-    expect('Skills LIST: "SQL" matches via the acronym form "(SQL)" in "Structured Query Language (SQL)"',
-      skillsSelected().includes('Structured Query Language (SQL)'));
-    expect('Skills LIST: "Excel" (no matching option) is skipped, never force-matched to anything',
-      !skillsSelected().some(t => /excel/i.test(t)));
-    expect('Skills LIST: "Python" (exact match) still gets added after the earlier skip (skip-and-continue, not stop-on-first-failure)',
-      skillsSelected().includes('Python'));
-    expect('Skills LIST applyFill reports overall success once at least one skill matched', okSkills === true);
-    expect('Skills rows use checkboxItem automation ids, clicked via the checkbox itself',
-      doc.querySelectorAll('#wd_skills_results [data-automation-id^="checkboxItem-"]').length > 0);
+
+    // Pre-existing decoys (seeded directly in test-page.html, present since page load):
+    // a DIFFERENT field's own already-open wd-popup, and a DIFFERENT field's own pill --
+    // both listing/containing text Skills will also search for.
+    expect('DECOY setup sanity: the unrelated field\'s pill list already has exactly one pre-existing "Python"',
+      doc.querySelectorAll('#wd_decoy_other_selected li').length === 1
+      && doc.getElementById('wd_decoy_other_selected').textContent.trim() === 'Python');
+
+    const okPython = await Scanner.applyFill(skillsEntry, 'Python');
+    expect('Skills: exact match "Python" is added -- the decoy field\'s pre-existing "Python" pill never short-circuited this',
+      okPython === true && skillsSelected().filter(t => t === 'Python').length === 1);
+
+    const okSql = await Scanner.applyFill(skillsEntry, 'SQL');
+    expect('Skills: "SQL" matches via the acronym form "(SQL)" in "Structured Query Language (SQL)"',
+      okSql === true && skillsSelected().includes('Structured Query Language (SQL)'));
+    expect('the popup is closed (Escape) between terms, not left open for the next one to stumble into',
+      doc.getElementById('wd_skills_popup').style.display !== 'block');
+
+    const t0 = Date.now();
+    const okExcel = await Scanner.applyFill(skillsEntry, 'Excel');
+    expect('Skills: "No Items." is detected and fails FAST, never waiting out the full result budget',
+      okExcel === false && (Date.now() - t0) < 3000);
+    expect('...and nothing Excel-shaped was ever added', !skillsSelected().some(t => /excel/i.test(t)));
+
+    expect('the OLD prefix-matching bug is gone: matchWorkdayPromptOption("java", ["JavaScript"]) no longer matches',
+      Scanner.matchWorkdayPromptOption('java', ['JavaScript']) === -1);
+    const okJava = await Scanner.applyFill(skillsEntry, 'Java');
+    expect('Skills: VIRTUALIZED list -- "Java" (one ArrowDown away) is added exactly, never the rendered "JavaScript" prefix',
+      okJava === true && skillsSelected().includes('Java') && !skillsSelected().includes('JavaScript'));
+
+    const okDocker = await Scanner.applyFill(skillsEntry, 'Docker');
+    expect('Skills: AUTO-COMMIT -- an exact term can commit straight to a pill with NO popup ever appearing',
+      okDocker === true && skillsSelected().includes('Docker'));
+
+    const okK8s = await Scanner.applyFill(skillsEntry, 'Kubernetes');
+    expect('Skills: LATENCY -- results arriving ~900ms after Enter are still caught, not failed prematurely',
+      okK8s === true && skillsSelected().includes('Kubernetes'));
+
+    const okFigma = await Scanner.applyFill(skillsEntry, 'Figma');
+    expect('Skills: PICKY CHECKBOX -- a checkbox that ignores a bare click still gets added via the pointer-sequence fallback',
+      okFigma === true && skillsSelected().includes('Figma'));
+
+    expect('DECOY popup: the unrelated pre-existing wd-popup was never read as Skills\' own results (still shows its untouched row)',
+      doc.querySelector('#wd_decoy_popup [data-automation-checked]').getAttribute('data-automation-checked') === 'Not Checked');
+    expect('DECOY pill: the unrelated field\'s "Python" pill is still exactly one, never touched by any Skills interaction above',
+      doc.querySelectorAll('#wd_decoy_other_selected li').length === 1);
+
+    // "First 2 terms produce no popup at all" -- short resultTimeoutMs override so this stays
+    // fast in the suite; the production default (8s) is for a real, possibly-slow tenant.
+    const abortResult = await Scanner.fillWorkdayPromptValue(skillsEntry,
+      ['totally-unrecognized-term-one', 'totally-unrecognized-term-two', 'Python'],
+      { resultTimeoutMs: 200 });
+    expect('Skills LIST: 2 terms in a row producing no popup at all stops the rest of the list with the operator-facing message',
+      abortResult.results.length === 3 && abortResult.results[2].result.reason === 'Workday skills results not found — please send a Report page');
+    expect('...and the 3rd term was never actually attempted once the abort fired', abortResult.results[2].result.ok === false);
+
+    // Cap and budget are exercised as pure logic (see below) rather than by actually running 16
+    // real terms or waiting out a real 60s here -- keeps the suite fast and deterministic.
+  }
+
+  // ---- Self-Identify disability CheckboxGroup (CC-305): single-choice via the shared
+  //      answer-family matcher; "exactly one" is enforced by unchecking every other box ------
+  {
+    const scanned = Scanner.scanFields(doc);
+    const cgEntry = Object.values(scanned.registry).find(e => e.kind === 'wd-checkbox-group');
+    expect('found the disabilityStatus wd-checkbox-group registry entry', !!cgEntry);
+
+    const okYes = Scanner.applyFill(cgEntry, 'Yes, I have a disability, or have had one in the past');
+    expect('checkbox-group: exact option text checks exactly that box, none of the others',
+      okYes === true && doc.getElementById('wd_disability_yes').checked === true
+      && doc.getElementById('wd_disability_no').checked === false
+      && doc.getElementById('wd_disability_decline').checked === false);
+
+    const okDecline = Scanner.applyFill(cgEntry, 'Decline to self-identify');
+    expect('checkbox-group: the shared decline answer-family matches "I do not want to answer"',
+      okDecline === true && doc.getElementById('wd_disability_decline').checked === true);
+    expect('checkbox-group: "exactly one" holds -- switching answers unchecks the previous one',
+      doc.getElementById('wd_disability_yes').checked === false && doc.getElementById('wd_disability_no').checked === false);
+
+    const okBad = Scanner.applyFill(cgEntry, 'Something Unrelated Entirely');
+    expect('checkbox-group: no confident match leaves the group completely untouched', okBad === false);
+    expect('...the previously-checked answer is still checked (nothing was cleared by the failed attempt)',
+      doc.getElementById('wd_disability_decline').checked === true);
+
+    const agreementCb = doc.getElementById('wd_agreement_checkbox');
+    expect('agreementCheckbox is refused by the checkbox-group option guard even if somehow targeted directly',
+      Scanner.isWorkdayCheckboxGroupOptionSafe(agreementCb, doc.getElementById('wd_disability_group')) === false);
   }
 
   // ---- résumé: duplicate prevention (own isolated JSDOM -- no interference with the shared

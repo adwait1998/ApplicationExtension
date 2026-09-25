@@ -396,50 +396,163 @@
 </script>
 
 <!-- ===================================================================
-     Workday widget ground-truth fixtures (v6 spec) — built ONLY from the real
-     selectors documented in the project brief (berellevy/job_app_filler,
-     ankitsharma38/Workday-Autofill-Assistant), never guessed. This extension's
-     Workday support was built twice before on guesses, and a self-authored
-     mock built from the same guesses passed both times while the operator's
-     real Workday form failed — so every selector below is exactly the
-     structure those two projects match against a live Workday DOM. Kept in
-     its own <form>, separate from #application-form, with its own decoy
-     submit button so a click-path bug here can never be confused with (or
-     masked by) the trap fixtures above.
+     Workday widget ground-truth fixtures (v7 spec, 2026-09-24 brief) — built ONLY from the
+     markup and negative controls cited in docs/research/2026-09-24-ats-widget-ground-truth.md
+     (berellevy/job_app_filler, tarunravisankar/tso_autofiller's verbatim NVIDIA capture,
+     theRoadLessOrdinary/add-skills, ajithchandraapplywizz/Workday_Auto), never guessed. The v6
+     mock encoded the two guesses the brief refuted — results rendered INSIDE the field, and a
+     synchronous spinner commit — and BOTH of those guesses would have passed it, which is
+     exactly the failure mode this rewrite exists to stop happening a third time: every fixture
+     below either matches a cited real capture, or is a negative control that makes the OLD
+     (pre-brief) technique demonstrably fail. Kept in its own <form>, separate from
+     #application-form, with its own decoy submit button so a click-path bug here can never be
+     confused with (or masked by) the trap fixtures above.
      =================================================================== -->
 <form id="wd-form">
 
-  <!-- Month/Year spinner pair (e.g. Work Experience "From") — a real Workday
-       numeric spinbutton pair: plain `.value =` + input/change is IGNORED
-       (see the script below); only a genuine ArrowUp keydown commits it. -->
+  <!-- Month/Year spinner pair (e.g. Work Experience "From") -- the verbatim NVIDIA shape: the
+       SAME element carries data-automation-id="dateSection{Month,Year}-input" AND
+       aria-label="Month"/"Year", with a sibling "-display" div. A plain `.value =` +
+       input/change is IGNORED (see the script below); only a genuine ArrowUp keydown commits
+       it, and the truth afterwards is the -display text/aria-valuetext, never input.value. -->
   <div data-automation-id="formField-wd-start-date" id="wd_start_date_field">
     <label id="wd_start_date_label">From</label>
     <div data-automation-id="dateInputWrapper" id="wd_start_date_wrapper">
-      <input type="text" aria-label="Month" id="wd_start_month" placeholder="MM">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionMonth-display" id="wd_start_month-display">MM</div>
+        <input type="text" role="spinbutton" aria-label="Month" aria-valuemin="1" aria-valuemax="12"
+               data-automation-id="dateSectionMonth-input" id="wd_start_month">
+      </div>
       <span aria-hidden="true">/</span>
-      <input type="text" aria-label="Year" id="wd_start_year" placeholder="YYYY">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionYear-display" id="wd_start_year-display">YYYY</div>
+        <input type="text" role="spinbutton" aria-label="Year" aria-valuemin="1900" aria-valuemax="2100"
+               data-automation-id="dateSectionYear-input" id="wd_start_year">
+      </div>
     </div>
   </div>
 
-  <!-- Year-only spinner (e.g. Education "From"/"To (Actual or Expected)") — same
-       structure, no Month input at all. This one's spinner deliberately needs
-       ArrowUp TWICE per unit to commit, exercising the "some variants need it
-       twice" retry-once path. -->
+  <!-- Year-only spinner (e.g. Education "From"/"To (Actual or Expected)") -- same structure, no
+       Month section at all. This one's spinner deliberately needs ArrowUp TWICE per unit to
+       commit, exercising the "some variants need it twice" retry-once path. -->
   <div data-automation-id="formField-wd-edu-from-year" id="wd_edu_from_field">
     <label id="wd_edu_from_label">From</label>
     <div data-automation-id="dateInputWrapper" id="wd_edu_from_wrapper">
-      <input type="text" aria-label="Year" id="wd_edu_from_year" placeholder="YYYY">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionYear-display" id="wd_edu_from_year-display">YYYY</div>
+        <input type="text" role="spinbutton" aria-label="Year" data-automation-id="dateSectionYear-input" id="wd_edu_from_year">
+      </div>
     </div>
   </div>
 
   <!-- Masked single-input fallback shape (ankitsharma38) — a dateInputWrapper
-       holding exactly ONE plain <input>, no aria-label Month/Year at all.
+       holding exactly ONE plain <input>, no Month/Day/Year section at all.
        Plain value+input with no preceding keydown is IGNORED; only a real
        per-character keydown/keypress/input/keyup sequence sticks. -->
   <div data-automation-id="formField-wd-cert-expiration" id="wd_cert_field">
     <label id="wd_cert_label">Certification Expiration</label>
     <div data-automation-id="dateInputWrapper" id="wd_cert_wrapper">
       <input type="text" id="wd_cert_masked" placeholder="MM/YYYY">
+    </div>
+  </div>
+
+  <!-- NEGATIVE CONTROL: asynchronous commit (setTimeout 0, not synchronous). A same-tick
+       synchronous read-back genuinely sees the OLD value here -- proof the fixture is
+       adversarial, not just assumed to be -- and only setWorkdaySpinnerValue()'s real yield
+       (wdSleep) observes the committed one. -->
+  <div data-automation-id="formField-wd-async-date" id="wd_async_field">
+    <label id="wd_async_label">Async From</label>
+    <div data-automation-id="dateInputWrapper" id="wd_async_wrapper">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionMonth-display" id="wd_async_month-display">MM</div>
+        <input type="text" role="spinbutton" aria-label="Month" data-automation-id="dateSectionMonth-input" id="wd_async_month">
+      </div>
+      <span aria-hidden="true">/</span>
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionYear-display" id="wd_async_year-display">YYYY</div>
+        <input type="text" role="spinbutton" aria-label="Year" data-automation-id="dateSectionYear-input" id="wd_async_year">
+      </div>
+    </div>
+  </div>
+
+  <!-- NEGATIVE CONTROL: "one model per wrapper" (S4) -- committing Year within 120ms of Month
+       having just committed clears Month right back out. Only a filler that YIELDS between
+       parts (fillWorkdayDateParts's WD_DATE_YIELD_MS) survives this; setting month then year
+       back-to-back with no wait loses the month, which the mock will actually demonstrate. -->
+  <div data-automation-id="formField-wd-yearclear-date" id="wd_yearclear_field">
+    <label id="wd_yearclear_label">Yearclear From</label>
+    <div data-automation-id="dateInputWrapper" id="wd_yearclear_wrapper">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionMonth-display" id="wd_yearclear_month-display">MM</div>
+        <input type="text" role="spinbutton" aria-label="Month" data-automation-id="dateSectionMonth-input" id="wd_yearclear_month">
+      </div>
+      <span aria-hidden="true">/</span>
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionYear-display" id="wd_yearclear_year-display">YYYY</div>
+        <input type="text" role="spinbutton" aria-label="Year" data-automation-id="dateSectionYear-input" id="wd_yearclear_year">
+      </div>
+    </div>
+  </div>
+
+  <!-- NEGATIVE CONTROL: the spinbutton input is genuinely invisible (visibility:hidden) behind
+       its own always-visible "-display" div -- S2: "a section may still be backed by an input
+       that is visually hidden; prefer it". Gating a fill on the INPUT's own visibility (the old
+       behaviour) refuses this instantly; gating on the WRAPPER's visibility (the fix) does not. -->
+  <div data-automation-id="formField-wd-hidden-date" id="wd_hidden_field">
+    <label id="wd_hidden_label">Hidden-input From</label>
+    <div data-automation-id="dateInputWrapper" id="wd_hidden_wrapper">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionMonth-display" id="wd_hidden_month-display">MM</div>
+        <input type="text" role="spinbutton" aria-label="Month" data-automation-id="dateSectionMonth-input"
+               id="wd_hidden_month" style="visibility:hidden">
+      </div>
+      <span aria-hidden="true">/</span>
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionYear-display" id="wd_hidden_year-display">YYYY</div>
+        <input type="text" role="spinbutton" aria-label="Year" data-automation-id="dateSectionYear-input"
+               id="wd_hidden_year" style="visibility:hidden">
+      </div>
+    </div>
+  </div>
+
+  <!-- Month+Day+Year shape (Self-Identify "Date" and similar) -- S1's MONTH_DAY_YEAR shape,
+       explicitly distinct from Month+Year; treating it as Month+Year (the old bug) would
+       silently drop the Day. -->
+  <div data-automation-id="formField-wd-selfid-date" id="wd_selfid_field">
+    <label id="wd_selfid_label">Date</label>
+    <div data-automation-id="dateInputWrapper" id="wd_selfid_wrapper">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionMonth-display" id="wd_selfid_month-display">MM</div>
+        <input type="text" role="spinbutton" aria-label="Month" data-automation-id="dateSectionMonth-input" id="wd_selfid_month">
+      </div>
+      <span aria-hidden="true">/</span>
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionDay-display" id="wd_selfid_day-display">DD</div>
+        <input type="text" role="spinbutton" aria-label="Day" data-automation-id="dateSectionDay-input" id="wd_selfid_day">
+      </div>
+      <span aria-hidden="true">/</span>
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionYear-display" id="wd_selfid_year-display">YYYY</div>
+        <input type="text" role="spinbutton" aria-label="Year" data-automation-id="dateSectionYear-input" id="wd_selfid_year">
+      </div>
+    </div>
+  </div>
+
+  <!-- NEGATIVE CONTROL: a localized tenant -- aria-label is German ("Monat"/"Jahr"), so the
+       English-only aria-label fallback the extension used to rely on exclusively would refuse
+       this; the correct, locale-independent primary hook is data-automation-id. -->
+  <div data-automation-id="formField-wd-monat-date" id="wd_monat_field">
+    <label id="wd_monat_label">Von</label>
+    <div data-automation-id="dateInputWrapper" id="wd_monat_wrapper">
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionMonth-display" id="wd_monat_month-display">MM</div>
+        <input type="text" role="spinbutton" aria-label="Monat" data-automation-id="dateSectionMonth-input" id="wd_monat_month">
+      </div>
+      <span aria-hidden="true">/</span>
+      <div>
+        <div aria-hidden="true" data-automation-id="dateSectionYear-display" id="wd_monat_year-display">YYYY</div>
+        <input type="text" role="spinbutton" aria-label="Jahr" data-automation-id="dateSectionYear-input" id="wd_monat_year">
+      </div>
     </div>
   </div>
 
@@ -453,7 +566,8 @@
     </button>
   </div>
 
-  <!-- Country dropdown — same shape, exercises the country alias table. -->
+  <!-- Country dropdown — same shape, exercises the country alias table AND (via a 60-item
+       virtualized catalog rendered a handful at a time) the scroll/ArrowDown collection path. -->
   <div data-automation-id="formField-country" id="wd_country_field">
     <label id="wd_country_label">Country</label>
     <button type="button" aria-haspopup="listbox" aria-controls="wd_country_listbox" id="wd_country_button">
@@ -461,27 +575,58 @@
     </button>
   </div>
 
-  <!-- Field of Study prompt — multiSelectContainer, a results popup, and a
-       selectedItemList. -->
+  <!-- Field of Study prompt -- multiSelectContainer whose results render in a PORTALLED popup
+       (see #wd_fos_popup at the end of <body>), never inside this field. A loose "live search"
+       always shows the same fixed options after Enter, same as before -- the negative case is a
+       nonsense term whose results are non-empty but match nothing confidently. -->
   <div data-automation-id="formField-field-of-study" id="wd_fos_field">
     <label id="wd_fos_label">Field of Study</label>
     <div data-automation-id="multiSelectContainer" id="wd_fos_container">
       <input type="text" id="wd_fos_input" role="combobox">
     </div>
-    <div id="wd_fos_results" style="display:none;"></div>
     <ul data-automation-id="selectedItemList" id="wd_fos_selected"></ul>
   </div>
 
-  <!-- Skills prompt — same multiSelectContainer shape, but results are
-       checkboxItem rows each containing a real checkbox (Workday's
-       "add multiple" pattern; the service sends a LIST for this one). -->
+  <!-- Skills prompt -- same multiSelectContainer shape; results render in a PORTALLED popup
+       (#wd_skills_popup at the end of <body>) with the real menuItem/promptLeafNode/
+       checkboxPanel/promptOption row anatomy. See the script below for the full adversarial
+       catalog (virtualization, "No Items.", auto-commit with no popup at all, latency, a picky
+       checkbox) keyed by the exact typed term. -->
   <div data-automation-id="formField-skills" id="wd_skills_field">
     <label id="wd_skills_label">Skills</label>
     <div data-automation-id="multiSelectContainer" id="wd_skills_container">
       <input type="text" id="wd_skills_input">
     </div>
-    <div id="wd_skills_results" style="display:none;"></div>
     <ul data-automation-id="selectedItemList" id="wd_skills_selected"></ul>
+  </div>
+
+  <!-- Self-Identify disability question (CC-305) -- a CheckboxGroup fieldset that "requires
+       exactly one selection" (S5), with the current official option texts. -->
+  <div data-automation-id="formField-disabilityStatus" id="wd_disability_field">
+    <fieldset data-automation-id="disabilityStatus-CheckboxGroup" id="wd_disability_group">
+      <legend id="wd_disability_legend">Please check one of the boxes below:</legend>
+      <div role="cell">
+        <input type="checkbox" id="wd_disability_yes">
+        <span>Yes, I have a disability, or have had one in the past</span>
+      </div>
+      <div role="cell">
+        <input type="checkbox" id="wd_disability_no">
+        <span>No, I do not have a disability and have not had one in the past</span>
+      </div>
+      <div role="cell">
+        <input type="checkbox" id="wd_disability_decline">
+        <span>I do not want to answer</span>
+      </div>
+    </fieldset>
+  </div>
+
+  <!-- Terms/consent -- a legal attestation the extension must NEVER auto-tick, no matter how
+       confidently some value might otherwise seem to match its label text. -->
+  <div data-automation-id="formField-termsAndConditions" id="wd_terms_field">
+    <label>
+      <input type="checkbox" data-automation-id="agreementCheckbox" id="wd_agreement_checkbox">
+      I have read and consent to the terms and conditions
+    </label>
   </div>
 
   <!-- Résumé upload — Workday consumes the File and empties input.files,
@@ -491,7 +636,10 @@
        already exhaustively cover findResumeFileTarget()'s own rules against
        their own dedicated inputs. Cannot be exercised end-to-end in jsdom —
        jsdom has no DataTransfer at all (see selftest.js) — included here for
-       the real-Chrome proof (scripts/chrome_load_test.py, owned elsewhere). -->
+       the real-Chrome proof (scripts/chrome_load_test.py, owned elsewhere).
+       The dropzone ALSO answers a native 'drop' (see the script below) --
+       a NEGATIVE CONTROL for the "two upload channels" bug: a widget that
+       delivers on both change and drop, expecting exactly one uploaded item. -->
   <div data-automation-id="formField-wd-resume" id="wd_resume_field">
     <label id="wd_resume_label">Attachments</label>
     <div data-automation-id="file-upload-drop-zone" id="wd_resume_dropzone">
@@ -515,11 +663,41 @@
   <li role="option" data-automation-id="promptOption-associate">Associates Degree</li>
   <li role="option" data-automation-id="promptOption-hs">High School or Equivalent</li>
 </ul>
-<ul role="listbox" id="wd_country_listbox" style="display:none;">
-  <li role="option">Canada</li>
-  <li role="option">United States of America</li>
-  <li role="option">Mexico</li>
-</ul>
+<!-- Virtualized: only 3 options render at a time (see script) out of 60+ -- the target
+     ("United States of America") sits well past what renders on open, so a correct fill must
+     scroll/ArrowDown to collect it rather than report "no confident match". -->
+<ul role="listbox" id="wd_country_listbox" style="display:none;"></ul>
+
+<!-- NEGATIVE CONTROL: a decoy wd-popup for a DIFFERENT, unrelated field, already open BEFORE
+     any Skills interaction starts and listing a term Skills will also search for. Popup
+     resolution via data-associated-widget (and the "since our own snapshot" fallback) must
+     never read this one. -->
+<div data-automation-widget="wd-popup" id="wd_decoy_popup">
+  <div data-associated-widget="wd_decoy_other_container">
+    <div data-automation-id="menuItem" data-automation-selected="true">
+      <div data-automation-id="promptLeafNode" data-automation-checked="Not Checked">
+        <input type="checkbox" data-automation-id="checkboxPanel">
+        <div data-automation-id="promptOption" data-automation-label="JavaScript">JavaScript</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NEGATIVE CONTROL: a DIFFERENT field's own selectedItemList, already containing a term
+     Skills will also search for. workdayPromptHasPill/getWorkdayPromptCurrentValue must stay
+     scoped to the Skills field's OWN formField and never read this. -->
+<div data-automation-id="formField-decoy-other" id="wd_decoy_other_field" style="display:none;">
+  <ul data-automation-id="selectedItemList" id="wd_decoy_other_selected"><li>Python</li></ul>
+</div>
+
+<!-- Skills' and Field of Study's own real popups -- portalled to <body>, linked to their
+     multiSelectContainer via data-associated-widget, per S1. -->
+<div data-automation-widget="wd-popup" id="wd_skills_popup" style="display:none;">
+  <div data-associated-widget="wd_skills_container" id="wd_skills_popup_inner"></div>
+</div>
+<div data-automation-widget="wd-popup" id="wd_fos_popup" style="display:none;">
+  <div data-associated-widget="wd_fos_container" id="wd_fos_popup_inner"></div>
+</div>
 
 <script>
 (function () {
@@ -533,18 +711,41 @@
     window.__WD_SUBMIT_COUNT__ = (window.__WD_SUBMIT_COUNT__ || 0) + 1;
   });
 
-  // ---- spinner date fields ----------------------------------------------
-  // Faithfully distinguishes the two techniques the project brief describes: a
-  // plain `.value =` write that ALSO fires input/change (the WRONG, previously
-  // -shipped technique) is reverted on the spot by the listeners below; a bare
-  // `.value =` write with NO event, followed by a real ArrowUp keydown, is
-  // exactly what a spinner widget's own keydown handler would see and commit
-  // — exactly what setWorkdaySpinnerValue() in scanner.js does.
-  function makeSpinner(input, min, max, presses) {
-    presses = presses || 1;
+  // ---- spinner date fields ------------------------------------------------
+  // Faithfully distinguishes the two techniques the project brief describes: a plain
+  // `.value =` write that ALSO fires input/change (the WRONG, previously-shipped technique) is
+  // reverted on the spot by the listeners below; a bare `.value =` write with NO event,
+  // followed by a real ArrowUp keydown, is exactly what a spinner widget's own keydown handler
+  // would see and commit -- exactly what setWorkdaySpinnerValue() in scanner.js does. Keeps the
+  // "-display" div and aria-valuetext/aria-valuenow in sync with every real commit, and back to
+  // the "MM"/"YYYY" placeholder whenever cleared -- the ONLY things a correct implementation
+  // may now treat as ground truth (never input.value).
+  function paintSpinner(input, displayEl, placeholder, pad, v) {
+    if (v === '' || v == null) {
+      input.value = '';
+      input.removeAttribute('aria-valuetext');
+      input.removeAttribute('aria-valuenow');
+      if (displayEl) displayEl.textContent = placeholder;
+      return;
+    }
+    var text = pad && v < 10 ? '0' + v : String(v);
+    input.value = String(v);
+    input.setAttribute('aria-valuetext', text);
+    input.setAttribute('aria-valuenow', String(v));
+    if (displayEl) displayEl.textContent = text;
+  }
+
+  function makeSpinner(input, min, max, opts) {
+    opts = opts || {};
+    var presses = opts.presses || 1;
+    var displayEl = opts.displayId ? document.getElementById(opts.displayId) : null;
+    var placeholder = opts.placeholder || 'MM';
+    var pad = !!opts.pad;
+    var asyncCommit = !!opts.async;
     var committed = '';
     var pending = 0;
-    function revert() { input.value = committed; }
+    paintSpinner(input, displayEl, placeholder, pad, '');
+    function revert() { paintSpinner(input, displayEl, placeholder, pad, committed); }
     input.addEventListener('input', revert);
     input.addEventListener('change', revert);
     input.addEventListener('keydown', function (e) {
@@ -557,15 +758,69 @@
       n += (e.key === 'ArrowUp' ? 1 : -1);
       if (n > max) n = max;
       if (n < min) n = min;
-      committed = String(n);
-      input.value = committed; // Workday's own commit -- fires no input/change event
+      function commit() { committed = n; paintSpinner(input, displayEl, placeholder, pad, n); }
+      if (asyncCommit) setTimeout(commit, 0); else commit(); // Workday's own commit -- fires no input/change event
+      if (opts.onCommit) opts.onCommit(n);
     });
+    return { get committed() { return committed; } };
   }
-  makeSpinner(document.getElementById('wd_start_month'), 1, 12, 1);
-  makeSpinner(document.getElementById('wd_start_year'), 1900, 2100, 1);
+  makeSpinner(document.getElementById('wd_start_month'), 1, 12, { displayId: 'wd_start_month-display', placeholder: 'MM', pad: true });
+  makeSpinner(document.getElementById('wd_start_year'), 1900, 2100, { displayId: 'wd_start_year-display', placeholder: 'YYYY' });
   // Deliberately needs TWO ArrowUps per unit -- exercises setWorkdaySpinnerValue()'s
   // "some variants need it twice" retry-once path.
-  makeSpinner(document.getElementById('wd_edu_from_year'), 1900, 2100, 2);
+  makeSpinner(document.getElementById('wd_edu_from_year'), 1900, 2100, { presses: 2, displayId: 'wd_edu_from_year-display', placeholder: 'YYYY' });
+
+  // NEGATIVE CONTROL: asynchronous commit (setTimeout 0).
+  makeSpinner(document.getElementById('wd_async_month'), 1, 12, { async: true, displayId: 'wd_async_month-display', placeholder: 'MM', pad: true });
+  makeSpinner(document.getElementById('wd_async_year'), 1900, 2100, { async: true, displayId: 'wd_async_year-display', placeholder: 'YYYY' });
+
+  // NEGATIVE CONTROL: hidden spinbutton input behind an always-visible display.
+  makeSpinner(document.getElementById('wd_hidden_month'), 1, 12, { displayId: 'wd_hidden_month-display', placeholder: 'MM', pad: true });
+  makeSpinner(document.getElementById('wd_hidden_year'), 1900, 2100, { displayId: 'wd_hidden_year-display', placeholder: 'YYYY' });
+
+  // Self-Identify Month+Day+Year -- three independent spinners, same technique.
+  makeSpinner(document.getElementById('wd_selfid_month'), 1, 12, { displayId: 'wd_selfid_month-display', placeholder: 'MM', pad: true });
+  makeSpinner(document.getElementById('wd_selfid_day'), 1, 31, { displayId: 'wd_selfid_day-display', placeholder: 'DD', pad: true });
+  makeSpinner(document.getElementById('wd_selfid_year'), 1900, 2100, { displayId: 'wd_selfid_year-display', placeholder: 'YYYY' });
+
+  // Localized tenant (aria-label="Monat"/"Jahr", but data-automation-id is the real English hook).
+  makeSpinner(document.getElementById('wd_monat_month'), 1, 12, { displayId: 'wd_monat_month-display', placeholder: 'MM', pad: true });
+  makeSpinner(document.getElementById('wd_monat_year'), 1900, 2100, { displayId: 'wd_monat_year-display', placeholder: 'YYYY' });
+
+  // NEGATIVE CONTROL: "one model per wrapper" -- committing Year within 120ms of Month having
+  // just committed clears Month right back out (S4: "editing the year can clear the month").
+  // Deliberately hand-rolled rather than built on makeSpinner, since the Year handler needs to
+  // reach into Month's own committed/paint state.
+  (function () {
+    var monthInput = document.getElementById('wd_yearclear_month');
+    var yearInput = document.getElementById('wd_yearclear_year');
+    var monthDisplay = document.getElementById('wd_yearclear_month-display');
+    var yearDisplay = document.getElementById('wd_yearclear_year-display');
+    var monthCommittedAt = 0;
+    var monthCommitted = '', yearCommitted = '';
+    paintSpinner(monthInput, monthDisplay, 'MM', true, '');
+    paintSpinner(yearInput, yearDisplay, 'YYYY', false, '');
+    monthInput.addEventListener('input', function () { paintSpinner(monthInput, monthDisplay, 'MM', true, monthCommitted); });
+    monthInput.addEventListener('change', function () { paintSpinner(monthInput, monthDisplay, 'MM', true, monthCommitted); });
+    yearInput.addEventListener('input', function () { paintSpinner(yearInput, yearDisplay, 'YYYY', false, yearCommitted); });
+    yearInput.addEventListener('change', function () { paintSpinner(yearInput, yearDisplay, 'YYYY', false, yearCommitted); });
+    monthInput.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowUp') return;
+      var n = parseInt(monthInput.value, 10); if (isNaN(n)) n = 0; n = Math.min(n + 1, 12);
+      monthCommitted = n; monthCommittedAt = Date.now();
+      paintSpinner(monthInput, monthDisplay, 'MM', true, n);
+    });
+    yearInput.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowUp') return;
+      var n = parseInt(yearInput.value, 10); if (isNaN(n)) n = 1999; n++;
+      yearCommitted = n;
+      paintSpinner(yearInput, yearDisplay, 'YYYY', false, n);
+      if (monthCommittedAt && (Date.now() - monthCommittedAt) < 120) {
+        monthCommitted = '';
+        paintSpinner(monthInput, monthDisplay, 'MM', true, '');
+      }
+    });
+  })();
 
   // ---- masked single-input date field ------------------------------------
   // Only accepts a value change immediately preceded by a real keydown on the
@@ -585,94 +840,244 @@
     input.addEventListener('blur', function () { sawKeydown = false; });
   })();
 
-  // ---- dropdowns ----------------------------------------------------------
+  // ---- dropdowns ------------------------------------------------------------
+  // Degree: a short, fully-rendered list (unchanged). Country: a 60-item virtualized catalog
+  // (only a window of 3 renders at a time) with the target ("United States of America") placed
+  // well past what's visible on open -- proves the scroll/ArrowDown collection path, and that
+  // the removed "first visible listbox on the page" fallback is no longer needed for it to work.
   function makeDropdown(buttonId, listboxId, textId) {
     var btn = document.getElementById(buttonId);
     var listbox = document.getElementById(listboxId);
     var textEl = document.getElementById(textId);
+    function wireOptionClicks() {
+      Array.prototype.forEach.call(listbox.querySelectorAll('[role="option"]'), function (opt) {
+        opt.addEventListener('click', function () {
+          textEl.textContent = opt.textContent;
+          listbox.style.display = 'none';
+        });
+      });
+    }
     btn.addEventListener('click', function () {
-      listbox.style.display = (listbox.style.display === 'block') ? 'none' : 'block';
+      var opening = listbox.style.display !== 'block';
+      listbox.style.display = opening ? 'block' : 'none';
+      if (opening && listbox.__renderWindow) {
+        listbox.__scrollIndex = 0; // fresh open always starts back at the top of the catalog
+        listbox.__renderWindow(0);
+        wireOptionClicks();
+      }
     });
     btn.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') listbox.style.display = 'none';
+      if (e.key === 'Escape') { listbox.style.display = 'none'; return; }
+      if (e.key === 'ArrowDown' && listbox.__renderWindow) {
+        listbox.__scrollIndex = (listbox.__scrollIndex || 0) + (listbox.__scrollStep || 3);
+        listbox.__renderWindow(listbox.__scrollIndex);
+        wireOptionClicks();
+      }
     });
-    Array.prototype.forEach.call(listbox.querySelectorAll('[role="option"]'), function (opt) {
-      opt.addEventListener('click', function () {
-        textEl.textContent = opt.textContent;
-        listbox.style.display = 'none';
-      });
-    });
+    wireOptionClicks();
   }
   makeDropdown('wd_degree_button', 'wd_degree_listbox', 'wd_degree_button_text');
+
+  (function () {
+    var countries = ['Argentina', 'Australia', 'Austria', 'Belgium', 'Brazil', 'Canada', 'Chile',
+      'China', 'Colombia', 'Czech Republic', 'Denmark', 'Egypt', 'Finland', 'France', 'Germany',
+      'Greece', 'Hungary', 'India', 'Indonesia', 'Ireland', 'Israel', 'Italy', 'Japan', 'Kenya',
+      'Malaysia', 'Mexico', 'Morocco', 'Netherlands', 'New Zealand', 'Nigeria', 'Norway',
+      'Pakistan', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Romania', 'Russia',
+      'Saudi Arabia', 'Singapore', 'South Africa', 'South Korea', 'Spain', 'Sweden',
+      'Switzerland', 'Taiwan', 'Thailand', 'Turkey', 'Ukraine',
+      'United Arab Emirates', 'United Kingdom',
+      // deliberately NOT near the top or bottom -- three ArrowDown/scroll rounds needed
+      'United States of America',
+      'Uruguay', 'Venezuela', 'Vietnam', 'Zambia', 'Zimbabwe'];
+    var WINDOW = 5;
+    var listbox = document.getElementById('wd_country_listbox');
+    listbox.__scrollStep = WINDOW;
+    listbox.__renderWindow = function (startIdx) {
+      listbox.innerHTML = '';
+      countries.slice(startIdx, startIdx + WINDOW).forEach(function (name) {
+        var li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        li.textContent = name;
+        listbox.appendChild(li);
+      });
+    };
+  })();
   makeDropdown('wd_country_button', 'wd_country_listbox', 'wd_country_button_text');
 
-  // ---- prompts (Field of Study / Skills) ---------------------------------
-  // Always shows ALL of its fixed options after Enter (a loose "live search")
-  // -- this is what lets the negative case happen: results are non-empty but
-  // none of them relate to a nonsense term, so the matcher must find nothing
-  // confident rather than ever picking the first one.
-  function makePrompt(inputId, resultsId, selectedId, options, useCheckboxRows) {
-    var input = document.getElementById(inputId);
-    var results = document.getElementById(resultsId);
-    var selected = document.getElementById(selectedId);
+  // ---- Field of Study prompt: portalled popup, loose fixed-list "live search" --------------
+  (function () {
+    var input = document.getElementById('wd_fos_input');
+    var popup = document.getElementById('wd_fos_popup');
+    var inner = document.getElementById('wd_fos_popup_inner');
+    var selected = document.getElementById('wd_fos_selected');
+    var options = ['Computer Science', 'Electrical Engineering', 'Business Administration'];
+    function alreadySelected(text) {
+      return Array.prototype.some.call(selected.querySelectorAll('li'), function (li) { return li.textContent === text; });
+    }
+    function render(rows) {
+      inner.innerHTML = '';
+      rows.forEach(function (label) {
+        var menuItem = document.createElement('div');
+        menuItem.setAttribute('data-automation-id', 'menuItem');
+        var opt = document.createElement('div');
+        opt.setAttribute('data-automation-id', 'promptOption');
+        opt.setAttribute('data-automation-label', label);
+        opt.textContent = label;
+        menuItem.appendChild(opt);
+        menuItem.addEventListener('click', function () {
+          if (!alreadySelected(label)) {
+            var li = document.createElement('li');
+            li.textContent = label;
+            selected.appendChild(li);
+          }
+        });
+        inner.appendChild(menuItem);
+      });
+    }
     input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { popup.style.display = 'none'; return; }
       if (e.key !== 'Enter') return;
       setTimeout(function () {
-        results.innerHTML = '';
-        options.forEach(function (o, i) {
-          var row = document.createElement('div');
-          if (useCheckboxRows) {
-            row.setAttribute('data-automation-id', 'checkboxItem-' + i);
-            var cb = document.createElement('input');
-            cb.type = 'checkbox';
-            var span = document.createElement('span');
-            span.textContent = o;
-            row.appendChild(cb);
-            row.appendChild(span);
-            cb.addEventListener('change', function () {
-              if (cb.checked) {
-                var li = document.createElement('li');
-                li.textContent = o;
-                selected.appendChild(li);
-              }
-            });
-          } else {
-            row.setAttribute('role', 'option');
-            row.setAttribute('data-automation-id', 'promptOption-' + i);
-            row.textContent = o;
-            row.addEventListener('click', function () {
-              var li = document.createElement('li');
-              li.textContent = o;
-              selected.appendChild(li);
-              results.style.display = 'none';
-              input.value = '';
-            });
-          }
-          results.appendChild(row);
-        });
-        results.style.display = 'block';
+        render(options);
+        popup.style.display = 'block';
       }, 15);
     });
-  }
-  makePrompt('wd_fos_input', 'wd_fos_results', 'wd_fos_selected',
-    ['Computer Science', 'Electrical Engineering', 'Business Administration'], false);
-  makePrompt('wd_skills_input', 'wd_skills_results', 'wd_skills_selected',
-    ['Structured Query Language (SQL)', 'Python', 'Project Management'], true);
+  })();
+
+  // ---- Skills prompt: portalled popup, full adversarial catalog per the project brief ------
+  // Real anatomy: menuItem (row, data-automation-selected marks the highlight) ->
+  // promptLeafNode (data-automation-checked marks the checked state) -> checkboxPanel (the
+  // actual checkbox) + promptOption (data-automation-label carries the text).
+  (function () {
+    var input = document.getElementById('wd_skills_input');
+    var popup = document.getElementById('wd_skills_popup');
+    var inner = document.getElementById('wd_skills_popup_inner');
+    var selected = document.getElementById('wd_skills_selected');
+    var pickyLabels = ['Figma'];
+    var virtualState = null;
+
+    function alreadySelected(text) {
+      return Array.prototype.some.call(selected.querySelectorAll('li'), function (li) { return li.textContent === text; });
+    }
+    function addPill(text) {
+      if (alreadySelected(text)) return;
+      var li = document.createElement('li');
+      li.textContent = text;
+      selected.appendChild(li);
+    }
+    function commit(label, leaf, cb) {
+      cb.checked = true;
+      leaf.setAttribute('data-automation-checked', 'Checked');
+      addPill(label);
+    }
+    function renderRows(rows, highlightIdx) {
+      inner.innerHTML = '';
+      rows.forEach(function (label, i) {
+        var menuItem = document.createElement('div');
+        menuItem.setAttribute('data-automation-id', 'menuItem');
+        menuItem.setAttribute('data-automation-selected', i === highlightIdx ? 'true' : 'false');
+        var leaf = document.createElement('div');
+        leaf.setAttribute('data-automation-id', 'promptLeafNode');
+        leaf.setAttribute('data-automation-checked', alreadySelected(label) ? 'Checked' : 'Not Checked');
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.setAttribute('data-automation-id', 'checkboxPanel');
+        cb.checked = alreadySelected(label);
+        var opt = document.createElement('div');
+        opt.setAttribute('data-automation-id', 'promptOption');
+        opt.setAttribute('data-automation-label', label);
+        opt.textContent = label;
+        leaf.appendChild(cb);
+        leaf.appendChild(opt);
+        menuItem.appendChild(leaf);
+        inner.appendChild(menuItem);
+
+        var picky = pickyLabels.indexOf(label) !== -1;
+        cb.addEventListener('click', function () {
+          if (picky) { cb.checked = false; return; } // "React ignores a bare el.click()" (S3)
+          commit(label, leaf, cb);
+        });
+        ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function (evtName) {
+          leaf.addEventListener(evtName, function () { leaf.__sawPointer = true; });
+        });
+        leaf.addEventListener('click', function (e) {
+          if (e.target === cb) return; // the checkbox's own listener above already handled it
+          if (!picky || leaf.__sawPointer) commit(label, leaf, cb);
+        });
+      });
+    }
+    function showNoItems() {
+      inner.innerHTML = '';
+      var notice = document.createElement('div');
+      notice.textContent = 'No Items.';
+      inner.appendChild(notice);
+    }
+    function openAt(rows, highlightIdx) {
+      popup.style.display = 'block';
+      renderRows(rows, highlightIdx == null ? 0 : highlightIdx);
+    }
+
+    // Keyed by the exact typed term (lowercased) -- see the mock's own comment block above and
+    // the project brief §2.3 for what each case proves.
+    function catalog(termKey) {
+      if (termKey === 'python') return { kind: 'rows', rows: ['Python'] };
+      if (termKey === 'sql') return { kind: 'rows', rows: ['Structured Query Language (SQL)'] };
+      if (termKey === 'excel') return { kind: 'empty' }; // "No Items." -- must fail fast, not wait out the full budget
+      if (termKey === 'java') return { kind: 'virtual', rows: ['JavaScript', 'Java'] }; // exact match is 1 ArrowDown away
+      if (termKey === 'docker') return { kind: 'autocommit', label: 'Docker' }; // commits on Enter, NO popup ever
+      if (termKey === 'kubernetes') return { kind: 'rows', rows: ['Kubernetes'], delayMs: 900 }; // arrives late
+      if (termKey === 'figma') return { kind: 'rows', rows: ['Figma'] }; // picky checkbox, see pickyLabels
+      return { kind: 'nothing' }; // genuinely nothing happens -- no popup, no pill, ever
+    }
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { popup.style.display = 'none'; virtualState = null; return; }
+      if (e.key === 'ArrowDown' && virtualState) {
+        virtualState.idx = Math.min(virtualState.idx + 1, virtualState.rows.length - 1);
+        openAt([virtualState.rows[virtualState.idx]], 0);
+        return;
+      }
+      if (e.key !== 'Enter') return;
+      var termKey = input.value.trim().toLowerCase();
+      var plan = catalog(termKey);
+      virtualState = null;
+      if (plan.kind === 'nothing') return;
+      if (plan.kind === 'autocommit') { setTimeout(function () { addPill(plan.label); }, 20); return; }
+      setTimeout(function () {
+        if (plan.kind === 'empty') { openAt([]); showNoItems(); return; }
+        if (plan.kind === 'virtual') { virtualState = { idx: 0, rows: plan.rows }; openAt([plan.rows[0]], 0); return; }
+        openAt(plan.rows, 0);
+      }, plan.delayMs || 15);
+    });
+  })();
 
   // ---- résumé upload (Workday consumes the File and empties input.files) --
-  document.getElementById('wd_resume_input').addEventListener('change', function (e) {
-    var f = e.target.files && e.target.files[0];
-    if (!f) return;
-    try { e.target.value = ''; } catch (err) { /* real browsers allow clearing a file input */ }
+  function addResumeItem(name) {
     setTimeout(function () {
       var item = document.createElement('div');
       item.setAttribute('data-automation-id', 'file-upload-item');
       var nameEl = document.createElement('div');
       nameEl.setAttribute('data-automation-id', 'file-upload-item-name');
-      nameEl.textContent = f.name;
+      nameEl.textContent = name;
       item.appendChild(nameEl);
       document.getElementById('wd_resume_uploaded_area').appendChild(item);
     }, 30);
+  }
+  document.getElementById('wd_resume_input').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try { e.target.value = ''; } catch (err) { /* real browsers allow clearing a file input */ }
+    addResumeItem(f.name);
+  });
+  // NEGATIVE CONTROL: this widget ALSO answers a native 'drop', independent of whether change
+  // already delivered the file -- a fix that fires 'drop' unconditionally (the old bug) creates
+  // a SECOND file-upload-item from one attachResumeFile() call; a fix that fires it only when
+  // change didn't stick creates exactly one either way.
+  document.getElementById('wd_resume_dropzone').addEventListener('drop', function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    addResumeItem(f.name);
   });
 })();
 </script>

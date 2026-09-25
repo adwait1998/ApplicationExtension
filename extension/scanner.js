@@ -522,8 +522,11 @@
   var WD_FORM_FIELD_SELECTOR = '[data-automation-id^="formField-"]';
   // Applied in EVERY new Workday guard below, regardless of what else that guard already
   // checks: an element whose OWN automation id names Workday's real navigation actions is
-  // refused outright, no matter how much it otherwise looks like a safe target.
-  var WD_HARD_DENY_AUTOMATION_RE = /bottom-navigation|submit|next|save/i;
+  // refused outright, no matter how much it otherwise looks like a safe target. Also covers
+  // the terms/consent checkbox (`agreementCheckbox`) -- see the project brief: that is a legal
+  // attestation, never something this extension may tick on the applicant's behalf, no matter
+  // how confidently a value might otherwise seem to match it.
+  var WD_HARD_DENY_AUTOMATION_RE = /bottom-navigation|submit|next|save|agreementCheckbox|terms/i;
 
   function hasWorkdayHardDenyAutomationId(el) {
     if (!el || !el.getAttribute) return false;
@@ -551,11 +554,24 @@
     return getPrecedingText(container);
   }
 
-  function dispatchKeyboardEvent(el, type, key, code) {
+  /**
+   * `keyCode` is optional (5th arg) — S1 sets `keyCode:38, which:38` on the ArrowUp keydown a
+   * Workday spinbutton needs; the prompt's Enter needs `keyCode:13`. Neither property can
+   * actually be set through the KeyboardEventInit dictionary (it's a legacy getter with no
+   * standard constructor support — browsers silently ignore it there, real or not), so when a
+   * `keyCode` is given this defines it directly on the created instance afterwards, which is
+   * what makes it observable to a page's own `e.keyCode`/`e.which` check.
+   */
+  function dispatchKeyboardEvent(el, type, key, code, keyCode) {
     var view = realmOf(el);
     var Ctor = (view && view.KeyboardEvent) || (typeof KeyboardEvent !== 'undefined' ? KeyboardEvent : null);
     if (!Ctor) return;
-    el.dispatchEvent(new Ctor(type, { key: key, code: code || key, bubbles: true, cancelable: true }));
+    var evt = new Ctor(type, { key: key, code: code || key, bubbles: true, cancelable: true });
+    if (typeof keyCode === 'number') {
+      try { Object.defineProperty(evt, 'keyCode', { value: keyCode, configurable: true }); } catch (e1) { /* best effort */ }
+      try { Object.defineProperty(evt, 'which', { value: keyCode, configurable: true }); } catch (e2) { /* best effort */ }
+    }
+    el.dispatchEvent(evt);
   }
 
   /**
@@ -623,6 +639,16 @@
     if (t) return t;
     var aria = el.getAttribute && el.getAttribute('aria-label');
     return aria ? cleanText(aria) : '';
+  }
+
+  /**
+   * A real macrotask yield, used everywhere a Workday widget needs its OWN async commit to
+   * catch up before we read it back — see the project brief: a synchronous read-back after a
+   * synthetic keydown sees only our own write, not whatever Workday's controlled re-render (a
+   * React 18 root can commit in a microtask or later) settles on.
+   */
+  function wdSleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
   // ---------------------------------------------------------------------
@@ -821,51 +847,104 @@
   }
 
   // ---------------------------------------------------------------------
-  // Workday spinner dates (dateInputWrapper) — ground truth structure:
+  // Workday spinner dates (dateInputWrapper) — ground truth structure (verbatim NVIDIA capture,
+  // tarunravisankar/tso_autofiller tests/nvidia-date.html): ONE markup, not two generations —
+  // the "-input" element itself carries BOTH the automation id and the aria-label:
   //   div[data-automation-id^="formField-"] -> div[data-automation-id="dateInputWrapper"]
-  //     -> input[aria-label="Month"] + input[aria-label="Year"]      (month/year pair)
-  //     -> input[aria-label="Year"] only                              (year-only, education)
-  //     -> exactly ONE plain <input>, no aria-label Month/Year at all (masked MM/YYYY fallback)
-  //
-  // The data-automation-id "dateSectionMonth-input"/"dateSectionYear-input" this extension
-  // used to look for appears in NEITHER working source it was rebuilt from — that guess is why
-  // real Workday dates silently failed twice. Detection here keys ONLY on the structure above.
+  //     -> div#..-dateSection{Month,Day,Year}
+  //          -> div[aria-hidden][data-automation-id="dateSection{P}-display"]   "MM"/"DD"/"YYYY"
+  //          -> input[role=spinbutton][aria-label="{P}"]
+  //               [data-automation-id="dateSection{P}-input"]
+  // Shapes seen: Month+Year (work experience), Year-only (education), Month+Day+Year
+  // (Self-Identify "Date"). The earlier claim on this line that "dateSectionMonth-input"
+  // appears in NEITHER working source was wrong — S2, S4, S6, S7 and S10 all use it. Detection
+  // below keys on data-automation-id FIRST (locale-independent — an aria-label can be
+  // localized, e.g. "Monat" on a German tenant), falling back to aria-label for a tenant that
+  // has one but not the other.
   // ---------------------------------------------------------------------
 
+  var WD_DATE_PART_NAMES = ['Month', 'Day', 'Year'];
+  var WD_DATE_SETTLE_MS = 60;   // wait after an ArrowUp for Workday's own async commit (S2)
+  var WD_DATE_YIELD_MS = 150;   // wait between parts, and before the re-check-month pass (S1/S4)
+  var WD_DATE_PLACEHOLDER_RE = /^[mdy]+$/i; // the "-display"/masked empty state, e.g. "MM", "YYYY"
+
+  /** The `dateSection{Part}-input` (falling back to `input[aria-label=Part]`) inside `wrapper`. */
+  function findWorkdayDatePart(wrapper, partName) {
+    return wrapper.querySelector('[data-automation-id="dateSection' + partName + '-input"]')
+      || wrapper.querySelector('input[aria-label="' + partName + '"]')
+      || null;
+  }
+
+  /**
+   * The `-display` companion of a `dateSection*-input` — the id-suffix swap first (matches the
+   * verbatim NVIDIA capture exactly), then a same-parent data-automation-id sibling lookup (for
+   * a tenant whose ids don't follow that exact convention).
+   */
+  function findWorkdayDateSectionDisplay(inputEl) {
+    if (!inputEl) return null;
+    var doc = ownerDoc(inputEl);
+    if (inputEl.id && doc && doc.getElementById) {
+      var byId = doc.getElementById(inputEl.id.replace(/-input$/, '-display'));
+      if (byId) return byId;
+    }
+    var parent = inputEl.parentElement;
+    if (!parent) return null;
+    var auto = (inputEl.getAttribute && inputEl.getAttribute('data-automation-id')) || '';
+    if (auto) {
+      var byAuto = parent.querySelector('[data-automation-id="' + auto.replace(/-input$/, '-display') + '"]');
+      if (byAuto) return byAuto;
+    }
+    return parent.querySelector('[data-automation-id$="-display"]');
+  }
+
+  /**
+   * Finds every Workday date wrapper in `root`. Returns { shape, wrapper, monthEl, dayEl,
+   * yearEl, maskedEl, container, label } where `shape` is 'mdy' (Day present), 'my'
+   * (Month+Year), 'y' (Year only) or 'masked' (ankitsharma38's single-input fallback, ONLY when
+   * no real Month/Day/Year part was found at all AND the wrapper holds exactly one `<input>`).
+   */
   function findWorkdayDateWrappers(root) {
     var wrappers = Array.prototype.slice.call(root.querySelectorAll('[data-automation-id="dateInputWrapper"]'));
     var out = [];
     for (var i = 0; i < wrappers.length; i++) {
       var w = wrappers[i];
       if (!isVisible(w)) continue;
-      var monthEl = w.querySelector('input[aria-label="Month"]');
-      var yearEl = w.querySelector('input[aria-label="Year"]');
+      var monthEl = findWorkdayDatePart(w, 'Month');
+      var dayEl = findWorkdayDatePart(w, 'Day');
+      var yearEl = findWorkdayDatePart(w, 'Year');
       var container = findWorkdayFormField(w) || w;
       var label = getWorkdayFieldLabel(container);
       if (yearEl) {
-        out.push({ shape: monthEl ? 'my' : 'y', wrapper: w, monthEl: monthEl || null, yearEl: yearEl, maskedEl: null, container: container, label: label });
+        var shape = dayEl ? 'mdy' : (monthEl ? 'my' : 'y');
+        out.push({ shape: shape, wrapper: w, monthEl: monthEl || null, dayEl: dayEl || null, yearEl: yearEl, maskedEl: null, container: container, label: label });
         continue;
       }
-      // No aria-label Month/Year input at all -- the masked single-input fallback shape
-      // (ankitsharma38), ONLY when the wrapper holds exactly one <input>.
       var allInputs = w.querySelectorAll('input');
-      if (allInputs.length === 1) {
-        out.push({ shape: 'masked', wrapper: w, monthEl: null, yearEl: null, maskedEl: allInputs[0], container: container, label: label });
+      if (allInputs.length === 1 && !monthEl && !dayEl) {
+        out.push({ shape: 'masked', wrapper: w, monthEl: null, dayEl: null, yearEl: null, maskedEl: allInputs[0], container: container, label: label });
       }
     }
     return out;
   }
 
+  /**
+   * Gated on the WRAPPER's own visibility, never the input's — a real spinbutton can sit
+   * visually behind its own `-display` div (S2: "a section may still be backed by an input
+   * that is visually hidden; prefer it"), and requiring the input itself to be visible refused
+   * every real date on the spot.
+   */
   function isWorkdaySpinnerInputSafe(el) {
     if (!el || el.tagName !== 'INPUT') return false;
     if (hasWorkdayHardDenyAutomationId(el)) return false;
+    var auto = (el.getAttribute && el.getAttribute('data-automation-id')) || '';
     var aria = (el.getAttribute && el.getAttribute('aria-label')) || '';
-    if (aria !== 'Month' && aria !== 'Year') return false;
+    var looksLikePart = /^dateSection(Month|Day|Year)-input$/.test(auto) || WD_DATE_PART_NAMES.indexOf(aria) !== -1;
+    if (!looksLikePart) return false;
     var wrapper = el.closest ? el.closest('[data-automation-id="dateInputWrapper"]') : null;
     if (!wrapper) return false;
     if (hasWorkdayHardDenyAutomationId(wrapper)) return false;
     if (el.disabled) return false;
-    if (!isVisible(el)) return false;
+    if (!isVisible(wrapper)) return false;
     return true;
   }
 
@@ -877,36 +956,90 @@
     if (hasWorkdayHardDenyAutomationId(wrapper)) return false;
     if (wrapper.querySelectorAll('input').length !== 1) return false;
     if (el.disabled) return false;
-    if (!isVisible(el)) return false;
+    if (!isVisible(wrapper)) return false;
     return true;
   }
 
   /**
-   * berellevy's technique for a Workday numeric spinbutton: setting `.value` and firing
-   * input/change is silently reverted by Workday's own controlled re-render. Setting `.value`
-   * ONE BELOW the target with no event at all, then a real ArrowUp keydown, lets Workday's own
-   * handler commit the target itself. Some variants need the ArrowUp twice; read back and
-   * retry once before giving up.
+   * The honest answer to "what does this spinbutton currently show", per S2: the `-display`
+   * text (skipping its own "MM"/"DD"/"YYYY" placeholder state), then `aria-valuetext`, then
+   * `aria-valuenow` — NEVER `el.value`, which keeps whatever we last wrote even when Workday's
+   * own model rejected or hasn't yet caught up to it. Falls back to `el.value` ONLY when this
+   * tenant's markup exposes none of the three at all (degrade gracefully rather than refuse
+   * every fill outright on a page shaped slightly differently than every captured source).
+   */
+  function readWorkdaySpinnerDisplayValue(el) {
+    if (!el) return NaN;
+    var sawAnySource = false;
+    var display = findWorkdayDateSectionDisplay(el);
+    if (display) {
+      sawAnySource = true;
+      var t = cleanText(display.textContent);
+      if (t && !WD_DATE_PLACEHOLDER_RE.test(t)) {
+        var n1 = parseInt(t, 10);
+        if (!isNaN(n1)) return n1;
+      }
+    }
+    var valuetext = el.getAttribute && el.getAttribute('aria-valuetext');
+    if (valuetext != null && valuetext !== '') {
+      sawAnySource = true;
+      if (!WD_DATE_PLACEHOLDER_RE.test(valuetext)) {
+        var n2 = parseInt(valuetext, 10);
+        if (!isNaN(n2)) return n2;
+      }
+    }
+    var valuenow = el.getAttribute && el.getAttribute('aria-valuenow');
+    if (valuenow != null && valuenow !== '') {
+      sawAnySource = true;
+      var n3 = parseInt(valuenow, 10);
+      if (!isNaN(n3)) return n3;
+    }
+    if (!sawAnySource) {
+      var raw = parseInt(el.value, 10);
+      if (!isNaN(raw)) return raw;
+    }
+    return NaN;
+  }
+
+  /**
+   * berellevy's technique for a Workday numeric spinbutton, made asynchronous per S2's
+   * verification discipline (this is the fix for the reported "hangs on dates" bug alongside
+   * the Skills fix below): setting `.value` and firing input/change is silently reverted by
+   * Workday's own controlled re-render (the mock proves this — see selftest.js). Setting
+   * `.value` ONE BELOW the target with NO event at all, then a real ArrowUp keydown carrying
+   * `keyCode`/`which` 38 (S1), lets Workday's own handler commit the target itself. Reads back
+   * through the page's OWN model (readWorkdaySpinnerDisplayValue), never our own `.value`
+   * write, and only AFTER a real yield — a synchronous read-back sees only what we just wrote.
+   * Some variants need the ArrowUp twice (S1); retries once.
    */
   function setWorkdaySpinnerValue(el, targetNum) {
-    if (!isWorkdaySpinnerInputSafe(el)) return false;
-    if (typeof targetNum !== 'number' || isNaN(targetNum)) return false;
+    if (!isWorkdaySpinnerInputSafe(el)) return Promise.resolve(false);
+    if (typeof targetNum !== 'number' || isNaN(targetNum)) return Promise.resolve(false);
+    if (readWorkdaySpinnerDisplayValue(el) === targetNum) return Promise.resolve(true);
 
-    el.value = String(targetNum - 1);
-    dispatchKeyboardEvent(el, 'keydown', 'ArrowUp', 'ArrowUp');
-    if (typeof el.click === 'function') el.click();
-    if (parseInt(el.value, 10) === targetNum) return true;
+    function attempt() {
+      if (typeof el.focus === 'function') {
+        try { el.focus({ preventScroll: true }); } catch (eFocusOpts) { try { el.focus(); } catch (eFocus) { /* best effort */ } }
+      }
+      el.value = String(targetNum - 1);
+      dispatchKeyboardEvent(el, 'keydown', 'ArrowUp', 'ArrowUp', 38);
+      dispatchKeyboardEvent(el, 'keyup', 'ArrowUp', 'ArrowUp', 38);
+      if (typeof el.click === 'function') el.click();
+      return wdSleep(WD_DATE_SETTLE_MS).then(function () {
+        return readWorkdaySpinnerDisplayValue(el) === targetNum;
+      });
+    }
 
-    // Some variants need ArrowUp twice -- read back and retry once, from wherever it landed.
-    dispatchKeyboardEvent(el, 'keydown', 'ArrowUp', 'ArrowUp');
-    if (typeof el.click === 'function') el.click();
-    return parseInt(el.value, 10) === targetNum;
+    return attempt().then(function (ok) {
+      if (ok) return true;
+      return attempt(); // some variants need ArrowUp twice -- retry once more from wherever it landed
+    });
   }
 
   /**
    * ankitsharma38's fallback: ONLY used when a dateInputWrapper holds exactly one masked text
-   * input (no separate Month/Year spinners at all). Types `text` character by character with a
-   * genuine keydown/keypress/input/keyup sequence per character, then blurs.
+   * input (no separate Month/Day/Year spinners at all). Types `text` character by character with
+   * a genuine keydown/keypress/input/keyup sequence per character, then blurs.
    */
   function typeMaskedTextField(el, text) {
     if (!isWorkdayMaskedDateInputSafe(el)) return false;
@@ -933,42 +1066,115 @@
 
   function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
-  /** Splits a service-provided "MM/YYYY" (or, for a year-only field, "MM/YYYY" or bare "YYYY") value. */
+  var MM_DD_YYYY_RE = /^\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})\s*$/;
+
+  /**
+   * Fills each `{ el, target }` part in STRICT sequence, awaiting one before the next starts
+   * (S1 — no source commits two parts back-to-back with no yield). Once every part has
+   * committed, yields once more and RE-READS every part, redoing (one pass) any that drifted —
+   * S4: "editing the year can clear the month". Blurs the last part, then reads the formField's
+   * own error text (S2), so a date Workday itself rejected (e.g. "Must end after start date")
+   * is reported as a failure rather than a false "ok".
+   */
+  function fillWorkdayDateParts(entry, parts) {
+    function fillOne(i) {
+      if (i >= parts.length) return Promise.resolve(true);
+      return setWorkdaySpinnerValue(parts[i].el, parts[i].target).then(function (ok) {
+        if (!ok) return false;
+        return wdSleep(WD_DATE_YIELD_MS).then(function () { return fillOne(i + 1); });
+      });
+    }
+    function recheckOne(i, accOk) {
+      if (i >= parts.length) return Promise.resolve(accOk);
+      var p = parts[i];
+      var already = readWorkdaySpinnerDisplayValue(p.el) === p.target;
+      var step = already ? Promise.resolve(true) : setWorkdaySpinnerValue(p.el, p.target);
+      return step.then(function (ok) { return recheckOne(i + 1, accOk && ok); });
+    }
+
+    return fillOne(0).then(function (allOk) {
+      return wdSleep(WD_DATE_YIELD_MS).then(function () {
+        return recheckOne(0, allOk).then(function (finalOk) {
+          var lastEl = parts[parts.length - 1].el;
+          if (typeof lastEl.blur === 'function') lastEl.blur(); else fireEvents(lastEl, ['focusout', 'blur']);
+          if (!finalOk) return false;
+          var wrapper = entry.wrapper;
+          var formField = (wrapper && findWorkdayFormField(wrapper)) || wrapper;
+          var err = (formField && formField.querySelector)
+            ? formField.querySelector('[data-automation-id="errorMessage"], [data-automation-id*="error"]')
+            : null;
+          if (err && isVisible(err) && cleanText(err.textContent)) return false; // Workday itself rejected the date
+          return true;
+        });
+      });
+    });
+  }
+
+  /**
+   * Splits a service-provided date across the wrapper's parts — "MM/YYYY" for 'wd-date-my',
+   * "MM/DD/YYYY" for 'wd-date-mdy' (Self-Identify and similar), "MM/YYYY" or bare "YYYY" for
+   * 'wd-date-y'. Always asynchronous now (see fillWorkdayDateParts/setWorkdaySpinnerValue) —
+   * `applyFill`'s wd-date-* branches below already `.then()` this like the other Workday
+   * widgets.
+   */
   function setWorkdayDateValue(entry, value) {
     var str = String(value == null ? '' : value).trim();
-    if (!str) return false; // never guess at clearing a spinner -- report failure honestly
+    if (!str) return Promise.resolve(false); // never guess at clearing a spinner -- report failure honestly
 
     if (entry.kind === 'wd-date-y') {
       var ym = MM_YYYY_RE.exec(str);
       var yr = ym ? ym[2] : (/^\d{4}$/.test(str) ? str : null);
-      if (!yr) return false;
+      if (!yr) return Promise.resolve(false);
       return setWorkdaySpinnerValue(entry.yearEl, parseInt(yr, 10));
+    }
+
+    if (entry.kind === 'wd-date-mdy') {
+      var mdy = MM_DD_YYYY_RE.exec(str);
+      if (!mdy) return Promise.resolve(false);
+      var monthNumM = parseInt(mdy[1], 10), dayNumM = parseInt(mdy[2], 10), yearNumM = parseInt(mdy[3], 10);
+      if (monthNumM < 1 || monthNumM > 12 || dayNumM < 1 || dayNumM > 31) return Promise.resolve(false);
+      return fillWorkdayDateParts(entry, [
+        { el: entry.monthEl, target: monthNumM },
+        { el: entry.dayEl, target: dayNumM },
+        { el: entry.yearEl, target: yearNumM }
+      ]);
     }
 
     if (entry.kind === 'wd-date-my') {
       var m = MM_YYYY_RE.exec(str);
-      if (!m) return false;
+      if (!m) return Promise.resolve(false);
       var monthNum = parseInt(m[1], 10);
-      if (monthNum < 1 || monthNum > 12) return false;
+      if (monthNum < 1 || monthNum > 12) return Promise.resolve(false);
       if (entry.maskedEl) {
-        return typeMaskedTextField(entry.maskedEl, pad2(monthNum) + '/' + m[2]);
+        return Promise.resolve(typeMaskedTextField(entry.maskedEl, pad2(monthNum) + '/' + m[2]));
       }
-      var okMonth = setWorkdaySpinnerValue(entry.monthEl, monthNum);
-      var okYear = setWorkdaySpinnerValue(entry.yearEl, parseInt(m[2], 10));
-      return okMonth && okYear;
+      return fillWorkdayDateParts(entry, [
+        { el: entry.monthEl, target: monthNum },
+        { el: entry.yearEl, target: parseInt(m[2], 10) }
+      ]);
     }
 
-    return false;
+    return Promise.resolve(false);
   }
 
   function getWorkdayDateValue(entry) {
-    if (entry.kind === 'wd-date-y') return String((entry.yearEl && entry.yearEl.value) || '').trim();
+    if (entry.kind === 'wd-date-y') {
+      var y = readWorkdaySpinnerDisplayValue(entry.yearEl);
+      return isNaN(y) ? '' : String(y);
+    }
+    if (entry.kind === 'wd-date-mdy') {
+      var mm = readWorkdaySpinnerDisplayValue(entry.monthEl);
+      var dd = readWorkdaySpinnerDisplayValue(entry.dayEl);
+      var yy = readWorkdaySpinnerDisplayValue(entry.yearEl);
+      if (isNaN(mm) && isNaN(dd) && isNaN(yy)) return '';
+      return (isNaN(mm) ? '' : pad2(mm)) + '/' + (isNaN(dd) ? '' : pad2(dd)) + '/' + (isNaN(yy) ? '' : String(yy));
+    }
     if (entry.kind === 'wd-date-my') {
       if (entry.maskedEl) return String(entry.maskedEl.value || '').trim();
-      var mv = parseInt(entry.monthEl && entry.monthEl.value, 10);
-      var yv = String((entry.yearEl && entry.yearEl.value) || '').trim();
-      if (isNaN(mv) && !yv) return '';
-      return (isNaN(mv) ? '' : pad2(mv)) + '/' + yv;
+      var mv = readWorkdaySpinnerDisplayValue(entry.monthEl);
+      var yv = readWorkdaySpinnerDisplayValue(entry.yearEl);
+      if (isNaN(mv) && isNaN(yv)) return '';
+      return (isNaN(mv) ? '' : pad2(mv)) + '/' + (isNaN(yv) ? '' : String(yv));
     }
     return '';
   }
@@ -976,6 +1182,7 @@
   function getWorkdayDateHighlightTargets(entry) {
     if (entry.kind === 'wd-date-y') return [entry.yearEl];
     if (entry.maskedEl) return [entry.maskedEl];
+    if (entry.kind === 'wd-date-mdy') return [entry.monthEl, entry.dayEl, entry.yearEl];
     return [entry.monthEl, entry.yearEl];
   }
 
@@ -1002,7 +1209,10 @@
     return true;
   }
 
-  var WD_OPTION_AUTOMATION_RE = /promptOption|checkboxItem/i;
+  // menuItem/promptLeafNode are the real Skills-popup row/leaf automation ids (see the Workday
+  // prompt section below); promptOption/checkboxItem cover the option label and a legacy row
+  // shape.
+  var WD_OPTION_AUTOMATION_RE = /promptOption|checkboxItem|menuItem|promptLeafNode/i;
 
   /**
    * `el` must look like a real Workday option AND live inside `scopeEl` (the listbox the
@@ -1029,13 +1239,17 @@
       var byId = doc.getElementById(controlsId);
       if (byId && isVisible(byId)) return byId;
     }
-    // Fallback: any [role=listbox] that has become visible somewhere in the document --
-    // Workday portals the popup to <body>, far from the opener button.
-    var candidates = Array.prototype.slice.call(doc.querySelectorAll('[role="listbox"]'));
-    for (var i = 0; i < candidates.length; i++) {
-      if (isVisible(candidates[i])) return candidates[i];
-    }
+    // Deliberately NO document-wide "first visible [role=listbox]" fallback: with more than one
+    // dropdown on the page, that can grab a STALE listbox some earlier interaction left open
+    // rather than the one this button just opened (see the project brief) — aria-controls, set
+    // by Workday itself on this exact button, is the only link we trust.
     return null;
+  }
+
+  function collectWorkdayListboxOptions(listbox) {
+    return Array.prototype.slice.call(
+      listbox.querySelectorAll('[role="option"], [data-automation-id*="promptOption"]')
+    ).filter(isVisible);
   }
 
   // ---- degree / country synonyms (explicit families only -- no guessing outside them) ------
@@ -1295,6 +1509,17 @@
    * back to the first option (see the project brief: a typeahead once blindly picked
    * "Venezuela" for "Arizona" on a real application).
    */
+  /**
+   * Opens the dropdown, matches `value` against its options, and clicks the match — or, when
+   * nothing matches confidently, presses Escape and leaves the field untouched. NEVER falls
+   * back to the first option (see the project brief: a typeahead once blindly picked
+   * "Venezuela" for "Arizona" on a real application).
+   *
+   * When the target isn't among the currently-rendered options, scrolls the listbox (and
+   * presses ArrowDown, S4) up to 15 times, re-collecting each time, and gives up after two
+   * consecutive rounds that render no new option labels at all — a long/virtualized list
+   * (Country, State, Source) that only renders a window of its options at a time.
+   */
   function fillWorkdayDropdown(entry, value) {
     var button = entry.button;
     var doc = ownerDoc(button);
@@ -1309,31 +1534,54 @@
     return waitFor(function () { return resolveWorkdayListbox(doc, button); }, 2000, doc).then(function (listbox) {
       if (!listbox) return { ok: false, reason: 'dropdown popup never appeared' };
 
-      var optionEls = Array.prototype.slice.call(
-        listbox.querySelectorAll('[role="option"], [data-automation-id*="promptOption"]')
-      ).filter(isVisible);
+      var optionEls = collectWorkdayListboxOptions(listbox);
       var texts = optionEls.map(optionAccessibleText);
       var idx = matchWorkdayDropdownOption(target, texts);
 
-      if (idx === -1) {
-        dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape');
-        return { ok: false, reason: 'no confident match for "' + target + '" among dropdown options' };
+      // Compares the RENDERED LABELS, not just how many there are: a virtualized listbox can
+      // keep showing the same COUNT of options on every round (a fixed-size sliding window)
+      // while the actual set behind it keeps changing -- comparing length alone would have
+      // declared that "stale" after the very first round and given up long before reaching a
+      // target seated deep in a long list.
+      function scrollRound(roundsLeft, staleRounds, lastKey) {
+        if (idx !== -1 || roundsLeft <= 0 || staleRounds >= 2) return Promise.resolve();
+        if (typeof listbox.scrollBy === 'function') {
+          try { listbox.scrollBy(0, listbox.clientHeight || 200); } catch (eScroll) { /* best effort */ }
+        } else if (typeof listbox.scrollTop === 'number') {
+          listbox.scrollTop += (listbox.clientHeight || 200);
+        }
+        dispatchKeyboardEvent(button, 'keydown', 'ArrowDown', 'ArrowDown', 40);
+        return wdSleep(150).then(function () {
+          optionEls = collectWorkdayListboxOptions(listbox);
+          texts = optionEls.map(optionAccessibleText);
+          idx = matchWorkdayDropdownOption(target, texts);
+          var key = texts.join('␟');
+          var grew = key !== lastKey;
+          return scrollRound(roundsLeft - 1, grew ? 0 : staleRounds + 1, key);
+        });
       }
 
-      var matched = optionEls[idx];
-      if (!isWorkdayOptionSafe(matched, listbox)) {
-        dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape');
-        return { ok: false, reason: 'matched option failed the safety guard' };
-      }
+      return scrollRound(15, 0, texts.join('␟')).then(function () {
+        if (idx === -1) {
+          dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape', 27);
+          return { ok: false, reason: 'no confident match for "' + target + '" among dropdown options' };
+        }
 
-      dispatchPointerClickSequence(matched);
-      var matchedText = texts[idx];
-      return waitFor(function () {
-        var shown = cleanText(button.textContent).toLowerCase();
-        return shown && shown.indexOf(cleanText(matchedText).toLowerCase()) !== -1;
-      }, 1000, doc).then(function (verified) {
-        if (!verified) return { ok: false, reason: 'selected option did not appear on the button afterwards' };
-        return { ok: true, matchedText: matchedText };
+        var matched = optionEls[idx];
+        if (!isWorkdayOptionSafe(matched, listbox)) {
+          dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape', 27);
+          return { ok: false, reason: 'matched option failed the safety guard' };
+        }
+
+        dispatchPointerClickSequence(matched);
+        var matchedText = texts[idx];
+        return waitFor(function () {
+          var shown = cleanText(button.textContent).toLowerCase();
+          return shown && shown.indexOf(cleanText(matchedText).toLowerCase()) !== -1;
+        }, 1000, doc).then(function (verified) {
+          if (!verified) return { ok: false, reason: 'selected option did not appear on the button afterwards' };
+          return { ok: true, matchedText: matchedText };
+        });
       });
     });
   }
@@ -1343,7 +1591,21 @@
   // Certification, Skills, ...
   // ---------------------------------------------------------------------
 
+  // Real anatomy (S3): a "menuItem" row carries the highlight/selection state; inside it, a
+  // "promptLeafNode" carries the CHECKED state and is what a pointer sequence must land on; its
+  // own child "checkboxPanel" input is the actual checkbox; the visible label lives on
+  // "promptOption"'s `data-automation-label`. WD_PROMPT_RESULT_SELECTOR is kept ONLY as a
+  // fallback for a tenant/mock that renders no menuItem rows at all.
+  var WD_PROMPT_ROW_SELECTOR = '[data-automation-id="menuItem"]';
   var WD_PROMPT_RESULT_SELECTOR = '[data-automation-id*="promptOption"], [data-automation-id*="checkboxItem"], [role="option"]';
+  var WD_PROMPT_NO_ITEMS_RE = /no (items|matches|results)\b/i;
+  var WD_PROMPT_DEBOUNCE_MS = 500;
+  var WD_PROMPT_RESULT_TIMEOUT_MS = 8000;
+  var WD_PROMPT_ARROWDOWN_MAX = 40;
+  var WD_PROMPT_ARROWDOWN_DELAY_MS = 150;
+  var WD_PROMPT_MAX_TERMS = 15;
+  var WD_PROMPT_TOTAL_BUDGET_MS = 60000;
+  var WD_PROMPT_NO_POPUP_ABORT_STREAK = 2;
 
   function findWorkdayPrompts(root) {
     var containers = Array.prototype.slice.call(root.querySelectorAll('[data-automation-id="multiSelectContainer"]'));
@@ -1373,30 +1635,32 @@
 
   function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-  /** Match priority: exact -> acronym form ("(SQL)") -> word-boundary startsWith -> substring. */
+  /**
+   * Match priority: exact (case-insensitive) -> the "(ACRONYM)" form -> nothing. NEVER a
+   * prefix/startsWith or substring match (the previous tiers here) — see the project brief:
+   * "Java" must never match a rendered "JavaScript" while the exact "Java" row sits one
+   * ArrowDown away in a virtualized list. A TIE — more than one option normalising to the same
+   * exact or acronym text — fails outright rather than guessing which one was meant.
+   */
   function matchWorkdayPromptOption(term, optionTexts) {
     var norm = function (s) { return cleanText(s).toLowerCase(); };
     var t = norm(term);
     if (!t) return -1;
     var i;
 
+    var exactHits = [];
     for (i = 0; i < optionTexts.length; i++) {
-      if (norm(optionTexts[i]) === t) return i;
+      if (norm(optionTexts[i]) === t) exactHits.push(i);
     }
+    if (exactHits.length === 1) return exactHits[0];
+    if (exactHits.length > 1) return -1;
 
     var acronymRe = new RegExp('\\(' + escapeRegExp(t) + '\\)', 'i');
+    var acronymHits = [];
     for (i = 0; i < optionTexts.length; i++) {
-      if (acronymRe.test(optionTexts[i])) return i;
+      if (acronymRe.test(optionTexts[i])) acronymHits.push(i);
     }
-
-    var startRe = new RegExp('\\b' + escapeRegExp(t), 'i');
-    for (i = 0; i < optionTexts.length; i++) {
-      if (startRe.test(optionTexts[i])) return i;
-    }
-
-    for (i = 0; i < optionTexts.length; i++) {
-      if (norm(optionTexts[i]).indexOf(t) !== -1) return i;
-    }
+    if (acronymHits.length === 1) return acronymHits[0];
     return -1;
   }
 
@@ -1404,14 +1668,206 @@
     setNativeValue(input, '');
   }
 
+  function snapshotWorkdayPopups(doc) {
+    return Array.prototype.slice.call(doc.querySelectorAll('[data-automation-widget="wd-popup"]'));
+  }
+
   /**
-   * Types one term into a prompt/multi-select, waits for Workday's own results to appear,
-   * matches by strict priority, and clicks the match -- or, with no confident match, clears the
-   * typed text and reports failure. NEVER clicks the first result blindly (same rule as the
-   * dropdown above, and for the same reason: a wrong pick here is a false statement on a real
-   * application).
+   * Finds the popup a prompt's results render into. Every working source agrees Workday portals
+   * this to <body>, away from the field — S1: "this element's id is used to identify the
+   * dropdown element, since the dropdown is a popup and not a direct child of this field",
+   * linked by `[data-associated-widget]` == the multiSelectContainer's own id. Falls back to the
+   * input's own aria-controls/aria-owns target, then — ONLY ever restricted to a popup that
+   * appeared SINCE `beforePopups` (a snapshot taken before we typed) — the single most recently
+   * opened VISIBLE wd-popup. Deliberately never a bare document-wide scan of every popup on the
+   * page: with two prompts' popups open at once, that could read a DIFFERENT field's results.
    */
-  function fillWorkdayPromptTerm(entry, term) {
+  function resolveWorkdayPromptPopup(doc, input, beforePopups) {
+    var container = input.closest ? input.closest('[data-automation-id="multiSelectContainer"]') : null;
+    var id = container && container.id;
+    if (id) {
+      var linked = doc.querySelector('[data-associated-widget="' + cssEscape(id) + '"]');
+      if (linked) {
+        var popup = (linked.closest && linked.closest('[data-automation-widget="wd-popup"]')) || linked;
+        if (isVisible(popup)) return popup;
+      }
+    }
+    var controlsId = (input.getAttribute && (input.getAttribute('aria-controls') || input.getAttribute('aria-owns'))) || '';
+    if (controlsId && doc.getElementById) {
+      var byId = doc.getElementById(controlsId);
+      if (byId && isVisible(byId)) return byId;
+    }
+    if (beforePopups) {
+      var fresh = Array.prototype.slice.call(doc.querySelectorAll('[data-automation-widget="wd-popup"]'))
+        .filter(function (p) { return beforePopups.indexOf(p) === -1 && isVisible(p); });
+      if (fresh.length) return fresh[fresh.length - 1]; // the single most recently opened
+    }
+    return null;
+  }
+
+  function workdayPromptNoItemsShown(popup) {
+    return WD_PROMPT_NO_ITEMS_RE.test(cleanText(popup.textContent));
+  }
+
+  function workdayPromptRows(popup) {
+    var rows = Array.prototype.slice.call(popup.querySelectorAll(WD_PROMPT_ROW_SELECTOR)).filter(isVisible);
+    if (rows.length) return rows;
+    // Fallback shape only, for a tenant/mock that renders no menuItem rows at all.
+    return Array.prototype.slice.call(popup.querySelectorAll(WD_PROMPT_RESULT_SELECTOR)).filter(isVisible);
+  }
+
+  function workdayPromptRowLabel(row) {
+    var opt = row.querySelector && row.querySelector('[data-automation-id="promptOption"]');
+    var byAttr = opt && opt.getAttribute && opt.getAttribute('data-automation-label');
+    if (byAttr) return cleanText(byAttr);
+    return optionAccessibleText(row);
+  }
+
+  function workdayPromptRowCheckbox(row) {
+    return (row.querySelector && (row.querySelector('input[data-automation-id="checkboxPanel"]') || row.querySelector('input[type="checkbox"]'))) || null;
+  }
+
+  function workdayPromptRowIsChecked(row) {
+    var leaf = (row.getAttribute && row.getAttribute('data-automation-id') === 'promptLeafNode')
+      ? row
+      : (row.querySelector && row.querySelector('[data-automation-id="promptLeafNode"]'));
+    if (leaf && leaf.getAttribute && leaf.getAttribute('data-automation-checked') === 'Checked') return true;
+    var cb = workdayPromptRowCheckbox(row);
+    return !!(cb && cb.checked);
+  }
+
+  function workdayPromptClickTarget(row) {
+    return (row.querySelector && row.querySelector('[data-automation-id="promptLeafNode"]')) || row;
+  }
+
+  /**
+   * Skills: the row's own checkbox first — S8 says a bare click works; S3 says "React ignores a
+   * bare el.click()" on some tenants and needs a full pointer sequence on the promptLeafNode
+   * instead. They disagree, so this tries the cheap path, verifies via `data-automation-checked`
+   * (never assumed), and falls back to the pointer sequence when the state didn't move. The
+   * caller still verifies the actual pill regardless of which technique the checked-state came
+   * from. Single-select (no checkbox at all): a pointer sequence on the leaf/row directly.
+   */
+  function clickWorkdayPromptRow(row) {
+    var doc = ownerDoc(row);
+    var checkbox = workdayPromptRowCheckbox(row);
+    if (!checkbox) {
+      dispatchPointerClickSequence(workdayPromptClickTarget(row));
+      return Promise.resolve(true);
+    }
+    if (!isClickSafe(checkbox)) return Promise.resolve(false);
+    checkbox.click();
+    return waitFor(function () { return workdayPromptRowIsChecked(row) ? true : null; }, 1500, doc).then(function (checked) {
+      if (!checked) dispatchPointerClickSequence(workdayPromptClickTarget(row));
+      return true;
+    });
+  }
+
+  function workdayPromptPillTexts(entry) {
+    var formField = entry.formField;
+    if (!formField || !formField.querySelectorAll) return [];
+    var pills = Array.prototype.slice.call(formField.querySelectorAll(
+      'ul[data-automation-id="selectedItemList"] li, [data-automation-id="selectedItem"], [data-automation-id="promptSelectedItem"]'
+    ));
+    return pills.map(function (li) { return cleanText(li.textContent); }).filter(Boolean);
+  }
+
+  /** Scoped to `entry.formField` ONLY — no document-wide fallback (see the project brief: that
+   *  let a different field's pre-existing pill satisfy this field's own check). */
+  function workdayPromptHasPill(entry, term) {
+    var t = cleanText(term).toLowerCase();
+    if (!t) return false;
+    return workdayPromptPillTexts(entry).some(function (p) { return p.toLowerCase().indexOf(t) !== -1; });
+  }
+
+  function getWorkdayPromptCurrentValue(entry) {
+    return workdayPromptPillTexts(entry).join(', ');
+  }
+
+  /** Escape on the input, then clear it, then wait (briefly, best-effort) for the popup itself to disappear. */
+  function closeWorkdayPromptPopup(input, popup) {
+    dispatchKeyboardEvent(input, 'keydown', 'Escape', 'Escape', 27);
+    clearWorkdayPromptInput(input);
+    if (!popup) return Promise.resolve();
+    return waitFor(function () { return isVisible(popup) ? null : true; }, 1000, ownerDoc(input)).then(function () {});
+  }
+
+  /**
+   * Given the popup's currently-rendered rows, matches `t` and clicks it — or, when the list is
+   * virtualized and the exact/acronym match isn't rendered yet, walks the highlight with
+   * ArrowDown (S3) up to WD_PROMPT_ARROWDOWN_MAX times, reading whichever row is currently
+   * `data-automation-selected="true"` and re-collecting the plain rendered set each step (new
+   * rows can also just scroll into the DOM without ever becoming "selected").
+   */
+  function matchWorkdayPromptRows(entry, input, doc, t, popup, rows) {
+    var texts = rows.map(workdayPromptRowLabel);
+    var idx = matchWorkdayPromptOption(t, texts);
+
+    function withMatch(matchedRow, matchedText) {
+      if (!isWorkdayOptionSafe(matchedRow, popup)) {
+        return closeWorkdayPromptPopup(input, popup).then(function () {
+          return { ok: false, reason: 'matched result failed the safety guard' };
+        });
+      }
+      return clickWorkdayPromptRow(matchedRow).then(function (clicked) {
+        if (!clicked) {
+          return closeWorkdayPromptPopup(input, popup).then(function () {
+            return { ok: false, reason: 'checkbox click refused by the click guard' };
+          });
+        }
+        return waitFor(function () { return workdayPromptHasPill(entry, matchedText) ? true : null; }, 2000, doc).then(function (added) {
+          return closeWorkdayPromptPopup(input, popup).then(function () {
+            if (!added) return { ok: false, reason: 'click did not add "' + t + '" to the selected item list' };
+            return { ok: true, matchedText: matchedText };
+          });
+        });
+      });
+    }
+
+    if (idx !== -1) return withMatch(rows[idx], texts[idx]);
+
+    function arrowWalk(triesLeft) {
+      if (triesLeft <= 0) {
+        return closeWorkdayPromptPopup(input, popup).then(function () {
+          return { ok: false, reason: 'no confident match among results for "' + t + '"' };
+        });
+      }
+      dispatchKeyboardEvent(input, 'keydown', 'ArrowDown', 'ArrowDown', 40);
+      return wdSleep(WD_PROMPT_ARROWDOWN_DELAY_MS).then(function () {
+        var current = popup.querySelector('[data-automation-id="menuItem"][data-automation-selected="true"]');
+        if (current) {
+          var label = workdayPromptRowLabel(current);
+          if (cleanText(label).toLowerCase() === cleanText(t).toLowerCase()) return withMatch(current, label);
+        }
+        var freshRows = workdayPromptRows(popup);
+        var freshTexts = freshRows.map(workdayPromptRowLabel);
+        var freshIdx = matchWorkdayPromptOption(t, freshTexts);
+        if (freshIdx !== -1) return withMatch(freshRows[freshIdx], freshTexts[freshIdx]);
+        return arrowWalk(triesLeft - 1);
+      });
+    }
+    return arrowWalk(WD_PROMPT_ARROWDOWN_MAX);
+  }
+
+  /**
+   * Types one term into a prompt/multi-select, finds Workday's own results IN THE PORTALLED
+   * POPUP (see resolveWorkdayPromptPopup — this is the fix for the reported "hangs on ...
+   * skills" bug: the previous code here searched only inside the field, so every term waited out
+   * its full timeout and a Workday auto-commit was cleared and reported as a failure), matches
+   * by strict priority, and clicks the match — or, with no confident match, clears the typed
+   * text and reports failure. NEVER clicks the first result blindly.
+   *
+   * `opts` (optional) overrides timing for a caller/test: `resultTimeoutMs`, `debounceMs`.
+   *
+   * Resolves to `{ ok, reason, matchedText, noPopupAtAll }` — `noPopupAtAll` is true only when
+   * NEITHER a popup NOR a matching pill ever appeared at all within budget (used by
+   * fillWorkdayPromptValue to abort the rest of a Skills-shaped list early, per the project
+   * brief, rather than let every remaining term hang for its own full timeout).
+   */
+  function fillWorkdayPromptTerm(entry, term, opts) {
+    opts = opts || {};
+    var resultTimeoutMs = opts.resultTimeoutMs == null ? WD_PROMPT_RESULT_TIMEOUT_MS : opts.resultTimeoutMs;
+    var debounceMs = opts.debounceMs == null ? WD_PROMPT_DEBOUNCE_MS : opts.debounceMs;
     var input = entry.input;
     var doc = ownerDoc(input);
     if (!isWorkdayPromptInputSafe(input)) {
@@ -1420,64 +1876,49 @@
     var t = String(term == null ? '' : term).trim();
     if (!t) return Promise.resolve({ ok: false, reason: 'empty term' });
 
+    if (workdayPromptHasPill(entry, t)) {
+      return Promise.resolve({ ok: true, matchedText: t, alreadyPresent: true });
+    }
+
+    var beforePopups = snapshotWorkdayPopups(doc);
     setNativeValue(input, t);
-    dispatchKeyboardEvent(input, 'keydown', 'Enter', 'Enter');
 
-    // Searched narrowest-first: the multiSelectContainer itself (some implementations render
-    // results inline inside it), then the whole formField-* wrapper (covers a results panel
-    // rendered as a sibling of the container, under the same field — the common shape).
-    // Deliberately NEVER falls back to a whole-document search the way the dropdown's listbox
-    // resolution does: unlike the dropdown (explicitly portalled per the project brief, found
-    // only via its own aria-controls id), nothing in the ground truth says a prompt's results
-    // are portalled away from their own field, and a document-wide fallback here would risk
-    // binding to a DIFFERENT field's results left open on the page (e.g. an earlier prompt
-    // whose typed term had no confident match, so its own results panel was correctly left
-    // open rather than guessed at) — exactly the kind of cross-field mix-up this extension
-    // exists to prevent.
-    return waitFor(function () {
-      var roots = [entry.container, entry.formField];
-      for (var r = 0; r < roots.length; r++) {
-        var root = roots[r];
-        if (!root || !root.querySelectorAll) continue;
-        var els = Array.prototype.slice.call(root.querySelectorAll(WD_PROMPT_RESULT_SELECTOR)).filter(isVisible);
-        if (els.length) return { root: root, els: els };
-      }
-      return null;
-    }, 3000, doc).then(function (found) {
-      if (!found) {
-        clearWorkdayPromptInput(input);
-        return { ok: false, reason: 'no results returned for "' + t + '"' };
-      }
-      var resultEls = found.els;
-      var texts = resultEls.map(optionAccessibleText);
-      var idx = matchWorkdayPromptOption(t, texts);
-      if (idx === -1) {
-        clearWorkdayPromptInput(input);
-        return { ok: false, reason: 'no confident match among results for "' + t + '"' };
-      }
-      var matched = resultEls[idx];
-      if (!isWorkdayOptionSafe(matched, found.root)) {
-        clearWorkdayPromptInput(input);
-        return { ok: false, reason: 'matched result failed the safety guard' };
+    return wdSleep(debounceMs).then(function () {
+      dispatchKeyboardEvent(input, 'keydown', 'Enter', 'Enter', 13);
+      dispatchKeyboardEvent(input, 'keypress', 'Enter', 'Enter', 13);
+      dispatchKeyboardEvent(input, 'keyup', 'Enter', 'Enter', 13);
+
+      var start = Date.now();
+      var sawPopupEver = false;
+
+      function poll() {
+        if (workdayPromptHasPill(entry, t)) return { kind: 'pill' };
+        var popup = resolveWorkdayPromptPopup(doc, input, beforePopups);
+        if (popup) {
+          sawPopupEver = true;
+          if (workdayPromptNoItemsShown(popup)) return { kind: 'empty', popup: popup };
+          var rows = workdayPromptRows(popup);
+          if (rows.length) return { kind: 'rows', popup: popup, rows: rows };
+        }
+        if (Date.now() - start >= resultTimeoutMs) return { kind: 'timeout' };
+        return null;
       }
 
-      var checkbox = matched.querySelector ? matched.querySelector('input[type="checkbox"]') : null;
-      if (checkbox) {
-        if (!safeClick(checkbox)) return { ok: false, reason: 'checkbox click refused by the click guard' };
-      } else {
-        dispatchPointerClickSequence(matched);
-      }
+      return waitFor(poll, resultTimeoutMs, doc).then(function (outcome) {
+        outcome = outcome || { kind: 'timeout' };
 
-      var matchedText = texts[idx];
-      return waitFor(function () {
-        var list = (entry.formField && entry.formField.querySelector && entry.formField.querySelector('ul[data-automation-id="selectedItemList"]'))
-          || doc.querySelector('ul[data-automation-id="selectedItemList"]');
-        if (!list) return false;
-        var items = Array.prototype.slice.call(list.querySelectorAll('li'));
-        return items.some(function (li) { return cleanText(li.textContent).toLowerCase().indexOf(t.toLowerCase()) !== -1; });
-      }, 2000, doc).then(function (added) {
-        if (!added) return { ok: false, reason: 'click did not add "' + t + '" to the selected item list' };
-        return { ok: true, matchedText: matchedText };
+        if (outcome.kind === 'pill') return { ok: true, matchedText: t }; // Workday auto-committed it
+
+        if (outcome.kind === 'empty') {
+          return closeWorkdayPromptPopup(input, outcome.popup).then(function () {
+            return { ok: false, reason: 'Workday reported no results for "' + t + '"' };
+          });
+        }
+        if (outcome.kind === 'timeout') {
+          clearWorkdayPromptInput(input);
+          return { ok: false, reason: 'no results returned for "' + t + '"', noPopupAtAll: !sawPopupEver };
+        }
+        return matchWorkdayPromptRows(entry, input, doc, t, outcome.popup, outcome.rows);
       });
     });
   }
@@ -1485,34 +1926,143 @@
   /**
    * `value` is either a single term (Field of Study, School, Certification) or an array
    * (Skills — the service sends a list). For a list: add each in turn, skip one with no
-   * confident match and continue with the rest, capped at the list's own length.
+   * confident match and continue with the rest (skip-and-continue, never stop on the first
+   * failure) — capped at WD_PROMPT_MAX_TERMS terms and WD_PROMPT_TOTAL_BUDGET_MS overall. If the
+   * first WD_PROMPT_NO_POPUP_ABORT_STREAK terms in a row each produce no popup and no pill AT
+   * ALL, this tenant's Skills widget almost certainly isn't the shape this code expects — stop
+   * the rest of the list rather than let every remaining term hang for its own full timeout,
+   * which is exactly the reported bug this rewrite targets.
    */
-  function fillWorkdayPromptValue(entry, value) {
+  function fillWorkdayPromptValue(entry, value, opts) {
     if (Array.isArray(value)) {
+      var terms = value.slice(0, WD_PROMPT_MAX_TERMS);
+      var overCap = value.slice(WD_PROMPT_MAX_TERMS);
       var results = [];
+      var noPopupStreak = 0;
+      var startedAt = Date.now();
+
       function next(i) {
-        if (i >= value.length) return Promise.resolve(results);
-        return fillWorkdayPromptTerm(entry, value[i]).then(function (r) {
-          results.push({ term: value[i], result: r });
+        if (i >= terms.length) return Promise.resolve(results);
+        if (Date.now() - startedAt > WD_PROMPT_TOTAL_BUDGET_MS) {
+          for (var j = i; j < terms.length; j++) {
+            results.push({ term: terms[j], result: { ok: false, reason: 'not attempted -- overall time budget exhausted' } });
+          }
+          return Promise.resolve(results);
+        }
+        return fillWorkdayPromptTerm(entry, terms[i], opts).then(function (r) {
+          results.push({ term: terms[i], result: r });
+          noPopupStreak = r.noPopupAtAll ? (noPopupStreak + 1) : 0;
+          if (noPopupStreak >= WD_PROMPT_NO_POPUP_ABORT_STREAK) {
+            for (var k = i + 1; k < terms.length; k++) {
+              results.push({ term: terms[k], result: { ok: false, reason: 'Workday skills results not found — please send a Report page' } });
+            }
+            return results;
+          }
           return next(i + 1);
         });
       }
       return next(0).then(function (all) {
+        for (var s = 0; s < overCap.length; s++) {
+          all.push({ term: overCap[s], result: { ok: false, reason: 'not attempted -- over the ' + WD_PROMPT_MAX_TERMS + '-term cap' } });
+        }
         var failedTerms = all.filter(function (r) { return !r.result.ok; }).map(function (r) { return r.term; });
         var anyOk = all.some(function (r) { return r.result.ok; });
         return { ok: anyOk, failedTerms: failedTerms, results: all };
       });
     }
-    return fillWorkdayPromptTerm(entry, value);
+    return fillWorkdayPromptTerm(entry, value, opts);
   }
 
-  function getWorkdayPromptCurrentValue(entry) {
-    var doc = ownerDoc(entry.input);
-    var list = (entry.formField && entry.formField.querySelector && entry.formField.querySelector('ul[data-automation-id="selectedItemList"]'))
-      || (doc && doc.querySelector('ul[data-automation-id="selectedItemList"]'));
-    if (!list) return '';
-    var items = Array.prototype.slice.call(list.querySelectorAll('li')).map(function (li) { return cleanText(li.textContent); }).filter(Boolean);
-    return items.join(', ');
+  // ---------------------------------------------------------------------
+  // Workday Self-Identify checkbox group (disabilityStatus-CheckboxGroup, CC-305) — several
+  // independent <input type=checkbox> elements that together behave as ONE single-choice
+  // question ("requires exactly one selection" — S5), never as N independent booleans. Scoped
+  // narrowly to `fieldset[data-automation-id$="-CheckboxGroup"]`, the one concrete, cited shape
+  // — deliberately NOT the broader "any formField with more than one checkbox" heuristic the
+  // brief also mentions, since that would risk misreading the Skills popup's own checkboxItem
+  // rows (also `input[type=checkbox]`, but a completely different widget) as a choice group.
+  // ---------------------------------------------------------------------
+
+  function findWorkdayCheckboxGroups(root) {
+    var fieldsets = Array.prototype.slice.call(root.querySelectorAll('fieldset[data-automation-id$="-CheckboxGroup"]'));
+    var out = [];
+    for (var i = 0; i < fieldsets.length; i++) {
+      var fs = fieldsets[i];
+      if (!isVisible(fs)) continue;
+      if (hasWorkdayHardDenyAutomationId(fs)) continue;
+      var boxes = Array.prototype.slice.call(fs.querySelectorAll('input[type="checkbox"]')).filter(function (cb) {
+        return !cb.disabled && !hasWorkdayHardDenyAutomationId(cb);
+      });
+      if (!boxes.length) continue;
+      var container = findWorkdayFormField(fs) || fs;
+      out.push({ fieldset: fs, boxes: boxes, container: container, label: getWorkdayCheckboxGroupLabel(fs, container) });
+    }
+    return out;
+  }
+
+  /** The group's own question text — its <legend> first, else the usual formField label resolution. */
+  function getWorkdayCheckboxGroupLabel(fieldset, container) {
+    var legend = fieldset.querySelector && fieldset.querySelector('legend');
+    if (legend) {
+      var t = cleanText(legend.textContent);
+      if (t) return t;
+    }
+    return getWorkdayFieldLabel(container);
+  }
+
+  /**
+   * One option's own label — S5: "each option's label is at nextElementSibling.nextElementSibling";
+   * the recommended, more robust shape first (`label[for]`), then that exact sibling walk, then
+   * an ancestor `div[role=cell]` (a table-laid-out group), then the shared getLabel() fallback.
+   */
+  function getWorkdayCheckboxGroupOptionLabel(checkbox) {
+    var byFor = checkbox.id && checkbox.ownerDocument ? checkbox.ownerDocument.querySelector('label[for="' + cssEscape(checkbox.id) + '"]') : null;
+    if (byFor) {
+      var t1 = cleanText(byFor.textContent);
+      if (t1) return t1;
+    }
+    var sib = checkbox.nextElementSibling && checkbox.nextElementSibling.nextElementSibling;
+    if (sib) {
+      var t2 = cleanText(sib.textContent);
+      if (t2) return t2;
+    }
+    var cell = checkbox.closest ? checkbox.closest('[role="cell"]') : null;
+    if (cell) {
+      var t3 = cleanText(cell.textContent);
+      if (t3) return t3;
+    }
+    return cleanText(getLabel(checkbox));
+  }
+
+  function isWorkdayCheckboxGroupOptionSafe(el, fieldset) {
+    if (!el || el.tagName !== 'INPUT' || (el.type || '').toLowerCase() !== 'checkbox') return false;
+    if (hasWorkdayHardDenyAutomationId(el)) return false;
+    if (!fieldset || !fieldset.contains(el)) return false;
+    if (hasWorkdayHardDenyAutomationId(fieldset)) return false;
+    if (el.disabled) return false;
+    return true;
+  }
+
+  /**
+   * Matches `value` against the group's own option labels (the SAME shared matcher used for
+   * native selects/radios/Workday dropdowns — the CC-305 texts are exactly the decline/yes/no
+   * "answer family" shapes it already knows), clicks that one option, then unchecks every OTHER
+   * currently-checked box in the group so "exactly one" always holds. Never guesses: no
+   * confident match leaves the whole group untouched.
+   */
+  function setWorkdayCheckboxGroupValue(entry, value) {
+    var options = entry.boxes.map(getWorkdayCheckboxGroupOptionLabel);
+    var idx = matchChoiceOption(value, options);
+    if (idx === -1) return false;
+    var target = entry.boxes[idx];
+    if (!isWorkdayCheckboxGroupOptionSafe(target, entry.fieldset)) return false;
+    if (!target.checked && !safeClick(target)) return false;
+    if (!target.checked) return false;
+    for (var i = 0; i < entry.boxes.length; i++) {
+      var box = entry.boxes[i];
+      if (box !== target && box.checked && isWorkdayCheckboxGroupOptionSafe(box, entry.fieldset)) safeClick(box);
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------------
@@ -1587,6 +2137,7 @@
     // to begin with (only input/select/textarea are), so it is scanned separately below.
     var wdDateWrappers = findWorkdayDateWrappers(root);
     var wdPrompts = findWorkdayPrompts(root);
+    var wdCheckboxGroups = findWorkdayCheckboxGroups(root);
     var wdDropdowns = (function () {
       var buttons = Array.prototype.slice.call(root.querySelectorAll('button[aria-haspopup="listbox"]'));
       var out = [];
@@ -1603,10 +2154,24 @@
     for (var wd = 0; wd < wdDateWrappers.length; wd++) {
       var wdw = wdDateWrappers[wd];
       if (wdw.monthEl) consumedByWorkday.push(wdw.monthEl);
+      if (wdw.dayEl) consumedByWorkday.push(wdw.dayEl);
       if (wdw.yearEl) consumedByWorkday.push(wdw.yearEl);
       if (wdw.maskedEl) consumedByWorkday.push(wdw.maskedEl);
     }
     for (var wp = 0; wp < wdPrompts.length; wp++) consumedByWorkday.push(wdPrompts[wp].input);
+    for (var wcg = 0; wcg < wdCheckboxGroups.length; wcg++) {
+      var wcgBoxes = wdCheckboxGroups[wcg].boxes;
+      for (var wcgb = 0; wcgb < wcgBoxes.length; wcgb++) consumedByWorkday.push(wcgBoxes[wcgb]);
+    }
+    // A hard-deny element (agreementCheckbox/terms consent, chiefly) must never be offered as a
+    // fillable field AT ALL, not merely refused at fill time -- the generic checkbox fill path
+    // (setCheckboxValue) has no automation-id awareness of its own to fall back on, unlike every
+    // Workday-specific widget above, each of which re-checks this at the point of action. Scoped
+    // to inputs inside a formField-* container, so this can never reach outside Workday's own
+    // markup.
+    var wdHardDenyInputs = Array.prototype.slice.call(root.querySelectorAll(WD_FORM_FIELD_SELECTOR + ' input'))
+      .filter(hasWorkdayHardDenyAutomationId);
+    for (var hd = 0; hd < wdHardDenyInputs.length; hd++) consumedByWorkday.push(wdHardDenyInputs[hd]);
 
     for (var i = 0; i < candidates.length; i++) {
       var el = candidates[i];
@@ -1727,20 +2292,24 @@
       });
     }
 
-    // Workday spinner dates -- one field per dateInputWrapper, "wd-date-my" (month+year, or the
-    // single masked-input fallback) or "wd-date-y" (year-only, education "From"/"To"). The
-    // service may send "MM/YYYY" even for a year-only field; the resolver is told to use only
-    // the year part (see FieldDescriptor.widget on the /resolve contract).
+    // Workday spinner dates -- one field per dateInputWrapper: "wd-date-my" (month+year, or the
+    // single masked-input fallback), "wd-date-y" (year-only, education "From"/"To"), or
+    // "wd-date-mdy" (month+day+year -- Self-Identify "Date" and similar). The service may send
+    // "MM/YYYY" even for a year-only field; the resolver is told to use only the year part (see
+    // FieldDescriptor.widget on the /resolve contract).
     for (var wd2 = 0; wd2 < wdDateWrappers.length; wd2++) {
       var wdw2 = wdDateWrappers[wd2];
-      var wdAnchorEl = wdw2.maskedEl || wdw2.monthEl || wdw2.yearEl;
+      var wdAnchorEl = wdw2.maskedEl || wdw2.monthEl || wdw2.dayEl || wdw2.yearEl;
       if (wdAnchorEl.disabled || (wdw2.yearEl && wdw2.yearEl.disabled)) continue;
-      var wdKind = wdw2.shape === 'y' ? 'wd-date-y' : 'wd-date-my';
+      var wdKind = wdw2.shape === 'y' ? 'wd-date-y' : (wdw2.shape === 'mdy' ? 'wd-date-mdy' : 'wd-date-my');
       var wdId = 'f' + (counter++);
       var wdSection = getSectionContext(wdw2.wrapper);
-      registry[wdId] = wdw2.shape === 'y'
+      registry[wdId] = wdKind === 'wd-date-y'
         ? { kind: 'wd-date-y', yearEl: wdw2.yearEl, wrapper: wdw2.wrapper }
-        : { kind: 'wd-date-my', monthEl: wdw2.monthEl, yearEl: wdw2.yearEl, maskedEl: wdw2.maskedEl, wrapper: wdw2.wrapper };
+        : wdKind === 'wd-date-mdy'
+          ? { kind: 'wd-date-mdy', monthEl: wdw2.monthEl, dayEl: wdw2.dayEl, yearEl: wdw2.yearEl, wrapper: wdw2.wrapper }
+          : { kind: 'wd-date-my', monthEl: wdw2.monthEl, yearEl: wdw2.yearEl, maskedEl: wdw2.maskedEl, wrapper: wdw2.wrapper };
+      var wdPlaceholder = wdKind === 'wd-date-y' ? 'YYYY' : (wdKind === 'wd-date-mdy' ? 'MM/DD/YYYY' : 'MM/YYYY');
       fields.push({
         id: wdId,
         selector: buildSelector(wdAnchorEl),
@@ -1749,7 +2318,7 @@
         name: wdAnchorEl.name || '',
         autocomplete: '',
         label: wdw2.label || '',
-        placeholder: wdKind === 'wd-date-y' ? 'YYYY' : 'MM/YYYY',
+        placeholder: wdPlaceholder,
         required: !!wdAnchorEl.required,
         options: [],
         section: wdSection.section,
@@ -1805,6 +2374,33 @@
         section: prSection.section,
         section_index: prSection.section_index,
         widget: 'wd-prompt'
+      });
+    }
+
+    // Workday Self-Identify checkbox group -- disabilityStatus-CheckboxGroup and similar. Wire
+    // type "checkbox-group" matches the resolver's existing single-choice handling for it (see
+    // src/applypilot/extension/matcher.py) -- the SAME contract a radio group uses, just backed
+    // by independent <input type=checkbox> elements instead of a native radio group.
+    for (var wcgi = 0; wcgi < wdCheckboxGroups.length; wcgi++) {
+      var cg = wdCheckboxGroups[wcgi];
+      var cgId = 'f' + (counter++);
+      var cgSection = getSectionContext(cg.fieldset);
+      var cgOptions = cg.boxes.map(getWorkdayCheckboxGroupOptionLabel);
+      registry[cgId] = { kind: 'wd-checkbox-group', boxes: cg.boxes, fieldset: cg.fieldset, container: cg.container, label: cg.label };
+      fields.push({
+        id: cgId,
+        selector: buildSelector(cg.fieldset),
+        tag: 'input',
+        type: 'checkbox-group',
+        name: cg.boxes[0].name || '',
+        autocomplete: '',
+        label: cg.label || '',
+        placeholder: '',
+        required: true,
+        options: cgOptions,
+        section: cgSection.section,
+        section_index: cgSection.section_index,
+        widget: 'wd-checkbox-group'
       });
     }
 
@@ -2251,9 +2847,13 @@
       return checked ? checked.value : '';
     }
     if (entry.kind === 'date-parts') return getDatePartsValue(entry);
-    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y') return getWorkdayDateValue(entry);
+    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y' || entry.kind === 'wd-date-mdy') return getWorkdayDateValue(entry);
     if (entry.kind === 'wd-dropdown') return cleanText(entry.button.textContent);
     if (entry.kind === 'wd-prompt') return getWorkdayPromptCurrentValue(entry);
+    if (entry.kind === 'wd-checkbox-group') {
+      var checkedBox = entry.boxes.filter(function (b) { return b.checked; })[0];
+      return checkedBox ? getWorkdayCheckboxGroupOptionLabel(checkedBox) : '';
+    }
     var el = entry.el;
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return el.checked;
     return el.value;
@@ -2273,7 +2873,9 @@
       return setRadioValue(entry.elements, value);
     }
     if (entry.kind === 'date-parts') return setDatePartsValue(entry, value);
-    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y') return setWorkdayDateValue(entry, value);
+    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y' || entry.kind === 'wd-date-mdy') {
+      return setWorkdayDateValue(entry, value);
+    }
     if (entry.kind === 'wd-dropdown') {
       return fillWorkdayDropdown(entry, value).then(function (r) {
         entry._lastReason = r.reason || '';
@@ -2287,6 +2889,11 @@
         return !!r.ok;
       });
     }
+    if (entry.kind === 'wd-checkbox-group') {
+      var cgResult = setWorkdayCheckboxGroupValue(entry, value);
+      entry._lastReason = cgResult ? '' : ('no confident match for "' + value + '" among ' + entry.label);
+      return cgResult;
+    }
     var el = entry.el;
     if (el.tagName === 'SELECT') return setSelectValue(el, value);
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return setCheckboxValue(el, value);
@@ -2298,9 +2905,12 @@
   function getHighlightTargets(entry) {
     if (entry.kind === 'radio-group') return entry.elements.slice();
     if (entry.kind === 'date-parts') return [entry.monthEl, entry.yearEl];
-    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y') return getWorkdayDateHighlightTargets(entry);
+    if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y' || entry.kind === 'wd-date-mdy') {
+      return getWorkdayDateHighlightTargets(entry);
+    }
     if (entry.kind === 'wd-dropdown') return [entry.button];
     if (entry.kind === 'wd-prompt') return [entry.input];
+    if (entry.kind === 'wd-checkbox-group') return entry.boxes.slice();
     // A hidden native <select> paired with a custom widget (see
     // findPairedWidget) highlights the visible widget, never the hidden
     // select the operator can't see.
@@ -2514,49 +3124,47 @@
       }
       fireEvents(el, ['input', 'change']);
 
-      if (target.isDropzone) {
-        // Best-effort only: some dropzone widgets (react-dropzone and similar)
-        // read e.dataTransfer.files from the drop event itself rather than
-        // from the underlying input's change event. This can never downgrade
-        // the verified result below, and any failure here is swallowed.
-        try {
-          var dzEl = findDropzoneContainer(el);
-          var EventCtor = (view && (view.DragEvent || view.Event)) || (typeof Event !== 'undefined' ? Event : null);
-          if (EventCtor && dzEl) {
-            var dropEvt = new EventCtor('drop', { bubbles: true, cancelable: true });
-            try { Object.defineProperty(dropEvt, 'dataTransfer', { value: dt }); } catch (eDef) { /* best effort */ }
-            dzEl.dispatchEvent(dropEvt);
-          }
-        } catch (eDrop) {
-          // best effort only — never affects the verified result below
-        }
-      }
-
+      // NOTE: no drop event is dispatched here yet, on purpose — see the single, ONE-channel
+      // fallback below this. Some dropzone widgets (react-dropzone and similar) read
+      // e.dataTransfer.files from the drop event itself rather than the input's change event,
+      // but firing it unconditionally, before even checking whether change already worked, is
+      // exactly the double-upload bug the project brief documents.
       var attached = el.files && el.files[0];
       if (attached && attached.name === file.name) {
         return Promise.resolve({ attempted: true, attached: true, filename: attached.name });
       }
 
-      // input.files came back empty — a plain dropzone widget may still need the drop
-      // event too (independent of target.isDropzone above: a plain input[type=file] can sit
-      // right next to a Workday-style dropzone), and Workday itself always ends up here
-      // (it consumes the File and clears the input). Try the Workday drop zone, then fall
-      // back to waiting briefly for Workday's own success markers before giving up.
+      // ONE upload channel only past this point. input.files came back empty -- on a real
+      // Workday tenant that is the EXPECTED outcome (it consumes the File right after the
+      // change event above), not evidence the change event failed, so this must never re-fire
+      // the same delivery a second time. The project brief's "two upload channels" bug was
+      // exactly that: an earlier version of this function dispatched a synthetic 'drop' on the
+      // dropzone UNCONDITIONALLY whenever the target looked drop-zone-shaped, regardless of
+      // whether the change event had already been accepted -- on a tenant whose drop handler
+      // also honours a native 'drop' event, that produced a second, duplicate upload from a
+      // single attach() call. This dispatches 'drop' AT MOST once, and only because change
+      // alone didn't leave a file behind.
       try {
+        var dzEl = target.isDropzone ? findDropzoneContainer(el) : null;
         var wdDropzone = doc.querySelector && doc.querySelector('[data-automation-id="file-upload-drop-zone"]');
-        if (wdDropzone) {
+        var dropTarget = dzEl || wdDropzone;
+        if (dropTarget) {
           var EventCtor2 = (view && (view.DragEvent || view.Event)) || (typeof Event !== 'undefined' ? Event : null);
           if (EventCtor2) {
             var dropEvt2 = new EventCtor2('drop', { bubbles: true, cancelable: true });
             try { Object.defineProperty(dropEvt2, 'dataTransfer', { value: dt }); } catch (eDef2) { /* best effort */ }
-            wdDropzone.dispatchEvent(dropEvt2);
+            dropTarget.dispatchEvent(dropEvt2);
           }
         }
       } catch (eWdDrop) {
         // best effort only
       }
 
-      return waitForWorkdayUploadSuccess(doc, file.name, 5000).then(function (found) {
+      // Up to ~20s (S4 polls for ~21s; S9 sleeps 10s) -- longer than any other wait in this
+      // module on purpose: Workday's own upload confirmation is genuinely the slowest thing
+      // this extension ever waits on, and the previous 5s budget was shorter than every source
+      // examined.
+      return waitForWorkdayUploadSuccess(doc, file.name, 20000).then(function (found) {
         if (found) {
           return { attempted: true, attached: true, filename: findWorkdayUploadedFilename(doc) || file.name };
         }
@@ -2614,6 +3222,9 @@
     // Workday widgets — exported primarily for selftest.js; content.js only ever goes through
     // scanFields()/applyFill()/getCurrentValue()/getHighlightTargets() above.
     findWorkdayDateWrappers: findWorkdayDateWrappers,
+    findWorkdayDatePart: findWorkdayDatePart,
+    findWorkdayDateSectionDisplay: findWorkdayDateSectionDisplay,
+    readWorkdaySpinnerDisplayValue: readWorkdaySpinnerDisplayValue,
     isWorkdaySpinnerInputSafe: isWorkdaySpinnerInputSafe,
     isWorkdayMaskedDateInputSafe: isWorkdayMaskedDateInputSafe,
     setWorkdaySpinnerValue: setWorkdaySpinnerValue,
@@ -2623,6 +3234,7 @@
     isWorkdayDropdownOpenerSafe: isWorkdayDropdownOpenerSafe,
     isWorkdayOptionSafe: isWorkdayOptionSafe,
     resolveWorkdayListbox: resolveWorkdayListbox,
+    collectWorkdayListboxOptions: collectWorkdayListboxOptions,
     matchWorkdayDropdownOption: matchWorkdayDropdownOption,
     matchChoiceOption: matchChoiceOption,
     fillWorkdayDropdown: fillWorkdayDropdown,
@@ -2631,7 +3243,17 @@
     findWorkdayPrompts: findWorkdayPrompts,
     isWorkdayPromptInputSafe: isWorkdayPromptInputSafe,
     matchWorkdayPromptOption: matchWorkdayPromptOption,
+    resolveWorkdayPromptPopup: resolveWorkdayPromptPopup,
+    snapshotWorkdayPopups: snapshotWorkdayPopups,
+    workdayPromptRows: workdayPromptRows,
+    workdayPromptRowLabel: workdayPromptRowLabel,
+    workdayPromptHasPill: workdayPromptHasPill,
     fillWorkdayPromptTerm: fillWorkdayPromptTerm,
+    // Workday Self-Identify checkbox group (disabilityStatus-CheckboxGroup, CC-305).
+    findWorkdayCheckboxGroups: findWorkdayCheckboxGroups,
+    getWorkdayCheckboxGroupOptionLabel: getWorkdayCheckboxGroupOptionLabel,
+    isWorkdayCheckboxGroupOptionSafe: isWorkdayCheckboxGroupOptionSafe,
+    setWorkdayCheckboxGroupValue: setWorkdayCheckboxGroupValue,
     fillWorkdayPromptValue: fillWorkdayPromptValue,
     hasWorkdayHardDenyAutomationId: hasWorkdayHardDenyAutomationId
   };
