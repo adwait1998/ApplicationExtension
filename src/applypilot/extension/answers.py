@@ -248,8 +248,14 @@ def _real_llm_fn(question: str, context: str) -> str:
     (see llm_util's module docstring) -- everything else about this
     function (fail-soft, provider selection order otherwise) is unchanged.
     """
+    from applypilot.extension import llm_util
+
+    blocked = llm_util.cloud_block_reason()
+    if blocked:
+        # Raised, not swallowed: match() turns it into a visible reason.
+        raise llm_util.CloudBlocked(blocked)
     try:
-        from applypilot.extension.llm_util import get_llm_client
+        get_llm_client = llm_util.get_llm_client
 
         msgs = [
             {"role": "system", "content": _SYSTEM_PROMPT},
@@ -304,6 +310,11 @@ def fits_choice(answer: str, field: FieldDescriptor) -> bool:
         if len(a.split()) <= 3 and _prefix_on_boundary(o, a):
             return True
     return False
+
+
+def _cloud_blocked_exc():
+    from applypilot.extension.llm_util import CloudBlocked
+    return CloudBlocked
 
 
 def _refuse_llm(question: str, context: str) -> str:
@@ -598,6 +609,8 @@ def match(
 
     try:
         result = ac.answer(question, context=ctx, llm_fn=wrapped)
+    except _cloud_blocked_exc() as exc:
+        return SkipResult(id=field.id, source="draft", reason=f"no draft: {exc}", auto_fill=False)
     except _BudgetExhausted:
         return SkipResult(
             id=field.id,

@@ -41,7 +41,8 @@ _MARKERS = {
     # mid-token); "race condition" IS a standalone word "race" though, so it
     # needs an explicit carve-out — never treat the engineering term as EEO.
     "eeo_race": re.compile(r"\b(race(?!\s*-?\s*conditions?\b)|ethnicit\w+)\b", re.I),
-    "eeo_veteran": re.compile(r"\b(veteran|vevraa)\b", re.I),
+    # "What is your military status?" is the veteran self-ID question too.
+    "eeo_veteran": re.compile(r"\b(veteran|vevraa|military\s+status)\b", re.I),
     "eeo_disability": re.compile(r"\bdisabilit\w+\b", re.I),
     # Voluntary LGBTQ+ self-identification. Nothing marked these before, so a
     # draft-enabled path could hand "Do you identify as transgender?" to an
@@ -262,3 +263,98 @@ def resolve_canary(question: str, profile: dict) -> str | None:
         return None  # not in profile — refuse
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Choosing among a question's OPTIONS (the extension knows them for selects,
+# radio groups and button groups). A bare "Yes" is not enough when the options
+# bundle facts: "Yes, I am a U.S. citizen or permanent resident" vs "Yes, I am
+# authorized but will require sponsorship" — picking the first "Yes" made a
+# false citizenship claim for an applicant on a work visa.
+# ---------------------------------------------------------------------------
+
+_CITIZEN_CLAIM = re.compile(r"\b(citizen|permanent\s+resident|green\s*card|lawful\s+permanent)\b", re.I)
+_NEG_NEAR = re.compile(r"\b(not|no|never|without|don'?t|do\s+not|will\s+not|won'?t)\b", re.I)
+_SPONSOR_WORD = re.compile(r"\bsponsor\w*\b|\bvisa\b", re.I)
+_NEED_WORD = re.compile(r"\b(require|requires|required|need|needs|will\s+need)\b", re.I)
+_VISA_TYPES = re.compile(r"\b(h-?1b|h-?4|f-?1|opt|stem\s*opt|cpt|l-?1|tn|o-?1|e-?[123]|j-?1|ead|visa)\b", re.I)
+_CITIZEN_TYPES = re.compile(r"\b(citizen|green\s*card|permanent\s+resident|lpr)\b", re.I)
+_DECLINE_OPT = re.compile(
+    r"\b(decline|prefer\s+not|rather\s+not|not\s+declared|do(?:n'?t|\s+not)\s+(?:wish|want)|"
+    r"choose\s+not|not\s+to\s+(?:say|answer|disclose|self[- ]identify))\b", re.I)
+_ASSERTS = re.compile(r"^\s*(yes|no)\b|\bi\s+am\s+(a|an)\b|\bi\s+(self[- ])?identify\s+as\b|\bi\s+have\s+(a|an)\b",
+                      re.I)
+
+
+def _polarity(text: str) -> str | None:
+    t = text.strip().lower()
+    if re.match(r"^yes\b", t):
+        return "yes"
+    if re.match(r"^no\b", t):
+        return "no"
+    return None
+
+
+def _citizen_or_pr(wa: dict) -> bool | None:
+    kind = str(wa.get("work_permit_type") or wa.get("citizenship") or "").strip()
+    if not kind:
+        return None
+    if _CITIZEN_TYPES.search(kind):
+        return True
+    if _VISA_TYPES.search(kind):
+        return False
+    return None
+
+
+def _sponsorship_claim(option: str) -> bool | None:
+    """True: the option says the applicant needs sponsorship; False: says they
+    don't; None: says nothing about it."""
+    if not _SPONSOR_WORD.search(option):
+        return None
+    if re.search(r"\bwithout\s+(\w+\s+){0,2}(sponsor\w*|visa)", option, re.I):
+        return False
+    m = _NEED_WORD.search(option)
+    if not m:
+        return None
+    before = option[max(0, m.start() - 14):m.start()]
+    return not bool(_NEG_NEAR.search(before))
+
+
+def choose_option(question: str, options: list[str], profile: dict) -> tuple[str | None, str]:
+    """(exact option text, "") when exactly one option is consistent with every
+    fact the profile states; (None, reason) otherwise. Only for questions
+    resolve_canary answers; the caller keeps the plain answer when there are
+    no options to choose from."""
+    answer = resolve_canary(question, profile)
+    opts = [o for o in (options or []) if o and o.strip() and not re.match(r"^\s*(select|choose|--)", o, re.I)]
+    if not answer or not opts:
+        return None, "not resolvable from profile"
+    if answer == _EEO_DECLINE:
+        plain = [o for o in opts if _DECLINE_OPT.search(o) and not _ASSERTS.search(o)]
+        if len(plain) == 1:
+            return plain[0], ""
+        return None, ("no plain decline option" if not plain else "several decline options")
+    wa = (profile or {}).get("work_authorization", {}) or {}
+    if not (_MARKERS["workauth"].search(question) or _MARKERS["sponsorship"].search(question)):
+        exact = [o for o in opts if o.strip().lower() == answer.strip().lower()]
+        return (exact[0], "") if len(exact) == 1 else (None, "no exact option")
+    want_pol = _polarity(answer)
+    needs = _as_bool(wa.get("require_sponsorship"))
+    citizen = _citizen_or_pr(wa)
+    fits = []
+    for o in opts:
+        pol = _polarity(o)
+        if want_pol and pol and pol != want_pol:
+            continue
+        if want_pol and not pol and not _SPONSOR_WORD.search(o) and not _CITIZEN_CLAIM.search(o):
+            continue  # an option with no yes/no and no facts says nothing we can check
+        if _CITIZEN_CLAIM.search(o) and not _NEG_NEAR.search(o) and citizen is not True:
+            continue  # never claim citizenship/permanent residency the profile doesn't state
+        claim = _sponsorship_claim(o)
+        if claim is not None and (needs is None or claim != needs):
+            continue
+        fits.append(o)
+    if len(fits) == 1:
+        return fits[0], ""
+    return None, ("no option matches your work-authorization facts" if not fits
+                  else "several options could fit — answer this yourself")

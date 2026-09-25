@@ -191,7 +191,10 @@ with sync_playwright() as p:
         # -----------------------------------------------------------------------------------
         # 4. Checkbox groups: scanning shape + fill, across all three real ATS shapes
         # -----------------------------------------------------------------------------------
-        cg_fields = [f for f in fields if f.get("type") == "checkbox-group"]
+        # Excludes Workday's own "wd-checkbox-group" widget (feat/chrome-extension merged in
+        # separately) -- it legitimately shares the same type "checkbox-group" string, but is a
+        # different detector with its own coverage in chrome_load_test.py.
+        cg_fields = [f for f in fields if f.get("type") == "checkbox-group" and f.get("widget") != "wd-checkbox-group"]
         check("checkbox groups scanned: Greenhouse (shared name[]), Ashby (fieldset), Lever (cards[..][fieldN])",
               len(cg_fields) == 3, str([(f["name"], f["label"]) for f in cg_fields]))
         gh_group = next((f for f in cg_fields if f["name"] == "question_lang[]"), None)

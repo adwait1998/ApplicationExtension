@@ -42,7 +42,12 @@ DEFAULT_SETTINGS: dict = {
     "answers_enabled": True,
     "drafts_enabled": False,
     "max_drafts": 5,
+    # AI features (drafts, résumé import's AI pass, cover letters) may use a
+    # model on this computer freely; a cloud/remote model means the text
+    # leaves the machine, so it needs this explicit opt-in.
+    "cloud_llm_allowed": False,
 }
+CLOUD_LLM_ENV = "APPLYPILOT_CLOUD_LLM"
 
 ANSWERS_ENV = "APPLYPILOT_ANSWERS"
 DRAFTS_ENV = "APPLYPILOT_DRAFTS"
@@ -84,6 +89,8 @@ def load_settings(app_dir: str | Path | None = None) -> dict:
     md = raw.get("max_drafts")
     if isinstance(md, int) and not isinstance(md, bool) and md >= 0:
         out["max_drafts"] = md
+    if isinstance(raw.get("cloud_llm_allowed"), bool):
+        out["cloud_llm_allowed"] = raw["cloud_llm_allowed"]
     return out
 
 
@@ -108,6 +115,11 @@ def save_settings(app_dir: str | Path, updates: dict) -> dict:
         if not isinstance(updates["drafts_enabled"], bool):
             raise InvalidSettings("drafts_enabled must be a boolean")
         current["drafts_enabled"] = updates["drafts_enabled"]
+
+    if "cloud_llm_allowed" in updates:
+        if not isinstance(updates["cloud_llm_allowed"], bool):
+            raise InvalidSettings("cloud_llm_allowed must be a boolean")
+        current["cloud_llm_allowed"] = updates["cloud_llm_allowed"]
 
     if "max_drafts" in updates:
         md = updates["max_drafts"]
@@ -175,6 +187,10 @@ def effective_settings(app_dir: str | Path | None = None) -> dict:
     max_drafts_env = env_override_max_drafts()
     if max_drafts_env is not None:
         base["max_drafts"] = max_drafts_env
+
+    cloud_env = _env_bool_override(CLOUD_LLM_ENV)
+    if cloud_env is not None:
+        base["cloud_llm_allowed"] = cloud_env
 
     # Drafts require answers regardless of which source turned each on --
     # same invariant answers.py has always enforced.

@@ -6,23 +6,28 @@
  * slow pages — see README.md. A side panel's document stays alive across tab switches and
  * window focus changes, so this file is now a pure, disposable RENDERER:
  *
- *   - it injects scanner.js/capture.js/content.js into a tab ONLY when the operator clicks
- *     Fill this page or Report page — never on load, never on a tab switch (that's the whole
- *     point of host_permissions covering http/https: this panel can always draw the RIGHT UI
- *     for whichever tab is active, but that is not the same as running anything on it);
- *   - it tells content.js to start a fill (START_FILL) and does NOT await the result — the
- *     fill runs to completion in the page regardless of whether this panel stays open, gets
- *     closed, or the operator switches to a different tab and back;
- *   - it never writes the fill-result state itself. content.js reports progress/results to
- *     background.js (via chrome.runtime.sendMessage), which is the only context that persists
- *     them into chrome.storage.session, keyed per tab id. This file only ever READS that
- *     storage (chrome.storage.session.get) and listens for chrome.storage.onChanged to render
- *     live progress and survive its own reloads;
  *   - because the panel is one instance per WINDOW (not per tab), it follows
  *     chrome.tabs.onActivated / onUpdated itself and always renders whichever tab is active in
- *     its own window — activeTab alone cannot inject into a tab you switched to after opening
- *     the panel, which is exactly why host_permissions for http/https were added (see
- *     README.md "Permissions").
+ *     its own window — activeTab alone cannot inject into (or even draw the right UI for) a tab
+ *     you switched to after opening the panel. host_permissions itself only ever covers
+ *     127.0.0.1 (the local service); every other site is an OPTIONAL permission this file asks
+ *     for, per site, the first time it's needed — see gatePermissions()/refreshOriginInfo()
+ *     below and README.md "Permissions" — never a standing grant covering http/https up front;
+ *   - clicking Fill this page (or Report page) is the ONLY thing that (a) may prompt for that
+ *     site's permission and (b) injects scanner.js/capture.js/content.js into a tab — never on
+ *     load, never on a tab switch;
+ *   - Fill then hands the tab off to background.js (RUN_FILL) and does NOT await the result —
+ *     background.js coordinates every frame's own fill (see its file header) independently of
+ *     this panel, so the fill runs to completion regardless of whether this panel stays open,
+ *     gets closed, or the operator switches to a different tab and back. Cancel/Undo are the
+ *     same shape (CANCEL_FILL_TAB/UNDO_TAB) — this file only ever tells background.js what tab
+ *     to act on, never talks to a frame's content.js directly except for CAPTURE (Report page,
+ *     top frame only, unchanged from before this build);
+ *   - it never writes the fill-result state itself. Every frame reports its own progress/results
+ *     to background.js (via chrome.runtime.sendMessage), which is the only context that merges
+ *     them and persists the combined result into chrome.storage.session, keyed per tab id. This
+ *     file only ever READS that storage (chrome.storage.session.get) and listens for
+ *     chrome.storage.onChanged to render live progress and survive its own reloads.
  */
 (function () {
   'use strict';
@@ -72,6 +77,80 @@
     return 'fillState_' + tabId;
   }
 
+  // ---------------------------------------------------------------------
+  // least-privilege host access — see README "Permissions". host_permissions only ever
+  // statically covers 127.0.0.1 (the local service); every other site is an OPTIONAL
+  // permission (declared in manifest.json's optional_host_permissions) requested per-origin,
+  // asked once per site, and revocable any time from chrome://extensions. `originInfoByTab`
+  // caches, per tab, every http(s) origin a fill would touch (the tab's own origin plus every
+  // frame's — see refreshOriginInfo()) and which of those are already granted, computed at
+  // RENDER time so the Fill/Report click handlers below can call chrome.permissions.request()
+  // as the very first thing they do, with no `await` before it — Chrome only honors that call
+  // as part of the user gesture that triggered the click if nothing has yielded to the event
+  // loop first.
+  // ---------------------------------------------------------------------
+  var originInfoByTab = Object.create(null);
+
+  function toOriginPattern(url) {
+    try {
+      var u = new URL(url);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      return u.protocol + '//' + u.host + '/*';
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function hostFromPattern(p) {
+    var m = /^https?:\/\/([^/]+)\/\*$/.exec(p);
+    return m ? m[1] : p;
+  }
+
+  async function refreshOriginInfo(tabId, tabUrl) {
+    var patterns = [];
+    var seen = Object.create(null);
+    var top = toOriginPattern(tabUrl);
+    if (top) { seen[top] = true; patterns.push(top); }
+    try {
+      if (chrome.webNavigation && typeof chrome.webNavigation.getAllFrames === 'function') {
+        var frames = await chrome.webNavigation.getAllFrames({ tabId: tabId });
+        (frames || []).forEach(function (f) {
+          var p = toOriginPattern(f.url);
+          if (p && !seen[p]) { seen[p] = true; patterns.push(p); }
+        });
+      }
+    } catch (e) {
+      // best-effort — fall back to just the tab's own origin, already captured above
+    }
+    if (!patterns.length) {
+      delete originInfoByTab[tabId];
+      return;
+    }
+    var missing = [];
+    try {
+      for (var i = 0; i < patterns.length; i++) {
+        var has = await chrome.permissions.contains({ origins: [patterns[i]] });
+        if (!has) missing.push(patterns[i]);
+      }
+    } catch (e) {
+      missing = patterns.slice(); // fail safe: assume all missing rather than silently skip the gate
+    }
+    originInfoByTab[tabId] = { all: patterns, missing: missing };
+  }
+
+  /**
+   * Synchronous by design: reads the cache refreshOriginInfo() already populated and, if
+   * anything is missing, calls chrome.permissions.request() immediately — the caller (a click
+   * handler) must invoke this with NO `await` beforehand. Returns { requested, promise }, never
+   * itself a Promise, so calling it can never itself introduce an await.
+   */
+  function gatePermissions(tabId) {
+    var info = originInfoByTab[tabId];
+    var missing = info ? info.missing : [];
+    if (!missing.length) return { requested: [], promise: Promise.resolve(true) };
+    return { requested: missing, promise: chrome.permissions.request({ origins: missing }) };
+  }
+
   function setStatus(text, isError) {
     statusBox.textContent = text || '';
     statusBox.className = 'status' + (isError ? ' err' : '');
@@ -95,6 +174,15 @@
     await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['scanner.js', 'capture.js', 'content.js'] });
   }
 
+  // Fill (unlike Report) must reach every frame the operator granted — including a cross-origin
+  // iframe embedding e.g. a Greenhouse form on a company's own careers page — so it injects with
+  // allFrames: true. Chrome silently skips any frame this extension lacks host permission for
+  // rather than failing the whole call; gatePermissions() above is what makes sure every frame
+  // this fill will actually try to use has already been granted before this runs.
+  async function ensureInjectedAllFrames(tabId) {
+    await chrome.scripting.executeScript({ target: { tabId: tabId, allFrames: true }, files: ['scanner.js', 'capture.js', 'content.js'] });
+  }
+
   async function safeGetTab(tabId) {
     try {
       return await chrome.tabs.get(tabId);
@@ -114,6 +202,10 @@
     if (c.needsYou) parts.push(c.needsYou + (c.needsYou === 1 ? ' needs' : ' need') + ' you');
     var line = parts.join(' · ');
     if (c.failed) line += ' · ' + c.failed + ' failed';
+    // Honest reporting (README "Report honestly"): visible interactive controls the scanner
+    // never registered (unrecognized widgets, plus any cross-origin frame that could not be
+    // injected at all) — never silently folded into "Filled" or left out of the summary.
+    if (state.couldNotRead) line += ' · ' + state.couldNotRead + " couldn't read";
     return line;
   }
 
@@ -292,6 +384,14 @@
     if (!isRunning && cancelRequestedForTab === tabId) cancelRequestedForTab = null;
 
     var scriptable = canScript(tab.url);
+    if (scriptable) {
+      // Precompute (never at click time — see gatePermissions()) which of this tab's origins
+      // (its own, plus every frame's) are already granted, so the Fill/Report click handlers
+      // can call chrome.permissions.request() synchronously with no await first.
+      await refreshOriginInfo(tabId, tab.url);
+    } else {
+      delete originInfoByTab[tabId];
+    }
     scanBtn.disabled = !scriptable || isRunning;
     cancelBtn.hidden = !isRunning;
     undoBtn.disabled = isRunning || stale || !state || !state.undoAvailable;
@@ -378,38 +478,55 @@
     }
   }
 
-  scanBtn.addEventListener('click', async function () {
+  // Fill this page: gatePermissions() below is called SYNCHRONOUSLY, with no `await` before it,
+  // so a still-missing origin's chrome.permissions.request() prompt is honored as part of THIS
+  // click's user gesture (see the block comment above gatePermissions()). Everything after that
+  // point is ordinary async setup — inject, then hand the tab off to background.js, which
+  // coordinates every frame's fill from here (see background.js's file header).
+  scanBtn.addEventListener('click', function () {
     if (activeTabId == null) return;
-    var tab = await safeGetTab(activeTabId);
-    if (!tab || !canScript(tab.url)) {
-      setStatus('Open a job application page (http/https) in this tab, then try again.', true);
-      return;
-    }
-    scanBtn.disabled = true;
-    try {
-      // The ONLY two places this extension ever injects a script into a page: this click, and
-      // Report page below. Never on load, never on a tab switch.
-      await ensureInjected(activeTabId);
-      var resp = await chrome.tabs.sendMessage(activeTabId, { type: 'START_FILL' });
-      if (!resp || !resp.ok) {
-        setStatus('Could not start the fill' + ((resp && resp.error) ? (': ' + resp.error) : '') + '.', true);
-        scanBtn.disabled = false;
+    var tabId = activeTabId;
+    var gate = gatePermissions(tabId);
+    gate.promise.then(async function (granted) {
+      if (!granted) {
+        setStatus('ApplyPilot needs permission to fill forms on ' +
+          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', true);
         return;
       }
-      // Deliberately not awaiting completion here — the fill now runs independently of this
-      // panel (see file header). chrome.storage.onChanged drives every further UI update.
-      setStatus('Filling…');
-    } catch (e) {
-      setStatus('Could not access this page (' + (e && e.message ? e.message : e) + '). Some pages (chrome://, the Web Store, PDF viewer) cannot be scripted.', true);
-      scanBtn.disabled = false;
-    }
+      var tab = await safeGetTab(tabId);
+      if (!tab || !canScript(tab.url)) {
+        setStatus('Open a job application page (http/https) in this tab, then try again.', true);
+        return;
+      }
+      scanBtn.disabled = true;
+      try {
+        // The ONLY two places this extension ever injects a script into a page: this click, and
+        // Report page below. Never on load, never on a tab switch.
+        await ensureInjectedAllFrames(tabId);
+        var resp = await chrome.runtime.sendMessage({ type: 'RUN_FILL', tabId: tabId, url: tab.url });
+        if (!resp || !resp.ok) {
+          setStatus('Could not start the fill' + ((resp && resp.error) ? (': ' + resp.error) : '') + '.', true);
+          scanBtn.disabled = false;
+          return;
+        }
+        // Deliberately not awaiting completion here — the fill now runs independently of this
+        // panel, in every frame, coordinated by background.js (see its file header).
+        // chrome.storage.onChanged drives every further UI update.
+        setStatus('Filling…');
+      } catch (e) {
+        setStatus('Could not access this page (' + (e && e.message ? e.message : e) + '). Some pages (chrome://, the Web Store, PDF viewer) cannot be scripted.', true);
+        scanBtn.disabled = false;
+      }
+    });
   });
 
   cancelBtn.addEventListener('click', async function () {
     if (activeTabId == null) return;
     cancelRequestedForTab = activeTabId;
     try {
-      await chrome.tabs.sendMessage(activeTabId, { type: 'CANCEL_FILL' });
+      // Fans out to every frame currently participating in this tab's fill — see
+      // background.js's cancelFillForTab().
+      await chrome.runtime.sendMessage({ type: 'CANCEL_FILL_TAB', tabId: activeTabId });
     } catch (e) {
       setStatus('Could not cancel: ' + (e && e.message ? e.message : e), true);
     } finally {
@@ -420,7 +537,10 @@
   undoBtn.addEventListener('click', async function () {
     if (activeTabId == null) return;
     try {
-      var resp = await chrome.tabs.sendMessage(activeTabId, { type: 'UNDO' });
+      // Fans out to every frame and sums how many fields were actually restored (read back),
+      // not how many restores were merely attempted — see background.js's undoFillForTab() and
+      // content.js's undo().
+      var resp = await chrome.runtime.sendMessage({ type: 'UNDO_TAB', tabId: activeTabId });
       setStatus('Restored ' + ((resp && resp.restored) || 0) + ' field(s) to their previous values.');
       await renderForTab(activeTabId);
     } catch (e) {
@@ -429,27 +549,38 @@
   });
 
   // "Report this page": download the form's STRUCTURE (never values) so a page that fills
-  // badly can be diagnosed from its real markup instead of a guess.
-  reportBtn.addEventListener('click', async function () {
+  // badly can be diagnosed from its real markup instead of a guess. Only ever touches the top
+  // frame (unchanged from before this build) — gated on the same permission check as Fill
+  // since it also injects a script into the tab.
+  reportBtn.addEventListener('click', function () {
     if (activeTabId == null) return;
-    reportBtn.disabled = true;
-    try {
-      await ensureInjected(activeTabId);
-      var resp = await chrome.tabs.sendMessage(activeTabId, { type: 'CAPTURE' });
-      if (!resp || !resp.ok) throw new Error((resp && resp.error) || 'no response');
-      var blob = new Blob([JSON.stringify(resp.structure, null, 2)], { type: 'application/json' });
-      var a = document.createElement('a');
-      var host = (resp.structure.host || 'page').replace(/[^a-z0-9.-]/gi, '_');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'applypilot-page-' + host + '.json';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
-      setStatus('Saved the page structure (no field values included). Send the file to your developer.');
-    } catch (e) {
-      setStatus('Could not capture this page: ' + (e && e.message ? e.message : e), true);
-    } finally {
-      reportBtn.disabled = false;
-    }
+    var tabId = activeTabId;
+    var gate = gatePermissions(tabId);
+    gate.promise.then(async function (granted) {
+      if (!granted) {
+        setStatus('ApplyPilot needs permission to read this page on ' +
+          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', true);
+        return;
+      }
+      reportBtn.disabled = true;
+      try {
+        await ensureInjected(tabId);
+        var resp = await chrome.tabs.sendMessage(tabId, { type: 'CAPTURE' });
+        if (!resp || !resp.ok) throw new Error((resp && resp.error) || 'no response');
+        var blob = new Blob([JSON.stringify(resp.structure, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        var host = (resp.structure.host || 'page').replace(/[^a-z0-9.-]/gi, '_');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'applypilot-page-' + host + '.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+        setStatus('Saved the page structure (no field values included). Send the file to your developer.');
+      } catch (e) {
+        setStatus('Could not capture this page: ' + (e && e.message ? e.message : e), true);
+      } finally {
+        reportBtn.disabled = false;
+      }
+    });
   });
 
   optionsBtn.addEventListener('click', function () {

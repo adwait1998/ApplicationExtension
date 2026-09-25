@@ -125,6 +125,8 @@
   var smartFillDraftsEl = document.getElementById('smartFillDrafts');
   var smartFillMaxDraftsEl = document.getElementById('smartFillMaxDrafts');
   var smartFillLlmWarningEl = document.getElementById('smartFillLlmWarning');
+  var smartFillCloudEl = document.getElementById('smartFillCloud');
+  var smartFillModelLineEl = document.getElementById('smartFillModelLine');
   var smartFillSaveEl = document.getElementById('smartFillSave');
   var smartFillStatusEl = document.getElementById('smartFillStatus');
 
@@ -144,6 +146,18 @@
   function applyHealthData(data) {
     llmAvailable = data && typeof data.llm_available === 'boolean' ? data.llm_available : null;
     updateLlmWarning();
+    // Say plainly where AI text would go — the old copy said nothing ever
+    // left the machine, which was only true with a local model.
+    if (!data || typeof data.llm_available !== 'boolean') {
+      smartFillModelLineEl.textContent = 'AI model: unknown (service not reachable).';
+    } else if (!data.llm_available) {
+      smartFillModelLineEl.textContent = 'AI model: none available — AI features are skipped.';
+    } else if (data.llm_local) {
+      smartFillModelLineEl.textContent = 'AI model: ' + (data.llm_label || 'local') + ' — runs on this computer.';
+    } else {
+      smartFillModelLineEl.textContent = 'AI model: ' + (data.llm_label || data.llm_provider) +
+        ' — NOT on this computer. ' + (data.cloud_llm_allowed ? 'Allowed below.' : 'AI features are off until you allow it below.');
+    }
   }
 
   function loadLlmAvailability() {
@@ -188,6 +202,7 @@
         if (typeof data.answers_enabled === 'boolean') smartFillAnswersEl.checked = data.answers_enabled;
         if (typeof data.drafts_enabled === 'boolean') smartFillDraftsEl.checked = data.drafts_enabled;
         if (data.max_drafts != null) smartFillMaxDraftsEl.value = data.max_drafts;
+        if (typeof data.cloud_llm_allowed === 'boolean') smartFillCloudEl.checked = data.cloud_llm_allowed;
         smartFillStatusEl.className = '';
         smartFillStatusEl.textContent = '';
         persistSmartFillLocally();
@@ -221,8 +236,10 @@
     apiPost('/settings', {
       answers_enabled: smartFillAnswersEl.checked,
       drafts_enabled: smartFillDraftsEl.checked,
-      max_drafts: maxDrafts
+      max_drafts: maxDrafts,
+      cloud_llm_allowed: smartFillCloudEl.checked
     }).then(function () {
+      loadLlmAvailability();
       smartFillCardEl.classList.remove('section-disabled');
       setSmartFillStatus('ok', 'Saved.');
       smartFillSaveEl.disabled = false;

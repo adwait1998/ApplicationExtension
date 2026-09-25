@@ -2,10 +2,10 @@
  * ApplyPilot Copilot — content script.
  *
  * Injected on demand (via chrome.scripting.executeScript, triggered by the side panel) into
- * the active tab only — never registered as an always-on content script, so the extension
- * never touches a page the user hasn't explicitly invoked it on (injection happens only when
- * the operator clicks "Fill this page" or "Report page" in the panel — never on tab switch,
- * never on panel open).
+ * every frame the operator has granted host permission for — never registered as an always-on
+ * content script, so the extension never touches a page the user hasn't explicitly invoked it
+ * on (injection happens only when the operator clicks "Fill this page" or "Report page" in the
+ * panel — never on tab switch, never on panel open).
  *
  * Loaded AFTER scanner.js in the same isolated world, so `ApplyPilotScanner` is already a
  * global here. Nothing in this file ever calls form.submit(), clicks a submit button, or
@@ -15,16 +15,31 @@
  * everything below is guarded so a second injection reuses the existing state instead of
  * creating a second listener.
  *
+ * FILL EVERY FRAME: this same file is injected into EVERY frame the operator granted (the
+ * tab's own top-level document plus every same- or cross-origin iframe background.js could
+ * reach), one independent instance per frame, each with its own registry/priorValues/shield.
+ * background.js is the cross-frame coordinator (only an extension page — never a content
+ * script — can chrome.tabs.sendMessage a specific frameId), and it is what makes this work
+ * feel like ONE fill instead of N: it asks every frame to PREPARE_AND_SCAN itself, merges all
+ * of their fields into a single /resolve call, then hands each frame back only its own slice
+ * of the answer via APPLY_FILLS. See background.js's file header for the full sequence.
+ *
  * DETACHED FILL / PANEL-INDEPENDENCE: the side panel can be closed, its window can lose focus,
  * or the user can switch tabs at any moment — none of that may interrupt a fill in progress.
- * So the entire scan -> expand -> resolve -> apply -> résumé pipeline lives in THIS file
- * (see runFill() below) and is kicked off by a single fire-and-forget START_FILL message from
- * the panel. Progress and the final result are reported by messaging the background worker
- * (chrome.runtime.sendMessage — this works whether or not any panel/popup is open, because it
- * targets the extension's own service worker, not a UI page), which persists them into
- * chrome.storage.session keyed by this tab's id. The panel only ever READS that storage (plus
- * chrome.storage.onChanged for live updates); it never depends on staying open, and it never
- * writes the fill-result state itself.
+ * So each frame's own scan -> expand -> résumé -> apply pipeline lives entirely in THIS file
+ * and is driven by messages FROM background.js (never awaited by the panel). Progress and the
+ * final result are reported by messaging the background worker (chrome.runtime.sendMessage —
+ * this works whether or not any panel/popup is open, because it targets the extension's own
+ * service worker, not a UI page), which merges every frame's report into one per-tab result
+ * and persists it into chrome.storage.session keyed by this tab's id. The panel only ever
+ * READS that storage (plus chrome.storage.onChanged for live updates); it never depends on
+ * staying open, and it never writes the fill-result state itself.
+ *
+ * RÉSUMÉ FIRST: each frame attaches its own résumé (if it has a résumé-shaped file input at
+ * all — most frames won't) and waits for the page to settle BEFORE scanning, not after filling
+ * everything else. Some ATSs (Workday, Lever) parse an uploaded résumé and repopulate/overwrite
+ * form fields shortly after upload; scanning and filling first would mean those fields get
+ * silently clobbered the moment the résumé parse lands. See prepareAndScan() below.
  */
 (function () {
   'use strict';
@@ -45,10 +60,18 @@
   var highlightedElements = [];
 
   // A fill "never depends on the panel staying open", but exactly one fill runs at a time per
-  // tab. `activeRun` is non-null only while runFill() is in flight; CANCEL_FILL flips its
-  // `cancelled` flag, which the loops below check between fields and between list items.
+  // FRAME. `activeRun` is non-null from the moment PREPARE_AND_SCAN starts until this frame's
+  // participation in the fill is fully finished (see finishRun()); CANCEL_FILL flips its
+  // `cancelled` flag, which every loop below (expansion, résumé settle, the apply loop) checks
+  // between steps/fields/items.
   var activeRun = null;
   var runCounter = 0;
+
+  // Bridges PREPARE_AND_SCAN -> the later APPLY_FILLS message for this frame's current run:
+  // { state, run, removeShield, startedAt, fieldsById }. Non-null for exactly as long as this
+  // frame has told background.js "I scanned N fields" and is waiting to be told what to do
+  // with them (or has since been told and is actively applying them).
+  var currentPrepare = null;
 
   // Defaults per the spec: no single field may stall the fill for more than ~12s, and the
   // whole fill gives up on remaining (not-yet-attempted) fields after ~120s. Both are
@@ -58,6 +81,14 @@
   // exactly the production default.
   var DEFAULT_FIELD_TIMEOUT_MS = 12000;
   var DEFAULT_BUDGET_MS = 120000;
+
+  // How long to wait for the page to go quiet after a résumé attach before scanning (see
+  // "RÉSUMÉ FIRST" above) when there is no more specific upload-confirmation signal available
+  // (attachResumeFile() already waits on Workday's own confirmation marker internally — this is
+  // the generic fallback for everything else, e.g. Lever/Greenhouse résumé parsing that
+  // repopulates name/email/phone a moment after upload).
+  var DOM_QUIET_MS = 1200;
+  var DOM_QUIET_MAX_MS = 3000;
 
   function detect() {
     var scan = ApplyPilotScanner.scanAll(document);
@@ -74,21 +105,16 @@
   // repeating-section expansion — "Add Another" (Workday "My Experience" step)
   // ---------------------------------------------------------------------
   //
-  // Runs ONLY as the first step of an explicit, user-initiated fill (see runFill() below) —
-  // never on page load, never on DETECT. Asks the local service how many
-  // work_history/education entries the profile actually has, then clicks "Add Another" just
-  // enough times to make room for them before scanning, so the structured tier's existing
-  // section_index -> work_history[index-1]/education[index-1] mapping has somewhere to write
-  // block 2, 3, ... into. All the actual DOM/safety work (the guard, the click, counting
+  // Runs ONLY as the first step of this frame's participation in an explicit, user-initiated
+  // fill (see prepareAndScan() below) — never on page load, never on DETECT. Asks the local
+  // service how many work_history/education entries the profile actually has, then clicks "Add
+  // Another" just enough times to make room for them before scanning, so the structured tier's
+  // existing section_index -> work_history[index-1]/education[index-1] mapping has somewhere to
+  // write block 2, 3, ... into. All the actual DOM/safety work (the guard, the click, counting
   // blocks, finding the right button) lives in scanner.js so it can be exercised offline in
   // jsdom (see selftest.js) exactly like every other scanning concern in this extension.
-  //
-  // This function no longer installs its own submit shield — runFill() now installs ONE
-  // shield that spans the entire fill (expansion through résumé attach, see the file header
-  // and "the one rule that matters" in README.md), closing a gap that used to exist between
-  // expansion finishing and the fill itself starting.
 
-  var MAX_EXPANSION_CLICKS_TOTAL = 10; // hard cap across BOTH kinds combined, per fill
+  var MAX_EXPANSION_CLICKS_TOTAL = 10; // hard cap across BOTH kinds combined, per fill, per frame
   var EXPANSION_WAIT_TIMEOUT_MS = 3000;
 
   /** Resolves true once `kind`'s block count exceeds `priorCount`, or false after the timeout. */
@@ -258,6 +284,120 @@
   }
 
   // ---------------------------------------------------------------------
+  // never overwrite the user — see README "Never overwrite the user". Before writing a field,
+  // if it already holds a non-empty value that differs from what we're about to write, we skip
+  // it with reason "kept your value" instead of clobbering it (Workday prefills several fields
+  // from the operator's account profile; the operator may also have typed into the form before
+  // clicking Fill).
+  //
+  // Deliberately scoped to the plain 'element' (input/select/textarea) and 'radio-group' entry
+  // kinds only, where getCurrentValue() returning "empty" is unambiguous. The Workday popup
+  // widgets are excluded on purpose:
+  //   - wd-dropdown's un-opened button often shows non-empty PLACEHOLDER text ("Select One"),
+  //     which is not a real answer and must not be mistaken for one;
+  //   - wd-prompt (Field of Study, Skills, ...) is ADDITIVE — typing a new term never erases an
+  //     existing one — so "already has a value" is never a reason to skip adding more.
+  // ---------------------------------------------------------------------
+  var USER_VALUE_PROTECTED_KINDS = { element: true, 'radio-group': true };
+
+  function isMeaningfulExistingValue(value) {
+    if (typeof value === 'boolean') return value === true;
+    return typeof value === 'string' && value.trim() !== '';
+  }
+
+  /** Every underlying DOM element a registry entry actually touches. */
+  function entryElements(entry) {
+    var els = [];
+    if (entry.el) els.push(entry.el);
+    if (entry.highlightEl) els.push(entry.highlightEl);
+    if (entry.elements) els = els.concat(entry.elements);
+    if (entry.monthEl) els.push(entry.monthEl);
+    if (entry.yearEl) els.push(entry.yearEl);
+    if (entry.maskedEl) els.push(entry.maskedEl);
+    if (entry.button) els.push(entry.button);
+    if (entry.input) els.push(entry.input);
+    return els;
+  }
+
+  // ---------------------------------------------------------------------
+  // "kept your value" must protect ONLY a value that predates OUR OWN résumé attach — not one
+  // the résumé's own parsing just produced. Lever/Ashby/Workday all parse an uploaded résumé and
+  // can repopulate (sometimes wrongly) fields like name/email/phone/experience a moment after
+  // upload; since "RÉSUMÉ FIRST" (see file header) attaches it before scanning, a naive "is the
+  // current value non-empty and different" check would mistake the ATS's own guess for the
+  // operator's own input and protect it from ever being corrected by the real profile value.
+  //
+  // Two independent signals decide "this predates our own work, so it's real user input":
+  //   1. a snapshot of every field's value taken BEFORE expansion/résumé/scanning even started
+  //      (snapshotValuesByElement() below, keyed by the actual DOM element so it still lines up
+  //      even if the résumé attach reshuffled field order or ids);
+  //   2. a genuine, browser-trusted input/change event on that element at ANY point during this
+  //      run (installUserInputTracker() below) — catches the operator typing into the form
+  //      WHILE our own expand/résumé/settle steps are still running, a window the one-time
+  //      snapshot alone can't see into. Our own programmatic fills never set Event.isTrusted, so
+  //      this can never mistake our own write for the operator's.
+  // ---------------------------------------------------------------------
+
+  /** element -> its value at the moment this was taken (see getCurrentValue's own shape). */
+  function snapshotValuesByElement(scanResult) {
+    var map = new Map();
+    var reg = (scanResult && scanResult.registry) || {};
+    for (var id in reg) {
+      if (!Object.prototype.hasOwnProperty.call(reg, id)) continue;
+      var entry = reg[id];
+      var value;
+      try { value = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { continue; }
+      var els = entryElements(entry);
+      for (var i = 0; i < els.length; i++) map.set(els[i], value);
+    }
+    return map;
+  }
+
+  var userTouchedElements = (typeof WeakSet !== 'undefined') ? new WeakSet() : null;
+  var userInputTrackerInstalled = false;
+
+  /** Records every element that gets a real (isTrusted) input/change event while installed. */
+  function installUserInputTracker(doc) {
+    if (userInputTrackerInstalled || !userTouchedElements) return function () {};
+    userInputTrackerInstalled = true;
+    function onUserInput(e) {
+      if (!e || !e.isTrusted || !e.target) return; // our own writes are never isTrusted
+      userTouchedElements.add(e.target);
+    }
+    doc.addEventListener('input', onUserInput, true);
+    doc.addEventListener('change', onUserInput, true);
+    return function removeUserInputTracker() {
+      doc.removeEventListener('input', onUserInput, true);
+      doc.removeEventListener('change', onUserInput, true);
+      userInputTrackerInstalled = false;
+    };
+  }
+
+  /** True if `entry` held a value before our own résumé attach, or the operator typed into it. */
+  function isProtectedByPriorUserActivity(entry, preResumeValues) {
+    var els = entryElements(entry);
+    for (var i = 0; i < els.length; i++) {
+      if (userTouchedElements && userTouchedElements.has(els[i])) return true;
+      if (preResumeValues && preResumeValues.has(els[i]) && isMeaningfulExistingValue(preResumeValues.get(els[i]))) return true;
+    }
+    return false;
+  }
+
+  /** Loose equality between a getCurrentValue() reading and a /resolve fill value/values. */
+  function isSameValue(existing, target) {
+    if (Array.isArray(target)) {
+      var ex = String(existing == null ? '' : existing).toLowerCase();
+      return target.every(function (v) { return ex.indexOf(String(v).toLowerCase()) !== -1; });
+    }
+    if (typeof existing === 'boolean') {
+      var want = target === true || /^(true|yes|1|on)$/i.test(String(target));
+      return existing === want;
+    }
+    return String(existing == null ? '' : existing).trim().toLowerCase() ===
+      String(target == null ? '' : target).trim().toLowerCase();
+  }
+
+  // ---------------------------------------------------------------------
   // applying fills — one field at a time, with live progress, cancellation and per-field
   // timeouts. Fills are applied ONE AT A TIME, in order, awaiting each before starting the
   // next — never concurrently. Most widgets are synchronous (ApplyPilotScanner.applyFill()
@@ -358,6 +498,22 @@
       var isMultiValue = Array.isArray(fill.values) && fill.values.length > 1 && entry.kind === 'wd-prompt';
       var fillValue = (Array.isArray(fill.values) && fill.values.length) ? fill.values : fill.value;
 
+      // Never overwrite the user: a non-empty existing value that (a) predates our own résumé
+      // attach or was typed by the operator at any point during this run — see
+      // isProtectedByPriorUserActivity()'s doc comment — and (b) differs from what we're about
+      // to write, is left exactly as it was. A value that only appeared AFTER our own résumé
+      // attach (an ATS's own, possibly wrong, résumé parse) is deliberately NOT protected.
+      if (USER_VALUE_PROTECTED_KINDS[entry.kind] &&
+          isMeaningfulExistingValue(priorValues[fill.id]) &&
+          isProtectedByPriorUserActivity(entry, ctx.preResumeValues) &&
+          !isSameValue(priorValues[fill.id], fillValue)) {
+        delete priorValues[fill.id]; // nothing was written — nothing for Undo to restore
+        var keepTargets = ApplyPilotScanner.getHighlightTargets(entry);
+        for (var kt = 0; kt < keepTargets.length; kt++) highlight(keepTargets[kt], 'skipped', 'kept your value');
+        needsYou.push({ id: fill.id, label: label, reason: 'kept your value', tag: (fieldsById[fill.id] || {}).tag });
+        return step(i + 1);
+      }
+
       var work = isMultiValue
         ? applyMultiValueWithProgress(entry, fill.values, label, i, total, ctx).then(
             function (ok) { return { ok: ok, timedOut: false }; },
@@ -373,7 +529,11 @@
           var reasonText = (fill.reason || 'Filled') + (fill.profile_key ? ' [' + fill.profile_key + ']' : '');
           if (isDraft) reasonText += ' — drafted — review before submitting';
           for (var h = 0; h < hlTargets.length; h++) highlight(hlTargets[h], isDraft ? 'draft' : 'filled', reasonText);
-          applied.push({ id: fill.id, label: label, value: fill.value, reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft });
+          applied.push({
+            id: fill.id, label: label, value: fill.value,
+            values: (Array.isArray(fill.values) && fill.values.length) ? fill.values : null,
+            reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft
+          });
         } else if (outcome.timedOut) {
           for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Timed out waiting for this field to respond');
           failed.push({ id: fill.id, label: label, reason: 'Timed out after ' + Math.round(ctx.fieldTimeoutMs / 1000) + 's — the page did not respond in time' });
@@ -401,6 +561,43 @@
     });
   }
 
+  // Real ATS forms are React/Angular-based, and a field can look successfully filled the
+  // instant we write it yet still get wiped moments later by the page's own re-render (a
+  // controlled component re-asserting its old state) or by a combobox clearing its search text
+  // on blur. Counting that as "Filled" would overstate what actually landed. After the whole
+  // apply loop finishes, this waits briefly for any such re-render to happen, then reads every
+  // successfully-applied field back and moves anything that no longer matches what we set out
+  // of `applied` and into `failed` as "didn't stick" — the summary only ever counts VERIFIED
+  // fills.
+  var VERIFY_SETTLE_MS = 500;
+
+  function verifyAppliedFills(result) {
+    if (!result.applied.length) return Promise.resolve(result);
+    return new Promise(function (resolve) { setTimeout(resolve, VERIFY_SETTLE_MS); }).then(function () {
+      var stillApplied = [];
+      var reverted = [];
+      result.applied.forEach(function (a) {
+        var entry = registry[a.id];
+        if (!entry) { stillApplied.push(a); return; } // can't re-check — don't penalize it for that
+        var after;
+        try { after = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { stillApplied.push(a); return; }
+        var target = (a.values && a.values.length) ? a.values : a.value;
+        if (isSameValue(after, target)) {
+          stillApplied.push(a);
+        } else {
+          var hlTargets = ApplyPilotScanner.getHighlightTargets(entry);
+          for (var h = 0; h < hlTargets.length; h++) {
+            highlight(hlTargets[h], 'skipped', "Didn't stick — the page reverted this field after it was filled");
+          }
+          reverted.push({ id: a.id, label: a.label, reason: "Didn't stick — the page reverted this field after it was filled (re-render, or the widget cleared itself)" });
+        }
+      });
+      result.applied = stillApplied;
+      result.failed = result.failed.concat(reverted);
+      return result;
+    });
+  }
+
   function base64ToUint8Array(base64) {
     var binary = atob(base64);
     var len = binary.length;
@@ -410,12 +607,13 @@
   }
 
   /**
-   * Best-effort résumé attachment, run as part of runFill() — i.e. only ever as a step inside
-   * an explicit, user-initiated fill, never on page load (see file header). Fails soft at
-   * every step: no résumé-shaped field on the page, no service reachable, no résumé stored, or
-   * a widget that rejects programmatic assignment all resolve to a reported (never thrown)
-   * failure. The target gets the same highlight() treatment as a normal fill/skip so it's
-   * visible on the page, not just in the panel's summary.
+   * Best-effort résumé attachment, run as the FIRST step of scanning (see "RÉSUMÉ FIRST" in the
+   * file header and prepareAndScan() below) — i.e. only ever as a step inside an explicit,
+   * user-initiated fill, never on page load. Fails soft at every step: no résumé-shaped field on
+   * the page, no service reachable, no résumé stored, or a widget that rejects programmatic
+   * assignment all resolve to a reported (never thrown) failure. The target gets the same
+   * highlight() treatment as a normal fill/skip so it's visible on the page, not just in the
+   * panel's summary.
    */
   function maybeAttachResume() {
     // Cheap local check first — skip the round-trip to the background worker
@@ -467,30 +665,119 @@
     });
   }
 
-  function undo() {
-    var restored = 0;
-    for (var id in priorValues) {
-      if (!Object.prototype.hasOwnProperty.call(priorValues, id)) continue;
-      var entry = registry[id];
-      if (!entry) continue;
-      try {
-        ApplyPilotScanner.applyFill(entry, priorValues[id]);
-        restored++;
-      } catch (e) {
-        // best-effort — still clear highlights below
+  /**
+   * Resolves once `doc` has gone ~DOM_QUIET_MS without a mutation, or after DOM_QUIET_MAX_MS
+   * regardless — the generic "let the page settle" wait after a résumé attach (see "RÉSUMÉ
+   * FIRST" above) for ATSs with no more specific upload-confirmation signal to poll instead
+   * (attachResumeFile() already handles Workday's own confirmation marker internally).
+   */
+  function waitForDomQuiet(doc, quietMs, maxMs) {
+    return new Promise(function (resolve) {
+      var root = doc && (doc.body || doc.documentElement);
+      if (!root || typeof MutationObserver === 'undefined') {
+        setTimeout(resolve, Math.min(quietMs, maxMs));
+        return;
       }
+      var settled = false;
+      var quietTimer = null;
+      var maxTimer = null;
+      function finish() {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(quietTimer);
+        clearTimeout(maxTimer);
+        resolve();
+      }
+      var observer = new MutationObserver(function () {
+        clearTimeout(quietTimer);
+        quietTimer = setTimeout(finish, quietMs);
+      });
+      observer.observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
+      quietTimer = setTimeout(finish, quietMs);
+      maxTimer = setTimeout(finish, maxMs);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // "could not read" — visible, interactive-control-shaped elements that never made it into
+  // the scanner's registry (see README "Report honestly"). Built entirely from functions
+  // scanner.js already exports (isVisible) plus plain DOM queries — never a new scanner.js
+  // export — so this whole concern lives in content.js, which this build owns.
+  // ---------------------------------------------------------------------
+  var UNREAD_SELECTOR = 'input, select, textarea, [role="combobox"], [role="radiogroup"]';
+  var UNREAD_EXCLUDED_INPUT_TYPES = { hidden: true, submit: true, button: true, image: true, reset: true };
+
+  /** Every element any registry entry actually points at, so it can be excluded below. */
+  function registeredElements(reg) {
+    var known = [];
+    for (var id in reg) {
+      if (!Object.prototype.hasOwnProperty.call(reg, id)) continue;
+      known = known.concat(entryElements(reg[id]));
     }
-    priorValues = {};
-    for (var i = 0; i < highlightedElements.length; i++) clearHighlight(highlightedElements[i]);
-    highlightedElements = [];
-    return { restored: restored };
+    return known;
+  }
+
+  function countUnreadControls(doc, reg) {
+    var known = registeredElements(reg);
+    var all = Array.prototype.slice.call(doc.querySelectorAll(UNREAD_SELECTOR));
+    var unread = 0;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.disabled) continue;
+      var tag = el.tagName.toLowerCase();
+      if (tag === 'input' && UNREAD_EXCLUDED_INPUT_TYPES[(el.type || 'text').toLowerCase()]) continue;
+      if (!ApplyPilotScanner.isVisible(el)) continue;
+      if (known.indexOf(el) !== -1) continue;
+      unread++;
+    }
+    return unread;
+  }
+
+  /**
+   * Restores every field this run actually changed, back to the value it held immediately
+   * before this run touched it — and reports only how many restores were VERIFIED by reading
+   * the field back afterwards (getCurrentValue()), not how many restores were merely attempted.
+   * applyFill() can silently fail to stick on a widget that rejects programmatic writes, and a
+   * count that doesn't distinguish "tried" from "actually restored" would overstate what Undo
+   * did. Async because applyFill() returns a Promise for the Workday popup widgets
+   * (wd-dropdown/wd-prompt) — this used to fire-and-forget those, undercounting silently.
+   */
+  function undo() {
+    var ids = Object.keys(priorValues);
+    var restored = 0;
+
+    function next(i) {
+      if (i >= ids.length) return Promise.resolve();
+      var id = ids[i];
+      var entry = registry[id];
+      if (!entry) return next(i + 1);
+      var target = priorValues[id];
+      return Promise.resolve().then(function () {
+        return ApplyPilotScanner.applyFill(entry, target);
+      }).then(function () {
+        var after;
+        try { after = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { after = undefined; }
+        if (isSameValue(after, target)) restored++;
+      }, function () {
+        // best-effort — a restore that errors just doesn't count; never aborts the rest
+      }).then(function () { return next(i + 1); });
+    }
+
+    return next(0).then(function () {
+      priorValues = {};
+      for (var i = 0; i < highlightedElements.length; i++) clearHighlight(highlightedElements[i]);
+      highlightedElements = [];
+      return { restored: restored };
+    });
   }
 
   // ---------------------------------------------------------------------
   // per-tab persisted state — reported to background.js, which is the only context that
   // actually writes chrome.storage.session (content scripts default to no access to it; see
-  // README.md). The panel only ever reads this, plus chrome.storage.onChanged — it never
-  // depends on being open for the fill below to run to completion.
+  // README.md). background.js merges every frame's own report into ONE combined result per
+  // tab; the panel only ever reads that combined result, plus chrome.storage.onChanged — it
+  // never depends on being open for any frame's fill to run to completion.
   // ---------------------------------------------------------------------
 
   function emptyCounts() { return { filled: 0, drafts: 0, needsYou: 0, failed: 0 }; }
@@ -530,17 +817,39 @@
   }
 
   /**
-   * Runs the whole fill pipeline: expand repeating sections -> scan -> ask the local service
-   * -> apply fills (with live progress, cancellation and per-field timeouts) -> attach the
-   * résumé. Kicked off by START_FILL and NOT awaited by the message handler that starts it —
-   * see the file header for why. `opts.fieldTimeoutMs` / `opts.budgetMs` are test-only
-   * overrides (see the constants above); production callers never set them.
+   * Finalizes this frame's participation in the current run: removes ITS submit shield, clears
+   * `activeRun`/`currentPrepare`, and pushes one last terminal state update. This is the ONE
+   * place that happens, no matter whether the run ends because APPLY_FILLS finished normally,
+   * because PREPARE_AND_SCAN itself found nothing to do (empty page, cancelled before scanning
+   * finished, or errored), or because background.js sent ABORT_FILL (e.g. the merged /resolve
+   * call failed) — every one of those paths calls this instead of duplicating the cleanup.
    */
-  function runFill(opts) {
-    opts = opts || {};
-    var fieldTimeoutMs = (typeof opts.fieldTimeoutMs === 'number' && opts.fieldTimeoutMs > 0) ? opts.fieldTimeoutMs : DEFAULT_FIELD_TIMEOUT_MS;
-    var budgetMs = (typeof opts.budgetMs === 'number' && opts.budgetMs > 0) ? opts.budgetMs : DEFAULT_BUDGET_MS;
+  function finishRun(run, status, note) {
+    if (currentPrepare && currentPrepare.run === run) {
+      currentPrepare.removeShield();
+      currentPrepare.removeUserInputTracker();
+      var state = currentPrepare.state;
+      state.status = status;
+      if (note) state.note = note;
+      var total = (state.progress && state.progress.total) || 0;
+      state.progress = { current: total, total: total, label: '' };
+      sendStateUpdate(state);
+      currentPrepare = null;
+    }
+    if (activeRun === run) activeRun = null;
+  }
 
+  /**
+   * Phase 1 of this frame's fill: expand repeating sections, attach the résumé and wait for the
+   * page to settle, THEN scan (see "RÉSUMÉ FIRST" above). Resolves with
+   * `{ ok, fields, skippedFrames, unreadControls, cancelled }` for background.js to merge with
+   * every other frame's scan and send in ONE /resolve call — this function never calls
+   * /resolve itself. Leaves `activeRun`/the submit shield installed on success (with fields to
+   * apply) so APPLY_FILLS can pick them back up later; finalizes immediately (via finishRun())
+   * on cancellation, an empty page, or an error, since nothing will ever call APPLY_FILLS for
+   * those cases.
+   */
+  function prepareAndScan() {
     if (activeRun) {
       return Promise.resolve({ ok: false, error: 'already-running' });
     }
@@ -552,18 +861,31 @@
     var state = freshState('running', startedAt);
     state.undoAvailable = false;
 
-    // ONE shield for the entire fill — expansion, scanning, the /resolve round-trip, every
-    // field, and the résumé attach — closing the gap that used to exist between expansion
-    // finishing and APPLY_FILLS starting. See "the one rule that matters" in README.md.
+    // ONE shield for this frame's ENTIRE participation in the fill — expansion, résumé,
+    // scanning, and (once APPLY_FILLS arrives) every field — see "the one rule that matters" in
+    // README.md. This spans two separate incoming messages (this one and, later, APPLY_FILLS),
+    // so it is removed in exactly one place — finishRun() — never here.
     var removeShield = ApplyPilotScanner.installSubmitShield(document, function () {
       state.shieldFired = true;
+      push();
     });
+    // Same lifetime as the shield above — see "kept your value" / isProtectedByPriorUserActivity().
+    var removeUserInputTracker = installUserInputTracker(document);
 
     function isCancelled() { return run.cancelled; }
-    function overBudget() { return (Date.now() - startedAt) > budgetMs; }
     function push() { sendStateUpdate(state); }
-
     push();
+
+    currentPrepare = {
+      state: state, run: run, removeShield: removeShield, removeUserInputTracker: removeUserInputTracker,
+      startedAt: startedAt, fieldsById: {}, preResumeValues: null
+    };
+
+    // Snapshot every field's value BEFORE expansion/résumé/scanning touch anything — this is
+    // what lets the apply phase tell "was already here" (protect it) apart from "the résumé
+    // parse just put this here" (fine to overwrite with the real profile value) — see
+    // isProtectedByPriorUserActivity()'s doc comment above.
+    currentPrepare.preResumeValues = snapshotValuesByElement(ApplyPilotScanner.scanAll(document));
 
     return Promise.resolve()
       .then(function () {
@@ -574,44 +896,99 @@
       .then(function (expansion) {
         state.expansion = expansion;
         if (isCancelled()) return null;
+        state.progress = { current: 0, total: 0, label: 'Attaching résumé…' };
+        push();
+        return maybeAttachResume();
+      })
+      .then(function (resume) {
+        if (resume === null || isCancelled()) return null;
+        state.resume = resume;
+        push();
+        if (resume && resume.attempted && resume.attached) {
+          state.progress = { current: 0, total: 0, label: 'Waiting for the page to settle…' };
+          push();
+          return waitForDomQuiet(document, DOM_QUIET_MS, DOM_QUIET_MAX_MS);
+        }
+      })
+      .then(function (settleResult) {
+        if (isCancelled()) return null;
         state.progress = { current: 0, total: 0, label: 'Scanning the page…' };
         push();
-        var result = ApplyPilotScanner.scanAll(document);
-        registry = result.registry;
-        state.skippedFrames = result.skippedFrames;
-        return result.fields;
-      })
-      .then(function (fields) {
-        if (fields === null || isCancelled()) return null;
-        if (!fields.length) {
-          state.note = 'No fillable fields found on this page.';
-          return null;
-        }
-        var fieldsById = {};
-        fields.forEach(function (f) { fieldsById[f.id] = f; });
-        state.progress = { current: 0, total: fields.length, label: 'Asking the local ApplyPilot service…' };
-        push();
-        return chrome.runtime.sendMessage({ type: 'RESOLVE', url: location.href, fields: fields }).then(function (resolveResp) {
-          return { resolveResp: resolveResp, fieldsById: fieldsById };
-        });
-      })
-      .then(function (ctx) {
-        if (!ctx || isCancelled()) return null;
-        var resolveResp = ctx.resolveResp;
-        if (!resolveResp || !resolveResp.ok) {
-          state.error = (resolveResp && resolveResp.message) || 'The local service call failed.';
-          return null;
-        }
-        var data = resolveResp.data || {};
-        return applyFills(data.fills || [], data.skipped || [], ctx.fieldsById, {
-          isCancelled: isCancelled,
-          overBudget: overBudget,
-          fieldTimeoutMs: fieldTimeoutMs,
-          onProgress: function (progress) { state.progress = progress; push(); }
-        });
+        return ApplyPilotScanner.scanAll(document);
       })
       .then(function (result) {
-        if (!result) return;
+        if (result === null || isCancelled()) {
+          return { ok: true, cancelled: true, fields: [], skippedFrames: 0, unreadControls: 0 };
+        }
+        registry = result.registry;
+        result.fields.forEach(function (f) { currentPrepare.fieldsById[f.id] = f; });
+        var unreadControls = countUnreadControls(document, registry);
+        return { ok: true, cancelled: false, fields: result.fields, skippedFrames: result.skippedFrames, unreadControls: unreadControls };
+      })
+      .catch(function (e) {
+        var msg = 'Error while preparing this page: ' + (e && e.message ? e.message : String(e));
+        state.error = msg;
+        return { ok: false, error: msg, fields: [], skippedFrames: 0, unreadControls: 0 };
+      });
+  }
+
+  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (!msg || typeof msg !== 'object') return false;
+
+    if (msg.type === 'PREPARE_AND_SCAN') {
+      // Deliberately not a message this frame sent to itself — this always arrives FROM
+      // background.js, once per frame, at the start of a RUN_FILL it is coordinating (see that
+      // file's header). Not awaited by background.js beyond this one response: the frame keeps
+      // running independently of anything else once it replies.
+      prepareAndScan().then(function (result) {
+        var run = currentPrepare ? currentPrepare.run : null;
+        if (!result || !result.ok || result.cancelled || !(result.fields || []).length) {
+          // Nothing here for background.js to fold into a /resolve call — finalize locally
+          // right now rather than waiting for an APPLY_FILLS that will never be sent for this
+          // frame (see finishRun()'s doc comment).
+          var status = (result && result.cancelled) ? 'cancelled' : (result && result.ok ? 'done' : 'error');
+          var note = (result && result.ok && !result.cancelled && !(result.fields || []).length)
+            ? 'No fillable fields found in this frame.' : null;
+          if (run) finishRun(run, status, note);
+        }
+        sendResponse({
+          ok: !!(result && result.ok),
+          cancelled: !!(result && result.cancelled),
+          error: (result && result.error) || null,
+          fields: (result && result.fields) || [],
+          skippedFrames: (result && result.skippedFrames) || 0,
+          unreadControls: (result && result.unreadControls) || 0
+        });
+      });
+      return true; // async response
+    }
+
+    if (msg.type === 'APPLY_FILLS') {
+      var pending = currentPrepare;
+      if (!pending) {
+        sendResponse({ ok: false, error: 'no prepared scan for this frame' });
+        return false;
+      }
+      var run = pending.run;
+      var state = pending.state;
+      var fieldTimeoutMs = (typeof msg.fieldTimeoutMs === 'number' && msg.fieldTimeoutMs > 0) ? msg.fieldTimeoutMs : DEFAULT_FIELD_TIMEOUT_MS;
+      var budgetMs = (typeof msg.budgetMs === 'number' && msg.budgetMs > 0) ? msg.budgetMs : DEFAULT_BUDGET_MS;
+      var startedAt = pending.startedAt;
+
+      function isCancelled() { return run.cancelled; }
+      function overBudget() { return (Date.now() - startedAt) > budgetMs; }
+
+      applyFills(msg.fills || [], msg.skipped || [], pending.fieldsById || {}, {
+        isCancelled: isCancelled,
+        overBudget: overBudget,
+        fieldTimeoutMs: fieldTimeoutMs,
+        preResumeValues: pending.preResumeValues,
+        onProgress: function (progress) { state.progress = progress; sendStateUpdate(state); }
+      }).then(function (result) {
+        state.progress = { current: result.total, total: result.total, label: 'Confirming fields stuck…' };
+        sendStateUpdate(state);
+        return verifyAppliedFills(result);
+      }).then(function (result) {
         var factApplied = result.applied.filter(function (a) { return !a.draft; });
         var draftApplied = result.applied.filter(function (a) { return a.draft; });
         state.filled = factApplied;
@@ -625,40 +1002,25 @@
           failed: result.failed.length
         };
         state.undoAvailable = result.applied.length > 0;
-        if (isCancelled()) return;
-        state.progress = { current: result.total, total: result.total, label: 'Attaching résumé…' };
-        push();
-        return maybeAttachResume().then(function (resume) { state.resume = resume; });
-      })
-      .catch(function (e) {
-        state.error = 'Error while filling: ' + (e && e.message ? e.message : String(e));
-      })
-      // A real Promise.prototype.finally() (safe: minimum_chrome_version is 116) rather than a
-      // .then(fn, fn) pair — this callback runs exactly once no matter how the chain above
-      // settled, and removeShield()/activeRun cleanup run FIRST, before anything that could
-      // conceivably throw (state bookkeeping, push()), so the shield is guaranteed removed even
-      // in a failure mode nothing above anticipated. This is the one invariant that must never
-      // have an exit path that skips it.
-      .finally(function () {
-        removeShield();
-        if (activeRun === run) activeRun = null;
-        state.status = isCancelled() ? 'cancelled' : (state.error ? 'error' : 'done');
-        var total = (state.progress && state.progress.total) || 0;
-        state.progress = { current: total, total: total, label: '' };
-        push();
+        finishRun(run, isCancelled() ? 'cancelled' : 'done');
+      }, function (e) {
+        finishRun(run, 'error', 'Error while filling: ' + (e && e.message ? e.message : String(e)));
       });
-  }
 
-  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-    if (!msg || typeof msg !== 'object') return false;
-
-    if (msg.type === 'START_FILL') {
-      // Deliberately NOT awaited: this handler's job is only to acknowledge that the message
-      // was received and the fill has begun. The fill itself must survive the panel (or this
-      // whole message channel) going away — see the file header — so it reports its own
-      // progress/result via sendStateUpdate() rather than via sendResponse().
-      runFill({ fieldTimeoutMs: msg.fieldTimeoutMs, budgetMs: msg.budgetMs }).catch(function () {});
+      // Acknowledge receipt immediately — deliberately NOT awaiting the work above, the same
+      // "fire and forget, report progress via storage instead" contract the old START_FILL had.
       sendResponse({ ok: true, started: true });
+      return false;
+    }
+
+    if (msg.type === 'ABORT_FILL') {
+      // Sent by background.js only when it could not carry this frame's already-scanned fields
+      // any further (e.g. the merged /resolve call itself failed) — this frame did everything
+      // right, but there is nothing to apply. Finalize as an error so the panel doesn't spin.
+      if (currentPrepare) {
+        finishRun(currentPrepare.run, 'error', msg.error || 'The fill could not continue for this frame.');
+      }
+      sendResponse({ ok: true });
       return false;
     }
 
@@ -678,12 +1040,13 @@
         return false;
       }
       if (msg.type === 'UNDO') {
-        var result = undo();
-        var idle = freshState('idle');
-        idle.note = 'Restored ' + result.restored + ' field(s) to their previous values.';
-        sendStateUpdate(idle);
-        sendResponse(result);
-        return false;
+        undo().then(function (result) {
+          var idle = freshState('idle');
+          idle.note = 'Restored ' + result.restored + ' field(s) to their previous values.';
+          sendStateUpdate(idle);
+          sendResponse(result);
+        });
+        return true; // async response
       }
       if (msg.type === 'CAPTURE') {
         // Structure only — see capture.js for the no-values invariant.

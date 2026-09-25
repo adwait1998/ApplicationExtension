@@ -55,6 +55,14 @@ _CLAIM_PATTERNS: tuple[re.Pattern, ...] = (
     # "I joined X", "I left X" — the organisation is the direct object, so
     # there is no connector word for the patterns above to hang on.
     re.compile(rf"\bI\s+(?:joined|left|founded|co-founded)\s+{_ORG}"),
+    # Cover-letter shapes: "At X, I redesigned ...", "At X we shipped ..."
+    re.compile(rf"(?:^|[.!?]\s+|\n\s*)[Aa]t\s+{_ORG},?\s+(?:I|we|my)\b"),
+    # "As a designer at X, I ..."
+    re.compile(rf"\b[Aa]s\s+(?:a|an|the)\s+(?:[\w-]+\s+){{0,4}}?(?:at|for|with)\s+{_ORG}"),
+    # "X, where I led ..."
+    re.compile(rf"{_ORG},\s+where\s+I\b"),
+    # "I spent four years at X"
+    re.compile(rf"\bI\s+spent\s+(?:\w+\s+){{0,4}}?(?:at|with)\s+{_ORG}"),
 )
 
 # Capitalised words that start a sentence or are ordinary English — never an

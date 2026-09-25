@@ -130,7 +130,11 @@ def _answer(family: str, question: str, setting) -> tuple[str | None, str]:
     yn = _yes_no(setting)
     if yn is None:
         return None, "not set"
-    if _STATEMENT_RE.search(question) or not _PLAIN_QUESTION_START.search(question):
+    # Judge the wording on the question itself: a trailing instruction ("...?
+    # If yes, please explain.") does not turn a plain question into a
+    # statement, but a label that STARTS as a statement or follow-up does.
+    head = question.split("?", 1)[0]
+    if not _PLAIN_QUESTION_START.search(question) or _STATEMENT_RE.search(head):
         return None, "worded as a statement or follow-up, not a plain question"
     # Negation is judged on the question itself, minus "(Yes/No)" hints and
     # the legal phrase "no contest": the stored answer is only the right

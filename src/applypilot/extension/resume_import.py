@@ -387,10 +387,13 @@ def _default_llm_fn(text: str) -> str:
     llm_util's module docstring. Everything else (provider order when an
     env var IS set, fail-soft-to-warning behaviour in llm_extract() above)
     is unchanged."""
-    from applypilot.extension.llm_util import get_llm_client
+    from applypilot.extension import llm_util
 
+    blocked = llm_util.cloud_block_reason()
+    if blocked:
+        raise llm_util.CloudBlocked(blocked)   # -> an import warning; deterministic fields still import
     messages = _build_llm_messages(text)
-    return get_llm_client().chat(messages, max_tokens=3000, temperature=0.0)
+    return llm_util.get_llm_client().chat(messages, max_tokens=3000, temperature=0.0)
 
 
 def _extract_json_object(raw: str) -> dict | None:

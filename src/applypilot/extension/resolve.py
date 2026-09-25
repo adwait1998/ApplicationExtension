@@ -223,6 +223,30 @@ def resolve_field(
     if canary.is_canary(label):
         answer = canary.resolve_canary(label, profile)
         category = _canary_category(label)
+        options = [o for o in (field.options or []) if o and o.strip()]
+        if answer and options and (category in ("workauth", "sponsorship")
+                                   or answer == canary._EEO_DECLINE):
+            # The options may bundle facts ("Yes, I am a U.S. citizen or
+            # permanent resident" vs "Yes, ... will require sponsorship"):
+            # send the ONE option consistent with the whole profile, or
+            # leave the question for the applicant.
+            chosen, why = canary.choose_option(label, options, profile)
+            if not chosen:
+                return SkipResult(id=field.id, source="canary",
+                                  reason=f"canary:{category} — {why}", auto_fill=False)
+            answer = chosen
+        if answer and (field.type or "").strip().lower() == "checkbox" \
+                and answer.strip().lower() not in ("yes", "no"):
+            # One checkbox of an EEO group ("Veteran", "Person with
+            # disability") is an OPTION, not the question: it can't record
+            # "Decline to self-identify" or "Female". Leave it unticked and
+            # say so, instead of reporting a fill that changed nothing.
+            return SkipResult(id=field.id, source="canary",
+                              reason=f"canary:{category} — a single checkbox can't take '{answer}'; left unticked",
+                              auto_fill=False)
+        if answer and category == "salary" and (field.type or "").strip().lower() == "number":
+            digits = re.sub(r"[^\d.]", "", answer.split()[0] if answer.split() else "")
+            answer = digits or None  # a number input takes the number, not "120000 USD"
         if answer:
             return FillResult(
                 id=field.id,
@@ -352,7 +376,7 @@ def resolve_fields(
                     if answers.answers_enabled(app_dir) else None)
     draft_budget = answers.DraftBudget(app_dir=app_dir) if answers.drafts_enabled(app_dir) else None
     plan = FillPlan(tiers_available=tiers_available(backend, app_dir))
-    for f in fields:
+    for f in structured.infer_run_sections(fields):
         result = resolve_field(
             f, profile, laya=backend, answer_cache=answer_cache, draft_budget=draft_budget,
             app_dir=app_dir, url=url,

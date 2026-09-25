@@ -71,10 +71,14 @@ _WORK_KIND_HINT_RE = re.compile(
     r"\bjob\s*title\b|\brole\s*description\b|\bcompany\b|\bemployer\b", re.I
 )
 _EDU_KIND_HINT_RE = re.compile(
-    r"\bschool\b|\buniversity\b|\bcollege\b|\bdegree\b|\bfield\s*of\s*study\b"
+    r"\bschool\b|\buniversity\b|\bcollege\b|\bdegree\b|\bfield\s*of\s*study\b|\bdiscipline\b|\bmajor\b"
     r"|\bgpa\b|\bgrade\s*point\s*average\b",
     re.I,
 )
+# "Which university are you currently attending or did you last attend?" —
+# a question, but one whose answer IS the most recent school.
+_SCHOOL_QUESTION_RE = re.compile(
+    r"\b(which|what)\s+(university|school|college)\b|\b(university|school|college)\s+(did|do|are)\s+you\b", re.I)
 
 # ---------------------------------------------------------------------------
 # Slot patterns, per kind. Order matters: more specific first.
@@ -170,6 +174,8 @@ def _kind_for(field: FieldDescriptor, haystack: str) -> str | None:
     # Faire as a company?", "Have you worked at or been a consultant for
     # SoFi?") is not a work-history "Company" box; both got the applicant's
     # current employer on real forms.
+    if _SCHOOL_QUESTION_RE.search(field.label or ""):
+        return "education"
     if _QUESTION_LIKE_RE.search(field.label or "") or len((field.label or "").split()) > 8:
         return None
     is_work = bool(_WORK_KIND_HINT_RE.search(haystack))
@@ -208,6 +214,46 @@ def _index_for(field: FieldDescriptor) -> tuple[int, bool]:
 _MM_YYYY_RE = re.compile(r"^\s*(\d{1,2})\s*/\s*(\d{4})\s*$")
 
 
+_MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August",
+                "September", "October", "November", "December")
+
+
+def infer_run_sections(fields: list[FieldDescriptor]) -> list[FieldDescriptor]:
+    """Greenhouse's education block has no numbered heading: School, Degree,
+    Discipline, then "Start date month", "End date year" arrive as a run of
+    unsectioned fields. Date/detail fields that directly follow a field
+    which establishes education (or work) inherit that kind as block 1, so
+    the structured tier can fill them. The run ends at the first field that
+    is neither a kind hint nor such a slot; locations never inherit (too
+    easily the applicant's own)."""
+    import dataclasses
+
+    out: list[FieldDescriptor] = []
+    kind: str | None = None
+    for f in fields:
+        label = f.label or ""
+        if f.section or f.section_index is not None or len(label.split()) > 8:
+            kind = None
+            out.append(f)
+            continue
+        if _EDU_KIND_HINT_RE.search(label) and not _WORK_KIND_HINT_RE.search(label):
+            kind = "education"
+            out.append(f)
+            continue
+        if _WORK_KIND_HINT_RE.search(label) and not _EDU_KIND_HINT_RE.search(label):
+            kind = "work"
+            out.append(f)
+            continue
+        if kind and re.search(r"\b(start|end|from|to|graduat\w*|month|year|dates?)\b", label, re.I) \
+                and not re.search(r"\blocation\b|\bcity\b", label, re.I):
+            out.append(dataclasses.replace(
+                f, section="Education" if kind == "education" else "Work Experience", section_index=1))
+            continue
+        kind = None
+        out.append(f)
+    return out
+
+
 def _format_date(value: str, field: FieldDescriptor) -> str:
     """Profile dates are stored ``MM/YYYY``. Emit whatever the field wants:
 
@@ -226,6 +272,16 @@ def _format_date(value: str, field: FieldDescriptor) -> str:
         if m:
             mm, yyyy = m.group(1).zfill(2), m.group(2)
             return f"{yyyy}-{mm}-01"
+    # A date split into separate month and year boxes ("End date month",
+    # "End date year" on Greenhouse): each box gets only its part — the
+    # month as its name, which is what a month dropdown lists.
+    label = (field.label or "").lower()
+    m = _MM_YYYY_RE.match(value)
+    if m and re.search(r"\bmonth\b", label) and not re.search(r"\byear\b", label):
+        month = int(m.group(1))
+        return _MONTH_NAMES[month - 1] if 1 <= month <= 12 else value
+    if m and re.search(r"\byear\b", label) and not re.search(r"\bmonth\b", label):
+        return m.group(2)
     return value
 
 

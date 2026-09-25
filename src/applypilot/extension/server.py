@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import os
 import secrets
 import shutil
@@ -36,7 +37,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
-from applypilot.extension import answer_memory, llm_util, resolve, resume_import, schema
+from applypilot.extension import (answer_memory, app_log, cover_letter, job_context, llm_util, resolve,
+                                  resume_import, schema, tailor)
 from applypilot.extension import settings as ext_settings
 
 TOKEN_FILENAME = "extension_token.txt"
@@ -117,12 +119,33 @@ class ForgetIn(BaseModel):
     question: str = ""
 
 
+class LogIn(BaseModel):
+    """POST /log body: one fill of one page — counts only, never values."""
+    url: str = ""
+    title: str = ""
+    company: str = ""
+    counts: dict[str, int] = {}
+
+
+class LogStatusIn(BaseModel):
+    status: str = ""
+
+
+class CoverLetterIn(BaseModel):
+    """POST /cover-letter body: the page's URL plus any frame URLs (an
+    embedded Greenhouse form's iframe names the posting), and optionally the
+    page's visible text as a last-resort job description."""
+    urls: list[str] = []
+    page_text: str = ""
+
+
 class SettingsIn(BaseModel):
     """POST /settings body -- every field optional, a partial update over
     whatever is already persisted. Unset fields are left untouched."""
     answers_enabled: bool | None = None
     drafts_enabled: bool | None = None
     max_drafts: int | None = None
+    cloud_llm_allowed: bool | None = None
 
 
 def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
@@ -324,6 +347,8 @@ def create_app(
     root = Path(root)
 
     token = get_or_create_token(app_dir)
+    # AI call sites read the cloud-LLM opt-in from this service's own settings.
+    llm_util.SETTINGS_DIR = app_dir
 
     if profile is not None:
         def _load_profile() -> dict:
@@ -393,12 +418,16 @@ def create_app(
 
     @app.get("/health")
     def health(_: None = Depends(_require_token)) -> dict:
-        llm_ok, llm_provider = llm_util.llm_available()
+        info = llm_util.provider_info()
         return {
             "status": "ok",
             "tiers_available": resolve.tiers_available(app_dir=app_dir),
-            "llm_available": llm_ok,
-            "llm_provider": llm_provider,
+            "llm_available": info["available"],
+            "llm_provider": info["provider"],
+            "llm_label": info["label"],
+            "llm_local": info["local"],
+            "cloud_llm_allowed": ext_settings.effective_settings(app_dir).get("cloud_llm_allowed", False),
+            "llm_blocked_reason": llm_util.cloud_block_reason(app_dir),
         }
 
     @app.post("/resolve")
@@ -444,6 +473,8 @@ def create_app(
             "answers_enabled": effective["answers_enabled"],
             "drafts_enabled": effective["drafts_enabled"],
             "max_drafts": effective["max_drafts"],
+            "cloud_llm_allowed": effective["cloud_llm_allowed"],
+            "llm": llm_util.provider_info(),
             # Which (if any) of the three are currently pinned by an env
             # var -- null means "not pinned, the persisted value above is
             # editable from here".
@@ -487,6 +518,78 @@ def create_app(
     @app.post("/answers/forget")
     def forget_answer(body: ForgetIn, _: None = Depends(_require_token)) -> dict:
         return {"forgotten": answer_memory.forget(_bank_path(), body.question)}
+
+    # -----------------------------------------------------------------
+    # Cover letter: an explicit, user-clicked draft for the page being
+    # filled. Job context from the operator's jobs DB, else the ATS's
+    # public posting API, else the page text. Never auto-attached.
+    # -----------------------------------------------------------------
+
+    # -----------------------------------------------------------------
+    # Application log: which pages the Copilot filled, when, and how it
+    # went (counts only). Status is the applicant's to set.
+    # -----------------------------------------------------------------
+
+    def _log_path() -> Path:
+        return _current_profile_path(root).parent / app_log.LOG_NAME
+
+    @app.post("/log")
+    def log_fill(body: LogIn, _: None = Depends(_require_token)) -> dict:
+        if not body.url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=422, detail="url must be an http(s) page")
+        title, company = body.title, body.company
+        if not (title and company):
+            parsed = job_context.parse_ats_url(body.url) or {}
+            company = company or parsed.get("slug", "")
+        return app_log.record(_log_path(), body.url, title=title, company=company, counts=body.counts)
+
+    @app.get("/log")
+    def list_log(_: None = Depends(_require_token)) -> dict:
+        return {"entries": app_log.entries(_log_path())}
+
+    @app.post("/log/{entry_id}/status")
+    def log_status(entry_id: str, body: LogStatusIn, _: None = Depends(_require_token)) -> dict:
+        try:
+            found = app_log.set_status(_log_path(), entry_id, body.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not found:
+            raise HTTPException(status_code=404, detail="no such log entry")
+        return {"ok": True}
+
+    @app.get("/log.csv")
+    def log_csv(_: None = Depends(_require_token)) -> Response:
+        return Response(content=app_log.to_csv(_log_path()), media_type="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="applications.csv"'})
+
+    @app.post("/cover-letter")
+    def cover_letter_endpoint(body: CoverLetterIn, _: None = Depends(_require_token)) -> dict:
+        ok, provider = llm_util.llm_available()
+        if not ok:
+            raise HTTPException(status_code=503, detail="no language model available for drafting")
+        blocked = llm_util.cloud_block_reason(app_dir)
+        if blocked:
+            raise HTTPException(status_code=403, detail=blocked)
+        profile = _load_profile()
+        job = job_context.job_context([u for u in body.urls if u][:6], page_text=body.page_text[:20000],
+                                      db_path=app_dir / "applypilot.db")
+        try:
+            resume_txt = (_current_profile_path(root).parent / "resume.txt").read_text(encoding="utf-8")
+        except Exception:
+            resume_txt = ""
+
+        def chat(messages: list[dict]) -> str:
+            return llm_util.get_llm_client().chat(messages, max_tokens=1024, temperature=0.7)
+
+        try:
+            out = cover_letter.draft_cover_letter(profile, job or {}, resume_txt, chat)
+        except cover_letter.CoverLetterError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 — never a stack trace to the extension
+            raise HTTPException(status_code=502, detail=f"drafting failed: {str(exc)[:200]}") from exc
+        return {"text": out["text"], "warnings": out["warnings"], "draft": True, "provider": provider,
+                "job": {"title": job.get("title", ""), "company": job.get("company", ""),
+                        "source": job.get("source", "")}}
 
     @app.get("/profile")
     def profile_keys(_: None = Depends(_require_token)) -> dict:
@@ -702,5 +805,47 @@ def create_app(
             media_type=resume_import.content_type_for(stored),
             headers={"Content-Disposition": f'attachment; filename="{stored.name}"'},
         )
+
+    # -----------------------------------------------------------------
+    # Tailored résumé for the page: the pipeline's tailoring (validator +
+    # fabrication judge), offered only when it passed, stored beside the
+    # active profile, attached only when the applicant chooses it.
+    # -----------------------------------------------------------------
+
+    def _tailored_dir() -> Path:
+        return _current_profile_path(root).parent / tailor.TAILORED_DIRNAME
+
+    @app.post("/resume/tailor")
+    def tailor_endpoint(body: CoverLetterIn, _: None = Depends(_require_token)) -> dict:
+        ok, _provider = llm_util.llm_available()
+        if not ok:
+            raise HTTPException(status_code=503, detail="no language model available for tailoring")
+        blocked = llm_util.cloud_block_reason(app_dir)
+        if blocked:
+            raise HTTPException(status_code=403, detail=blocked)
+        urls = [u for u in body.urls if u][:6]
+        job = job_context.job_context(urls, page_text=body.page_text[:20000], db_path=app_dir / "applypilot.db")
+        try:
+            resume_txt = (_current_profile_path(root).parent / "resume.txt").read_text(encoding="utf-8")
+        except Exception:
+            resume_txt = ""
+        try:
+            return tailor.tailor_for_page(_load_profile(), job, resume_txt, urls[0] if urls else "",
+                                          _tailored_dir(), client=llm_util.get_llm_client())
+        except tailor.TailorError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 — never a stack trace to the extension
+            raise HTTPException(status_code=502, detail=f"tailoring failed: {str(exc)[:200]}") from exc
+
+    @app.get("/resume/tailored/{tid}")
+    def get_tailored(tid: str, _: None = Depends(_require_token)) -> Response:
+        found = tailor.find_tailored(_tailored_dir(), tid)
+        if not found:
+            raise HTTPException(status_code=404, detail="no such tailored résumé")
+        meta, pdf = found
+        name = (_load_profile().get("personal") or {}).get("full_name") or "Resume"
+        safe = re.sub(r'[^\w .-]', "", name).strip() or "Resume"
+        return Response(content=pdf.read_bytes(), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{safe} - Resume.pdf"'})
 
     return app

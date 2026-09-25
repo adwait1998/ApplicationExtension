@@ -299,7 +299,7 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
 # ── LLM Judge ────────────────────────────────────────────────────────────
 
 def judge_tailored_resume(
-    original_text: str, tailored_text: str, job_title: str, profile: dict
+    original_text: str, tailored_text: str, job_title: str, profile: dict, client=None,
 ) -> dict:
     """LLM judge layer: catches subtle fabrication that programmatic checks miss.
 
@@ -324,7 +324,7 @@ def judge_tailored_resume(
         )},
     ]
 
-    client = get_client()
+    client = client or get_client()
     response = client.chat(messages, max_tokens=512, temperature=0.1)
 
     passed = "VERDICT: PASS" in response.upper()
@@ -345,7 +345,7 @@ def judge_tailored_resume(
 
 def tailor_resume(
     resume_text: str, job: dict, profile: dict,
-    max_retries: int = 3, validation_mode: str = "normal",
+    max_retries: int = 3, validation_mode: str = "normal", client=None,
 ) -> tuple[str, dict]:
     """Generate a tailored resume via JSON output + fresh context on each retry.
 
@@ -381,7 +381,10 @@ def tailor_resume(
     }
     avoid_notes: list[str] = []
     tailored = ""
-    client = get_client()
+    # `client` lets a caller with its own provider policy (the extension's
+    # local-only-unless-allowed gate) supply the model; the pipeline passes
+    # nothing and gets its own client exactly as before.
+    client = client or get_client()
     tailor_prompt_base = _build_tailor_prompt(profile)
 
     for attempt in range(max_retries + 1):
@@ -431,7 +434,7 @@ def tailor_resume(
             report["status"] = "approved"
             return tailored, report
 
-        judge = judge_tailored_resume(resume_text, tailored, job.get("title", ""), profile)
+        judge = judge_tailored_resume(resume_text, tailored, job.get("title", ""), profile, client=client)
         report["judge"] = judge
 
         if not judge["passed"]:

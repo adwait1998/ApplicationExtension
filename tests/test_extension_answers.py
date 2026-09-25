@@ -673,6 +673,7 @@ def test_canary_shaped_previously_employed_style_question_is_unaffected():
 
 
 def test_real_llm_fn_falls_back_to_claude_cli_when_no_provider_configured(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPLYPILOT_CLOUD_LLM", "1")  # cloud use is opt-in; this tests which provider is chosen
     for var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "LLM_PROVIDER", "APPLYPILOT_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: "/fake/claude.cmd")
@@ -694,6 +695,7 @@ def test_real_llm_fn_falls_back_to_claude_cli_when_no_provider_configured(monkey
 
 
 def test_real_llm_fn_prefers_an_explicit_provider_over_claude_cli(monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_CLOUD_LLM", "1")  # cloud use is opt-in; this tests which provider is chosen
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     monkeypatch.delenv("LLM_URL", raising=False)
 

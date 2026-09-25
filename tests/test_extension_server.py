@@ -134,7 +134,8 @@ def test_health_reports_tiers_without_laya(client, auth_headers):
 def test_health_response_shape_includes_llm_fields(client, auth_headers):
     resp = client.get("/health", headers=auth_headers)
     body = resp.json()
-    assert set(body.keys()) == {"status", "tiers_available", "llm_available", "llm_provider"}
+    assert set(body.keys()) == {"status", "tiers_available", "llm_available", "llm_provider", "llm_label",
+                                "llm_local", "cloud_llm_allowed", "llm_blocked_reason"}
     assert isinstance(body["llm_available"], bool)
     assert isinstance(body["llm_provider"], str)
 
@@ -888,10 +889,13 @@ def test_get_settings_default_shape(tmp_path, monkeypatch):
     resp = client.get("/settings", headers={"X-ApplyPilot-Token": token})
     assert resp.status_code == 200
     body = resp.json()
+    llm = body.pop("llm")
+    assert set(llm) == {"available", "provider", "label", "local"}
     assert body == {
         "answers_enabled": True,
         "drafts_enabled": False,
         "max_drafts": 5,
+        "cloud_llm_allowed": False,
         "env_overrides": {"answers_enabled": None, "drafts_enabled": None, "max_drafts": None},
     }
 
@@ -911,7 +915,7 @@ def test_post_settings_persists_and_get_reflects_it(tmp_path, monkeypatch):
 
     # Persisted to disk, and a fresh app instance over the same app_dir sees it.
     on_disk = json.loads((tmp_path / "extension_settings.json").read_text(encoding="utf-8"))
-    assert on_disk == {"answers_enabled": True, "drafts_enabled": True, "max_drafts": 2}
+    assert on_disk == {"answers_enabled": True, "drafts_enabled": True, "max_drafts": 2, "cloud_llm_allowed": False}
 
     again = client.get("/settings", headers=headers).json()
     assert again["drafts_enabled"] is True
