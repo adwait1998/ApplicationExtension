@@ -36,7 +36,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
-from applypilot.extension import answer_memory, cover_letter, job_context, llm_util, resolve, resume_import, schema
+from applypilot.extension import (answer_memory, app_log, cover_letter, job_context, llm_util, resolve,
+                                  resume_import, schema)
 from applypilot.extension import settings as ext_settings
 
 TOKEN_FILENAME = "extension_token.txt"
@@ -115,6 +116,18 @@ class LearnIn(BaseModel):
 
 class ForgetIn(BaseModel):
     question: str = ""
+
+
+class LogIn(BaseModel):
+    """POST /log body: one fill of one page — counts only, never values."""
+    url: str = ""
+    title: str = ""
+    company: str = ""
+    counts: dict[str, int] = {}
+
+
+class LogStatusIn(BaseModel):
+    status: str = ""
 
 
 class CoverLetterIn(BaseModel):
@@ -501,6 +514,43 @@ def create_app(
     # filled. Job context from the operator's jobs DB, else the ATS's
     # public posting API, else the page text. Never auto-attached.
     # -----------------------------------------------------------------
+
+    # -----------------------------------------------------------------
+    # Application log: which pages the Copilot filled, when, and how it
+    # went (counts only). Status is the applicant's to set.
+    # -----------------------------------------------------------------
+
+    def _log_path() -> Path:
+        return _current_profile_path(root).parent / app_log.LOG_NAME
+
+    @app.post("/log")
+    def log_fill(body: LogIn, _: None = Depends(_require_token)) -> dict:
+        if not body.url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=422, detail="url must be an http(s) page")
+        title, company = body.title, body.company
+        if not (title and company):
+            parsed = job_context.parse_ats_url(body.url) or {}
+            company = company or parsed.get("slug", "")
+        return app_log.record(_log_path(), body.url, title=title, company=company, counts=body.counts)
+
+    @app.get("/log")
+    def list_log(_: None = Depends(_require_token)) -> dict:
+        return {"entries": app_log.entries(_log_path())}
+
+    @app.post("/log/{entry_id}/status")
+    def log_status(entry_id: str, body: LogStatusIn, _: None = Depends(_require_token)) -> dict:
+        try:
+            found = app_log.set_status(_log_path(), entry_id, body.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not found:
+            raise HTTPException(status_code=404, detail="no such log entry")
+        return {"ok": True}
+
+    @app.get("/log.csv")
+    def log_csv(_: None = Depends(_require_token)) -> Response:
+        return Response(content=app_log.to_csv(_log_path()), media_type="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="applications.csv"'})
 
     @app.post("/cover-letter")
     def cover_letter_endpoint(body: CoverLetterIn, _: None = Depends(_require_token)) -> dict:

@@ -441,12 +441,14 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
     # the file picker is OS-level. Surfaced as a skip naming what it is,
     # never faked as a fill.
     if (field.type or "").strip().lower() == "file":
-        return SkipResult(
-            id=field.id,
-            source="deterministic",
-            reason="file upload is not automated (v1) — attach your resume yourself",
-            auto_fill=False,
-        )
+        label = f"{field.label} {field.name}".lower()
+        if "cover" in label:
+            why = "cover letter upload — attach one yourself (a résumé is never put here)"
+        elif any(w in label for w in ("resume", "résumé", "cv")):
+            why = "résumé upload — handled by the résumé step, not by field filling"
+        else:
+            why = "file upload — attach this yourself"
+        return SkipResult(id=field.id, source="deterministic", reason=why, auto_fill=False)
 
     haystack = " ".join(str(x or "") for x in (field.label, field.name, field.placeholder))
 
