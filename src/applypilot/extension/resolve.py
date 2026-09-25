@@ -242,7 +242,7 @@ def resolve_field(
             # "Decline to self-identify" or "Female". Leave it unticked and
             # say so, instead of reporting a fill that changed nothing.
             return SkipResult(id=field.id, source="canary",
-                              reason=f"canary:{category} — a single checkbox can't take '{answer}'; left unticked",
+                              reason=f"canary:{category} — a single checkbox can't record this answer; left unticked",
                               auto_fill=False)
         if answer and category == "salary" and (field.type or "").strip().lower() == "number":
             digits = re.sub(r"[^\d.]", "", answer.split()[0] if answer.split() else "")

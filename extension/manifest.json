@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ApplyPilot Copilot",
   "version": "0.1.0",
-  "description": "Fills job application forms from your local ApplyPilot profile. Fills and highlights only — you always review and submit yourself. Nothing leaves your machine.",
+  "description": "Fills job application forms from your local ApplyPilot profile. Fills and highlights only — you always review and submit yourself. Your profile stays on this computer; AI features use a model on this computer unless you allow another.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyncOShT4yjwhzp2/1cUdPGbcxlBl00p8lMSYgUW3vx265a48/ygz+gf4ekD75UCn8SDBmD2hn97+DvOMXGqW2uf+X1HRjX6yvnxiTG44bh0QBc+JwHYjtSAGMcE7GIVch6/Sva8/zhhcQUMF7QcbJuIlOVyCuWfKHZMWOOD+bn+42DIyeoBdcf5WuW7WA7+4xVARyoXfsG2ST9HYHVhC0g+zjo6N7yfzVk/36FL+kbbGAHiC/qoOKsidwou0NbKkBbAkMYdUbXITGtgQ8kMW4tIYxDQzuChJl+ANB4q7ciXPJRbZV4YZh7EwPNNm5CkwTEEJzlmxRS9vLqoWaAVd2wIDAQAB",
   "icons": {
     "16": "icons/icon16.png",

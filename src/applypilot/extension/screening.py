@@ -143,7 +143,7 @@ def _answer(family: str, question: str, setting) -> tuple[str | None, str]:
     wording = re.sub(r"\bno contest\b", " ", wording, flags=re.I)
     if family == "criminal":
         if yn != "No":
-            return None, "your setting is 'Yes' — details matter, so answer this yourself"
+            return None, "details matter for this one — answer it yourself"
         if _CRIMINAL_OUT_OF_SCOPE_RE.search(question):
             return None, "asks about more than convictions (arrests, charges, traffic, ...)"
         if _NEGATION_RE.search(wording):

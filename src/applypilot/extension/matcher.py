@@ -440,10 +440,11 @@ def _match_years_range(field: FieldDescriptor, profile: dict) -> FillResult | Sk
     if len(hits) != 1:
         return None if not hits else SkipResult(
             id=field.id, source="deterministic",
-            reason=f"{len(hits)} options fit {raw} years — pick the right one yourself", auto_fill=False)
+            reason=f"{len(hits)} options fit your years of experience — pick the right one yourself",
+            auto_fill=False)
     return FillResult(id=field.id, value=hits[0], source="deterministic",
                       profile_key="experience.years_of_experience_total", confidence=0.9, auto_fill=True,
-                      reason=f"your total experience ({raw} years)")
+                      reason="your total years of experience")
 
 
 def _dedupe_ci(items) -> list[str]:
@@ -513,7 +514,7 @@ def _match_start_availability(field: FieldDescriptor, haystack: str, profile: di
             return SkipResult(
                 id=field.id,
                 source="deterministic",
-                reason=f"this start-date field needs a calendar date; your profile says '{value}' — pick one yourself",
+                reason="this start-date field needs a calendar date and your profile's start date isn't one — pick one yourself",
                 auto_fill=False,
             )
     return FillResult(
