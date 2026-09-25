@@ -4,10 +4,16 @@ A Manifest V3 Chrome extension that reads a job application form on the page you
 at, asks a **local** ApplyPilot service (`127.0.0.1` only) which of your profile values
 belongs in each field, fills them in, and highlights exactly what it did. Your profile and the
 page you're on never leave your machine — every request goes to that local service and nowhere
-else. The AI-generated features (**Draft cover letter**, **Tailor my résumé**) use a model
-running on this computer by default; they only ever reach a model that isn't on this computer if
-you've explicitly turned that on in Settings ("Allow AI features to use a model that isn't on
-this computer" — off by default). Nothing is submitted for you.
+else. The one exception: for **Draft cover letter** and **Tailor my résumé**, that local service
+separately fetches the job POSTING ITSELF from the ATS's own **public** job API (Greenhouse,
+Lever, Ashby, Workday — a plain GET of the same public listing anyone visiting the page can
+already see, no login involved) so it can write against the real job description — see
+`job_context.py`. That outbound request carries no profile data, no résumé, and nothing you've
+typed; it's just the posting's own public URL. The AI-generated features (**Draft cover letter**,
+**Tailor my résumé**) use a model running on this computer by default; they only ever reach a
+model that isn't on this computer if you've explicitly turned that on in Settings ("Allow AI
+features to use a model that isn't on this computer" — off by default). Nothing is submitted for
+you.
 
 ## The one rule that matters
 
@@ -282,17 +288,20 @@ read" count (see "Report honestly" below) is unchanged by any of this.
 
 **Export fill report** downloads a JSON file built entirely from what's already in
 `chrome.storage.session` — no page access, no permission prompt. Per field: which frame it's in
-(id and URL), its label, its tag/widget, its status, its source, and a **category** for why it
-landed where it did — plus the page's host/path and the fill's counts. **Never a value, and
-never the free-text reason, anywhere in the file.** An earlier build redacted only double-quoted
-substrings out of the reason text, which missed a value in single/curly quotes or with no quotes
-at all (an unquoted skills term, a canary question's own wording); the export is now built from
-an **allow-list** instead — `category` is one of a small, fixed, closed vocabulary
-(`content.js`'s `categoryForSource()`/every push site in `applyFills()`) content.js sets at the
-exact point it already knows why an entry was produced, never derived by parsing anyone's prose —
-so nothing the service or the page ever says can leak into this file, regardless of how either
-one happens to phrase a reason on screen. This file is meant to be sent to someone else to
-diagnose a bad fill.
+(a frame id, plus that frame's own **host/path**), its label, its tag/widget, its status, its
+source, and a **category** for why it landed where it did — plus the page's own host/path and the
+fill's counts. **Never a value, and never the free-text reason, anywhere in the file.** An
+earlier build redacted only double-quoted substrings out of the reason text, which missed a value
+in single/curly quotes or with no quotes at all (an unquoted skills term, a canary question's own
+wording); the export is now built from an **allow-list** instead — `category` is one of a small,
+fixed, closed vocabulary (`content.js`'s `categoryForSource()`/every push site in `applyFills()`)
+content.js sets at the exact point it already knows why an entry was produced, never derived by
+parsing anyone's prose — so nothing the service or the page ever says can leak into this file,
+regardless of how either one happens to phrase a reason on screen. The page's and every frame's
+URL are stripped to host/path the same way — an ATS's own query string can carry a one-time or
+identifying token (Greenhouse's `validityToken=…`, iCIMS's `hashed=…` id, ...) that has no
+business leaving this machine in a file meant to be forwarded to someone else. This file is meant
+to be sent to someone else to diagnose a bad fill.
 
 ## Keyboard shortcuts
 
@@ -376,26 +385,54 @@ capped at 3s) → **then** scan → resolve → apply.
 
 ## Never overwrite the user
 
-Before writing a plain text/select/textarea field or a radio group, if it already holds a
-non-empty value that differs from what's about to be written, and that value was genuinely there
-before this fill touched anything, the fill leaves it alone and reports "kept your value" instead
-of clobbering it — a Workday page can prefill several fields from your account, and you may have
-typed into the form yourself before clicking Fill.
+Before writing **any** field — a plain text/select/textarea field, a radio group, a react-select
+or plain ARIA combobox, an Ashby-style Yes/No button group, a checkbox group, a Workday dropdown/
+date/prompt, or the Lever location field, every widget kind this extension knows how to fill — if
+it already holds a non-empty, non-placeholder value that differs from what's about to be written,
+and that value was genuinely there before this fill touched anything, the fill leaves it alone and
+reports "kept your value" instead of clobbering it — a Workday page can prefill several fields
+from your account, and you may have typed or picked something into the form yourself before
+clicking Fill.
+
+This used to be scoped to only plain fields and radio groups, on the theory that "already has a
+value" was unambiguous only for those two. In practice that let a react-select "How did you
+hear?" combobox already committed to "Referral" get silently changed to "LinkedIn", and an Ashby
+Yes/No button group already set to "No" get flipped to "Yes" — both reported "Verified" as if
+nothing had been kept. Every kind now gets the same protection.
 
 Because résumé attachment now happens *before* scanning (see above), "already had a value" is
 deliberately **not** enough on its own — that would just as happily protect an ATS's own
 résumé-parse guess as it would your own input, presenting the ATS's guess as if it were yours.
 Two independent signals decide whether a value actually predates this fill: a snapshot of every
 field's value taken before expansion/résumé/scanning even started, and a real (browser-trusted)
-input/change event on that field at any point during the run — this extension's own programmatic
-writes are never "trusted" this way, so it can never mistake its own fill for yours. A value that
-only appears *because of* this run's own résumé attach is treated as the résumé parser's guess,
-not yours, and the real profile value still overwrites it.
+input/change/**click** event on that field at any point during the run (`click` is what makes this
+work for button-group and a Workday dropdown's own opener button — both are driven purely by
+clicks and never fire input/change at all) — this extension's own programmatic writes are never
+"trusted" this way, so it can never mistake its own fill for yours. A value that only appears
+*because of* this run's own résumé attach is treated as the résumé parser's guess, not yours, and
+the real profile value still overwrites it.
 
-This check is scoped to plain fields and radio groups, deliberately excluding the Workday popup
-widgets (an un-opened dropdown often shows non-empty placeholder text like "Select One" that
-isn't a real answer, and the Skills/Field-of-Study prompt is additive — typing a new term never
-erases an existing one, so "already has something" is never a reason to stop adding more).
+A Workday dropdown's un-opened button often shows non-empty PLACEHOLDER text ("Select One" —
+Workday's own real wording) that isn't a real answer, and a Workday date's masked/empty state can
+likewise read back as its own mask skeleton ("MM/YYYY") rather than a clean empty string — both
+are treated as "no value" rather than "kept your value", never mistaken for one. The Skills/
+Field-of-Study prompt is additive — a matched fill never removes an existing pill — so protecting
+it only ever means "don't add on top of a real prior answer that differs," never "erase what's
+there."
+
+## Replace kept values with my profile
+
+Workday in particular prefills several fields from your **account** on earlier steps of a
+multi-step flow — sometimes with a stale or simply wrong value for *this* application — and
+"never overwrite the user" (above) will faithfully keep it, exactly as it would keep something you
+typed yourself. When a fill kept one or more values, the panel shows each one as its own row under
+**Need you**, with a checkbox, the **page's current value** and **your profile's value** shown
+side by side, and a **Replace kept values with my profile** button. Tick the ones that are
+actually wrong, click the button, and only those fields are re-filled — through the exact same
+guarded fill path every other field uses (per-field timeout, highlight, post-fill verification,
+and **Undo** restores the page's own prior value exactly like any other fill). Fields you don't
+tick are left exactly as they were. The page/profile values shown here are **panel-only** — they
+are never written into the fill-report export (see "Export fill report" below).
 
 ## Permissions, and why they're this narrow
 
@@ -727,6 +764,17 @@ can prove and what a plain offline check already covers:
   - **never overwrite the user, but do correct the résumé's own guess**: a value already on the
     page before the fill started is kept and reported "kept your value", while a value a
     (simulated) résumé attach introduces is still overwritten by the real profile value;
+  - **never overwrite the user, every widget kind (reviewer round 4)**: a react-select combobox
+    already committed to one option, and an Ashby-style Yes/No button group already set to "No",
+    both end the fill unchanged and reported "kept your value" — proving the exact two cases the
+    reviewer reproduced against the pre-round-4 code; a value that only appears in a combobox
+    *after* the (simulated) résumé attach is still replaced by the real profile value, same
+    distinction as the plain-field case above; **Replace kept values with my profile** changes
+    exactly the rows ticked (and only those) and they end up verified, everything left unticked
+    stays exactly as it was;
+  - **the fill-report export's `frame` field carries no query string**: a frame URL with a
+    Greenhouse-style `validityToken=…`/iCIMS-style `hashed=…` query string still exports as bare
+    host/path, same as the page field;
   - **didn't stick**: a field made to silently revert shortly after being filled is caught by
     the post-fill verify step and reported "didn't stick", never counted as Filled;
   - closing a tab clears its `chrome.storage.session` entry; and none of the above ever submits

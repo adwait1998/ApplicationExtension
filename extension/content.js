@@ -73,6 +73,15 @@
   // with them (or has since been told and is actively applying them).
   var currentPrepare = null;
 
+  // finishRun() nulls currentPrepare out the moment a fill reaches a terminal status — but a
+  // standalone action taken AFTER that (the panel's "Replace kept values with my profile" —
+  // replaceKeptValues() below) still needs that run's own fieldsById (for labels/tag/widget) and
+  // preResumeValues (so a replaced field can still be re-protected against a SECOND, unrelated
+  // overwrite the normal way). Kept around here, separately, with the same "last one wins"
+  // lifetime lastReportedState already has, rather than resurrecting currentPrepare itself.
+  var lastFieldsById = null;
+  var lastPreResumeValues = null;
+
   // Defaults per the spec: no single field may stall the fill for more than ~12s, and the
   // whole fill gives up on remaining (not-yet-attempted) fields after ~120s. Both are
   // overridable ONLY via an explicit message field — used exclusively by
@@ -284,37 +293,71 @@
   }
 
   // ---------------------------------------------------------------------
-  // never overwrite the user — see README "Never overwrite the user". Before writing a field,
-  // if it already holds a non-empty value that differs from what we're about to write, we skip
-  // it with reason "kept your value" instead of clobbering it (Workday prefills several fields
-  // from the operator's account profile; the operator may also have typed into the form before
-  // clicking Fill).
+  // never overwrite the user — see README "Never overwrite the user". Before writing ANY field,
+  // of ANY widget kind scanner.js's registry produces (plain input/select/textarea, radio and
+  // checkbox groups, comboboxes, button groups, Workday dropdowns/dates/prompts, the Lever
+  // location field — every `entry.kind`), if it already holds a non-empty, non-placeholder value
+  // that differs from what we're about to write, we skip it with reason "kept your value" instead
+  // of clobbering it (Workday prefills several fields from the operator's account profile; the
+  // operator may also have typed/picked something into the form before clicking Fill).
   //
-  // Deliberately scoped to the plain 'element' (input/select/textarea) and 'radio-group' entry
-  // kinds only, where getCurrentValue() returning "empty" is unambiguous. The Workday popup
-  // widgets are excluded on purpose:
-  //   - wd-dropdown's un-opened button often shows non-empty PLACEHOLDER text ("Select One"),
-  //     which is not a real answer and must not be mistaken for one;
-  //   - wd-prompt (Field of Study, Skills, ...) is ADDITIVE — typing a new term never erases an
-  //     existing one — so "already has a value" is never a reason to skip adding more.
+  // Reviewer round 4: this used to be scoped to only 'element' and 'radio-group', on the theory
+  // that getCurrentValue() returning "empty" was unambiguous only for those two. In practice a
+  // react-select "How did you hear?" already committed to "Referral" got silently changed to
+  // "LinkedIn", and an Ashby Yes/No button group already set to "No" got flipped to "Yes" — both
+  // reported "verified". Every kind now gets the same protection; the two things that made
+  // wd-dropdown/wd-prompt look unsafe to include are handled directly instead of excluding them
+  // wholesale:
+  //   - wd-dropdown's un-opened button often shows non-empty PLACEHOLDER text ("Select One" —
+  //     Workday's own real wording, ground-truthed against production Workday behavior), which is
+  //     not a real answer — isMeaningfulExistingValue() below treats it the same as empty for
+  //     that one kind, so it's never mistaken for one;
+  //   - a Workday date's masked/-display empty state can likewise read back as its own mask
+  //     skeleton ("MM/YYYY", "mm/dd/yyyy") rather than a clean '' — also treated as not-a-value;
+  //   - wd-prompt (Field of Study, Skills, ...) is ADDITIVE — a matched fill never removes an
+  //     existing pill — so protecting it only ever means "don't add on top of a real prior answer
+  //     that differs", never "erase what's there".
   // ---------------------------------------------------------------------
-  var USER_VALUE_PROTECTED_KINDS = { element: true, 'radio-group': true };
+  var WD_DROPDOWN_PLACEHOLDER_RE = /^(select one|select\.\.\.|select|choose one|choose\.\.\.|--\s*select\s*--|please select)$/i;
+  var WD_DATE_MASK_ONLY_RE = /^[mdy\/\s-]*$/i; // "", "MM/YYYY", "mm/dd/yyyy" — mask skeleton, never a real date
 
-  function isMeaningfulExistingValue(value) {
+  /**
+   * `entry` is optional (omitted at call sites that only ever have a raw value to check) — when
+   * given, applies the kind-specific "that's not really a value" corrections described above on
+   * top of the generic empty-string/false check.
+   */
+  function isMeaningfulExistingValue(value, entry) {
     if (typeof value === 'boolean') return value === true;
-    return typeof value === 'string' && value.trim() !== '';
+    if (typeof value !== 'string') return false;
+    var t = value.trim();
+    if (t === '') return false;
+    if (entry && entry.kind === 'wd-dropdown' && WD_DROPDOWN_PLACEHOLDER_RE.test(t)) return false;
+    if (entry && (entry.kind === 'wd-date-y' || entry.kind === 'wd-date-mdy' || entry.kind === 'wd-date-my') &&
+        WD_DATE_MASK_ONLY_RE.test(t)) return false;
+    return true;
   }
 
-  /** Every underlying DOM element a registry entry actually touches. */
+  /**
+   * Every underlying DOM element a registry entry actually touches — including every kind added
+   * to "never overwrite the user" protection this build (button-group's `buttons`,
+   * wd-checkbox-group's `boxes`, wd-date-mdy's `dayEl`). This list is what makes BOTH signals in
+   * isProtectedByPriorUserActivity() work: snapshotValuesByElement() can only record a pre-fill
+   * value for elements this function returns, and the lookup below can only find them again by
+   * the same list — a kind whose elements are missing here would look "never protected" no matter
+   * what isMeaningfulExistingValue() or the protected-kinds logic decides.
+   */
   function entryElements(entry) {
     var els = [];
     if (entry.el) els.push(entry.el);
     if (entry.highlightEl) els.push(entry.highlightEl);
     if (entry.elements) els = els.concat(entry.elements);
     if (entry.monthEl) els.push(entry.monthEl);
+    if (entry.dayEl) els.push(entry.dayEl);
     if (entry.yearEl) els.push(entry.yearEl);
     if (entry.maskedEl) els.push(entry.maskedEl);
     if (entry.button) els.push(entry.button);
+    if (entry.buttons) els = els.concat(entry.buttons);
+    if (entry.boxes) els = els.concat(entry.boxes);
     if (entry.input) els.push(entry.input);
     return els;
   }
@@ -330,12 +373,19 @@
   // Two independent signals decide "this predates our own work, so it's real user input":
   //   1. a snapshot of every field's value taken BEFORE expansion/résumé/scanning even started
   //      (snapshotValuesByElement() below, keyed by the actual DOM element so it still lines up
-  //      even if the résumé attach reshuffled field order or ids);
-  //   2. a genuine, browser-trusted input/change event on that element at ANY point during this
-  //      run (installUserInputTracker() below) — catches the operator typing into the form
+  //      even if the résumé attach reshuffled field order or ids). This is the signal that
+  //      catches the reviewer's own repro cases — a combobox/button-group already committed
+  //      before the fill ever started — and it works for every kind as long as entryElements()
+  //      above actually lists that kind's elements.
+  //   2. a genuine, browser-trusted input/change/CLICK event on that element at ANY point during
+  //      this run (installUserInputTracker() below) — catches the operator typing or clicking
   //      WHILE our own expand/résumé/settle steps are still running, a window the one-time
-  //      snapshot alone can't see into. Our own programmatic fills never set Event.isTrusted, so
-  //      this can never mistake our own write for the operator's.
+  //      snapshot alone can't see into. `click` matters for the widgets this build adds that are
+  //      driven purely by clicks and never fire input/change at all (button-group's Yes/No
+  //      buttons, a wd-dropdown's own opener button). Our own programmatic fills never set
+  //      Event.isTrusted (scanner.js drives every one of its own clicks via `.click()` or a
+  //      dispatched event, never real input hardware), so this can never mistake our own write for
+  //      the operator's.
   // ---------------------------------------------------------------------
 
   /** element -> its value at the moment this was taken (see getCurrentValue's own shape). */
@@ -356,7 +406,9 @@
   var userTouchedElements = (typeof WeakSet !== 'undefined') ? new WeakSet() : null;
   var userInputTrackerInstalled = false;
 
-  /** Records every element that gets a real (isTrusted) input/change event while installed. */
+  /** Records every element that gets a real (isTrusted) input/change/click event while installed —
+   * `click` is what makes this apply to button-group/wd-dropdown-opener widgets, which never fire
+   * input/change at all (see the doc comment above). */
   function installUserInputTracker(doc) {
     if (userInputTrackerInstalled || !userTouchedElements) return function () {};
     userInputTrackerInstalled = true;
@@ -366,19 +418,21 @@
     }
     doc.addEventListener('input', onUserInput, true);
     doc.addEventListener('change', onUserInput, true);
+    doc.addEventListener('click', onUserInput, true);
     return function removeUserInputTracker() {
       doc.removeEventListener('input', onUserInput, true);
       doc.removeEventListener('change', onUserInput, true);
+      doc.removeEventListener('click', onUserInput, true);
       userInputTrackerInstalled = false;
     };
   }
 
-  /** True if `entry` held a value before our own résumé attach, or the operator typed into it. */
+  /** True if `entry` held a value before our own résumé attach, or the operator typed/clicked into it. */
   function isProtectedByPriorUserActivity(entry, preResumeValues) {
     var els = entryElements(entry);
     for (var i = 0; i < els.length; i++) {
       if (userTouchedElements && userTouchedElements.has(els[i])) return true;
-      if (preResumeValues && preResumeValues.has(els[i]) && isMeaningfulExistingValue(preResumeValues.get(els[i]))) return true;
+      if (preResumeValues && preResumeValues.has(els[i]) && isMeaningfulExistingValue(preResumeValues.get(els[i]), entry)) return true;
     }
     return false;
   }
@@ -541,21 +595,36 @@
       var isMultiValue = Array.isArray(fill.values) && fill.values.length > 1 && entry.kind === 'wd-prompt';
       var fillValue = (Array.isArray(fill.values) && fill.values.length) ? fill.values : fill.value;
 
-      // Never overwrite the user: a non-empty existing value that (a) predates our own résumé
-      // attach or was typed by the operator at any point during this run — see
-      // isProtectedByPriorUserActivity()'s doc comment — and (b) differs from what we're about
-      // to write, is left exactly as it was. A value that only appeared AFTER our own résumé
-      // attach (an ATS's own, possibly wrong, résumé parse) is deliberately NOT protected.
-      if (USER_VALUE_PROTECTED_KINDS[entry.kind] &&
-          isMeaningfulExistingValue(priorValues[fill.id]) &&
+      // Never overwrite the user (every widget kind — reviewer round 4): a non-empty, non-
+      // placeholder existing value that (a) predates our own résumé attach or was typed/clicked
+      // by the operator at any point during this run — see isProtectedByPriorUserActivity()'s doc
+      // comment — and (b) differs from what we're about to write, is left exactly as it was. A
+      // value that only appeared AFTER our own résumé attach (an ATS's own, possibly wrong,
+      // résumé parse) is deliberately NOT protected. `ctx.bypassProtection[fill.id]` is the one
+      // escape hatch: the panel's "Replace kept values with my profile" action (replaceKeptValues()
+      // below) re-runs THIS SAME step() for a handful of fields the operator explicitly ticked,
+      // and ticking the box + clicking that button IS the operator's own instruction to overwrite
+      // what's there — everything else about the guarded fill (timeout, highlight, priorValues/
+      // undo, the post-fill verify sweep) still applies to it exactly like any other fill.
+      if (!(ctx.bypassProtection && ctx.bypassProtection[fill.id]) &&
+          isMeaningfulExistingValue(priorValues[fill.id], entry) &&
           isProtectedByPriorUserActivity(entry, ctx.preResumeValues) &&
           !isSameValue(priorValues[fill.id], fillValue)) {
+        var keptPageValue = priorValues[fill.id];
         delete priorValues[fill.id]; // nothing was written — nothing for Undo to restore
         var keepTargets = ApplyPilotScanner.getHighlightTargets(entry);
         for (var kt = 0; kt < keepTargets.length; kt++) highlight(keepTargets[kt], 'skipped', 'kept your value');
         needsYou.push({
           id: fill.id, label: label, reason: 'kept your value',
-          status: 'kept_value', category: 'kept_value', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+          status: 'kept_value', category: 'kept_value', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill),
+          // Item 2 (reviewer round 4), "Replace kept values with my profile" — PANEL-ONLY: shown
+          // side by side in the panel so the operator can decide whether the page's own value is
+          // actually right. Never exported — sidepanel.js's reportRow() copies fields from an
+          // explicit allow-list that does not include these two, so they can never reach the
+          // fill-report JSON (see "Export fill report" in README.md).
+          pageValue: (keptPageValue == null ? '' : String(keptPageValue)),
+          profileValue: (Array.isArray(fillValue) ? fillValue.join(', ') : (fillValue == null ? '' : String(fillValue))),
+          profileValues: (Array.isArray(fillValue) ? fillValue : null)
         });
         return step(i + 1);
       }
@@ -1212,6 +1281,8 @@
     if (currentPrepare && currentPrepare.run === run) {
       currentPrepare.removeShield();
       currentPrepare.removeUserInputTracker();
+      lastFieldsById = currentPrepare.fieldsById || null;
+      lastPreResumeValues = currentPrepare.preResumeValues || null;
       var state = currentPrepare.state;
       state.status = status;
       if (note) state.note = note;
@@ -1456,6 +1527,98 @@
       }
       return { ok: true };
     }, function (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // REPLACE KEPT VALUES WITH MY PROFILE (item 2, reviewer round 4) — the panel button next to a
+  // fill's "kept your value" rows. A field protected by "never overwrite the user" above (see
+  // that section's own doc comment) is often exactly right to leave alone — but Workday in
+  // particular prefills several fields from the operator's OWN ACCOUNT on earlier steps of a
+  // multi-step flow, and that account-level guess can be stale or simply wrong for THIS
+  // application. This lets the operator correct those deliberately, one tick at a time, rather
+  // than never being able to fix them at all.
+  //
+  // `items` is [{id, value, values}] — background.js's replaceKeptValuesForTab() reads the exact
+  // id/profileValue/profileValues off THIS TAB'S OWN STORED state (the same numbers the panel
+  // rendered next to each kept row — see applyFills() above), never anything freshly resolved or
+  // re-typed, so this can never silently apply a different value than what the operator saw and
+  // ticked.
+  //
+  // Reuses applyFills()/verifyAppliedFills() verbatim — same per-field timeout, highlight,
+  // priorValues/undo bookkeeping, and post-fill "didn't stick" verification every other fill
+  // already gets — with exactly one difference: ctx.bypassProtection marks these specific field
+  // ids so the "never overwrite the user" check (which would otherwise immediately re-protect the
+  // very value the operator just asked to replace) steps aside for them, and only them, for this
+  // one call.
+  // ---------------------------------------------------------------------
+  function replaceKeptValues(items) {
+    items = items || [];
+    if (!items.length) return Promise.resolve({ ok: false, error: 'Nothing selected to replace.' });
+    if (activeRun) return Promise.resolve({ ok: false, error: 'A fill is already running on this page — try again once it finishes.' });
+
+    // currentPrepare is null once a fill has finished (finishRun() clears it) — lastFieldsById/
+    // lastPreResumeValues are what survive that, see their own doc comment above.
+    var fieldsById = (currentPrepare && currentPrepare.fieldsById) || lastFieldsById || {};
+    var preResumeValues = (currentPrepare && currentPrepare.preResumeValues) || lastPreResumeValues || null;
+
+    runCounter++;
+    var run = { token: runCounter, cancelled: false };
+    activeRun = run; // blocks a concurrent normal fill / continuation check the same way a real run does
+
+    var bypass = {};
+    var fills = items.map(function (it) {
+      bypass[it.id] = true;
+      var hasValues = Array.isArray(it.values) && it.values.length > 0;
+      return {
+        id: it.id,
+        auto_fill: true,
+        value: hasValues ? it.values.join(', ') : String(it.value == null ? '' : it.value),
+        values: hasValues ? it.values : undefined,
+        reason: 'Replaced your kept value with your profile value',
+        profile_key: null,
+        source: 'profile',
+        draft: false
+      };
+    });
+
+    var applyCtx = {
+      isCancelled: function () { return run.cancelled; },
+      overBudget: function () { return false; }, // a handful of explicitly-ticked fields — no time budget
+      fieldTimeoutMs: DEFAULT_FIELD_TIMEOUT_MS,
+      preResumeValues: preResumeValues,
+      bypassProtection: bypass,
+      onProgress: function () {} // no live progress UI for this small, targeted action
+    };
+
+    return applyFills(fills, [], fieldsById, applyCtx).then(verifyAppliedFills).then(function (result) {
+      activeRun = null;
+      // Fold into whatever this frame already reported, WITHOUT resetting the visible summary —
+      // same patchReportedState() pattern insertCoverLetterDraft()/attachResumeNow() use above.
+      // Every ticked id is dropped from the OLD needsYou list regardless of outcome — whether it
+      // was replaced or failed to replace, it is no longer "kept"; its new outcome is already
+      // folded in via result.applied/result.failed/result.needsYou below.
+      var priorState = lastReportedState || freshState('done', Date.now());
+      var stillNeedsYou = (priorState.needsYou || []).filter(function (n) { return !bypass[n.id]; });
+      var factApplied = result.applied.filter(function (a) { return !a.draft; });
+      var draftApplied = result.applied.filter(function (a) { return a.draft; });
+      var mergedFilled = (priorState.filled || []).concat(factApplied);
+      var mergedDrafts = (priorState.drafts || []).concat(draftApplied);
+      var mergedNeedsYou = stillNeedsYou.concat(result.needsYou);
+      var mergedFailed = (priorState.failed || []).concat(result.failed);
+      patchReportedState({
+        status: 'done',
+        filled: mergedFilled, drafts: mergedDrafts, needsYou: mergedNeedsYou, failed: mergedFailed,
+        counts: {
+          filled: mergedFilled.length, drafts: mergedDrafts.length,
+          needsYou: mergedNeedsYou.length, failed: mergedFailed.length
+        },
+        undoAvailable: true
+      });
+      return { ok: true, applied: factApplied.length + draftApplied.length, failed: result.failed.length };
+    }, function (e) {
+      activeRun = null;
       return { ok: false, error: String(e && e.message ? e.message : e) };
     });
   }
@@ -1789,6 +1952,13 @@
       if (msg.type === 'READ_FIELDS_FOR_ANSWERS') {
         sendResponse({ ok: true, values: readFieldsForAnswers(msg.ids) });
         return false;
+      }
+      if (msg.type === 'APPLY_REPLACE_KEPT_VALUES') {
+        // "Replace kept values with my profile" — background.js's replaceKeptValuesForTab()
+        // routes here per frame, with `msg.items` already stripped to this frame's own local ids
+        // (see replaceKeptValues() above).
+        replaceKeptValues(msg.items).then(sendResponse);
+        return true; // async response
       }
       if (msg.type === 'FLASH_FIELD') {
         sendResponse({ ok: scrollToField(msg.id) });

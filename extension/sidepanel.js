@@ -345,6 +345,26 @@
     if (entry.source) reasonBits.push('source: ' + escapeHtml(entry.source));
     if (entry.profile_key) reasonBits.push(escapeHtml(entry.profile_key));
     if (reasonBits.length) html += '<div class="reason">' + reasonBits.join(' &middot; ') + '</div>';
+
+    // Item 2 (reviewer round 4), "Replace kept values with my profile": a kept_value row also
+    // carries the page's own current value and the profile value we would otherwise have written
+    // (content.js's applyFills() — see its own doc comment on "never overwrite the user"),
+    // PANEL-ONLY: reportRow()/buildFillReport() below (the fill-report export) copies fields from
+    // an explicit allow-list that does not include pageValue/profileValue, so none of this ever
+    // reaches the exported JSON. The checkbox only ever carries the qualified field id — the
+    // "Replace kept values with my profile" button re-reads the actual value to write back off
+    // this tab's OWN stored state (background.js's replaceKeptValuesForTab()), never off this
+    // checkbox, so nothing sent to the page here originates from this row's markup.
+    if (entry.status === 'kept_value' && entry.id && (entry.pageValue || entry.profileValue)) {
+      html += '<div class="kept-compare">' +
+        '<label class="kept-replace-check"><input type="checkbox" class="kept-replace-checkbox" data-kept-id="' +
+        escapeHtml(entry.id) + '"> Replace with your profile value</label>' +
+        '<div class="kept-value-line"><span class="kept-value-tag">On the page:</span> ' +
+        escapeHtml(entry.pageValue || '(empty)') + '</div>' +
+        '<div class="kept-value-line"><span class="kept-value-tag">Your profile:</span> ' +
+        escapeHtml(entry.profileValue || '(no value)') + '</div>' +
+        '</div>';
+    }
     row.innerHTML = html;
     return row;
   }
@@ -381,6 +401,21 @@
       skipTitle.textContent = 'Need you (' + needsYou.length + ')';
       resultsBox.appendChild(skipTitle);
       needsYou.forEach(function (s) { resultsBox.appendChild(buildRow(s, 'skipped', false)); });
+
+      // Item 2 (reviewer round 4): "Replace kept values with my profile" — only shown when this
+      // fill actually kept at least one value (see buildRow()'s own kept-value compare block
+      // above for the per-row checkbox). One shared bar for the whole list rather than a button
+      // per row, so replacing several at once is one click.
+      var keptCount = needsYou.filter(function (s) { return s.status === 'kept_value'; }).length;
+      if (keptCount) {
+        var replaceBar = document.createElement('div');
+        replaceBar.className = 'kept-replace-bar';
+        replaceBar.innerHTML =
+          '<span class="kept-replace-count">0 of ' + keptCount + ' selected</span>' +
+          '<button type="button" class="secondary" data-action="replace-kept" disabled>' +
+          'Replace kept values with my profile</button>';
+        resultsBox.appendChild(replaceBar);
+      }
 
       // A single, once-per-render nudge: only when drafts are off (the operator's own Settings
       // toggle, a LOCAL-ONLY preference read directly from storage) AND at least one "need
@@ -830,9 +865,33 @@
     secret_guard: 1, unresolved: 1, other: 1, kept_value: 1, didnt_stick: 1, timed_out: 1,
     no_match: 1, cancelled: 1, time_budget: 1, field_missing: 1
   };
+
+  /** host + path only — NEVER the query string or hash, which on a real ATS can carry a
+   * one-time/identifying token (Greenhouse's own `validityToken=…`, iCIMS's `hashed=…` id, ...).
+   * Shared by the page field (buildFillReport() below) and the per-row frame field (reportRow()
+   * right below) so the two can never drift apart. */
+  function hostAndPath(url) {
+    var host = '', path = '';
+    try {
+      var u = new URL(url || '');
+      host = u.host;
+      path = u.pathname;
+    } catch (e) {
+      // no valid url at all — host/path stay empty rather than throwing
+    }
+    return { host: host, path: path };
+  }
+
   function reportRow(entry) {
+    // Reviewer round 4, item 3: `entry.frame` is `{frameId, url}` (background.js's
+    // applyFrameReport() — the url is that frame's own last-reported, FULL url, query string and
+    // all). Stripped to host+path here, at the export boundary, the same way the page field is —
+    // the panel-visible state (and the "click a row to jump to it" feature) keeps the full frame
+    // object untouched; only what leaves the machine in this file is narrowed.
+    var frameHostPath = entry.frame ? hostAndPath(entry.frame.url) : null;
+    var frame = entry.frame ? { frameId: entry.frame.frameId, host: frameHostPath.host, path: frameHostPath.path } : null;
     return {
-      frame: entry.frame || null,
+      frame: frame,
       label: entry.label || '',
       tag: entry.tag || '',
       widget: entry.widget || '',
@@ -846,16 +905,8 @@
   }
 
   function buildFillReport(state) {
-    var host = '', path = '';
-    try {
-      var u = new URL(state.url || '');
-      host = u.host;
-      path = u.pathname;
-    } catch (e) {
-      // a state with no valid url at all — page/host stay empty rather than throwing
-    }
     return {
-      page: { host: host, path: path },
+      page: hostAndPath(state.url),
       counts: state.counts || {},
       couldNotRead: state.couldNotRead || 0,
       skippedFrames: state.skippedFrames || 0,
@@ -1333,10 +1384,65 @@
   });
   resultsBox.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    // A kept_value row's own checkbox (see buildRow()'s "Replace kept values with my profile"
+    // block below) is a real nested interactive control now — let it handle its own Enter/Space
+    // (a checkbox's native Space-toggle) rather than this row-level "jump to field" shortcut
+    // stealing the keystroke via preventDefault().
+    if (e.target && e.target.closest && e.target.closest('input, button, a, select, textarea')) return;
     var row = e.target.closest('[data-field-id]');
     if (!row) return;
     e.preventDefault();
     scrollToRow(row);
+  });
+
+  // ---------------------------------------------------------------------
+  // REPLACE KEPT VALUES WITH MY PROFILE (item 2, reviewer round 4). Two delegated listeners, same
+  // "resultsBox's contents are fully replaced on every render" reasoning as REVIEW ROWS above:
+  // one keeps the "N of M selected" count/button-enabled state in sync with the checkboxes, the
+  // other does the actual replace on a click of the shared button. The value to write for each
+  // ticked row is never read off the checkbox/DOM here — only the qualified field id is; the
+  // actual value comes back off this tab's own stored state, server-side (see
+  // background.js's replaceKeptValuesForTab()), so this can never send a different value than the
+  // one already showing next to that checkbox.
+  // ---------------------------------------------------------------------
+  function updateKeptReplaceBar() {
+    var bar = resultsBox.querySelector('.kept-replace-bar');
+    if (!bar) return;
+    var total = resultsBox.querySelectorAll('.kept-replace-checkbox').length;
+    var checked = resultsBox.querySelectorAll('.kept-replace-checkbox:checked').length;
+    var countEl = bar.querySelector('.kept-replace-count');
+    var btn = bar.querySelector('[data-action="replace-kept"]');
+    if (countEl) countEl.textContent = checked + ' of ' + total + ' selected';
+    if (btn) btn.disabled = checked === 0;
+  }
+  resultsBox.addEventListener('change', function (e) {
+    if (e.target && e.target.classList && e.target.classList.contains('kept-replace-checkbox')) {
+      updateKeptReplaceBar();
+    }
+  });
+  resultsBox.addEventListener('click', async function (e) {
+    var btn = e.target.closest('[data-action="replace-kept"]');
+    if (!btn || btn.disabled || activeTabId == null) return;
+    var ids = Array.prototype.map.call(
+      resultsBox.querySelectorAll('.kept-replace-checkbox:checked'),
+      function (cb) { return cb.dataset.keptId; }
+    ).filter(Boolean);
+    if (!ids.length) return;
+    var tabId = activeTabId;
+    var originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Replacing…';
+    try {
+      var resp = await chrome.runtime.sendMessage({ type: 'REPLACE_KEPT_VALUES', tabId: tabId, ids: ids });
+      if (!resp || !resp.ok) {
+        setStatus((resp && (resp.detail || resp.message || resp.error)) || 'Could not replace the selected values.', true);
+      }
+      await renderForTab(tabId);
+    } catch (err) {
+      setStatus('Could not replace the selected values: ' + (err && err.message ? err.message : err), true);
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
   });
 
   optionsBtn.addEventListener('click', function () {
