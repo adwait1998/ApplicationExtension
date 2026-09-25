@@ -155,6 +155,17 @@ def _flatten_skills(profile: dict, limit: int = MAX_SKILLS) -> list[str]:
     return out[:limit]
 
 
+_PAREN_RE = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
+
+
+def _skill_search_term(skill: str) -> str:
+    """What to TYPE into a skills search box: "React (basic understanding)"
+    searches for "React" — the qualifier is for a human reader and matches
+    no skill tag. The joined text value (for a plain text field) keeps the
+    qualifier, so nothing is overstated there."""
+    return _PAREN_RE.sub("", skill).strip(" ,;-") or skill
+
+
 def _match_skills(field: FieldDescriptor, haystack: str, profile: dict) -> FillResult | SkipResult | None:
     if not _SKILLS_LABEL_RE.search(haystack):
         return None
@@ -169,7 +180,7 @@ def _match_skills(field: FieldDescriptor, haystack: str, profile: dict) -> FillR
     return FillResult(
         id=field.id,
         value=", ".join(skills),
-        values=list(skills),
+        values=_dedupe_ci(_skill_search_term(x) for x in skills),
         source="deterministic",
         profile_key="skills_boundary",
         confidence=0.9,
@@ -241,6 +252,60 @@ def _split_name(full_name: str) -> tuple[str, str]:
     return parts[0], " ".join(parts[1:])
 
 
+def _dedupe_ci(items) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        k = item.lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(item)
+    return out
+
+
+# "When can you start?" / "Earliest start date" -> the profile's own
+# availability. Deliberately strict: a bare "Start Date" is a work-history
+# or education date (the structured tier's job) and must never receive
+# "Immediately"; fields inside a numbered repeating section are skipped for
+# the same reason.
+_START_AVAILABILITY_RE = re.compile(
+    r"\b(earliest|available|availability|desired|expected|potential|anticipated|preferred|possible|proposed)"
+    r"\s+(start(ing)?|join(ing)?)\s+date\b"
+    r"|\bwhen\s+(can|could|would|are)\s+you\s+(start|begin|join|be\s+available)\b"
+    r"|\bavailab\w+\s+to\s+(start|begin|join)\b"
+    r"|\bdate\s+(you\s+are\s+|you're\s+)?available\b"
+    r"|\bstart\s+availability\b",
+    re.I,
+)
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _match_start_availability(field: FieldDescriptor, haystack: str, profile: dict) -> FillResult | SkipResult | None:
+    if field.section_index is not None or not _START_AVAILABILITY_RE.search(haystack):
+        return None
+    value = value_for_key("availability.earliest_start_date", profile)
+    if not value:
+        return None  # not an attestation: lower tiers / the human may answer
+    ftype = (field.type or "").strip().lower()
+    if ftype in ("date", "month") or (field.widget or "").startswith("wd-date"):
+        if not _ISO_DATE_RE.match(value.strip()):
+            return SkipResult(
+                id=field.id,
+                source="deterministic",
+                reason=f"this start-date field needs a calendar date; your profile says '{value}' — pick one yourself",
+                auto_fill=False,
+            )
+    return FillResult(
+        id=field.id,
+        value=value,
+        source="deterministic",
+        profile_key="availability.earliest_start_date",
+        confidence=0.9,
+        auto_fill=True,
+        reason="your earliest start date",
+    )
+
+
 def value_for_key(key: str, profile: dict) -> str | None:
     """Resolve a profile path (optionally suffixed ``#first``/``#last``) to
     a string value, or None if unset/blank."""
@@ -285,6 +350,10 @@ def match(field: FieldDescriptor, profile: dict) -> FillResult | SkipResult | No
     skills_result = _match_skills(field, haystack, profile)
     if skills_result is not None:
         return skills_result
+
+    start = _match_start_availability(field, haystack, profile)
+    if start is not None:
+        return start
 
     autocomplete = (field.autocomplete or "").strip().lower()
     if autocomplete:
