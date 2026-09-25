@@ -1904,6 +1904,23 @@ pending.push((async () => {
     Scanner.isChoiceButtonSafe(noFormYes, noFormContainer) === false);
 })();
 
+// --- matchCityStateOption: direct unit checks (edge cases the end-to-end combobox fixtures
+//     below don't otherwise exercise) -------------------------------------------------------
+(() => {
+  const CATALOG = ['Seattle, Washington, United States', 'Seattle Hill-Silver Firs, Washington, United States',
+    'South Seattle, Washington, United States', 'Seattle Bar, Oregon, United States'];
+  expect('matchCityStateOption: exact city+state resolves uniquely, never a same-state neighbour that merely contains the word',
+    Scanner.matchCityStateOption('Seattle, Washington', CATALOG) === 0);
+  expect('matchCityStateOption: a 2-letter state code resolves the same option as the full name',
+    Scanner.matchCityStateOption('Seattle, WA', CATALOG) === 0);
+  expect('matchCityStateOption: a plain value with no comma at all is never mistaken for "City, State" (-1, not a crash)',
+    Scanner.matchCityStateOption('Seattle', CATALOG) === -1);
+  expect('matchCityStateOption: a comma-bearing value whose second part is not a real US state never unlocks this tier',
+    Scanner.matchCityStateOption('Seattle, Mars', CATALOG) === -1);
+  expect('matchCityStateOption: wrong state for an otherwise-matching city -> -1, never guesses the city alone',
+    Scanner.matchCityStateOption('Seattle, Oregon', CATALOG) === -1);
+})();
+
 // --- combobox / button-group / Lever-location: async fill + verify behavior, run STRICTLY
 //     SEQUENTIALLY (same reasoning as the Workday dropdown/prompt block above: shared timers
 //     and MutationObservers on one document behave most predictably one step at a time). -----
@@ -1981,6 +1998,92 @@ pending.push((async () => {
     const ok = await Scanner.applyFill(entry, 'Austin');
     expect('generic ARIA combobox (opened via ArrowDown, no "Toggle flyout" button) filled and verified via aria-activedescendant',
       ok === true && Scanner.getComboboxCommittedValue(entry) === 'Austin');
+  }
+
+  // Looks a scanned combobox field up by its OWN input element rather than by label text --
+  // several fixtures on this page are deliberately labelled just "Country" (the phone-country
+  // widget matches the REAL Greenhouse markup, which carries no distinguishing label of its
+  // own beyond "Country" -- see gh_phone_country_label), so fieldByLabel() alone would resolve
+  // to whichever one happens to scan first.
+  const fieldForInputId = id => {
+    const el = byId(id);
+    return scanned.fields.find(f => { const e = scanned.registry[f.id]; return e && e.input === el; });
+  };
+
+  // ---- combobox: Greenhouse phone "Country" (dial-code widget) ----
+  // Ground truth (live probe, 2026-09-24, job-boards.greenhouse.io/gitlab and /twilio): once
+  // committed, the combobox's OWN chip collapses to just the dial code ("+1") -- ONLY the
+  // paired intl-tel-input button's aria-label still names the country. Before this fix,
+  // verifyComboboxSelection compared the matched option text ("United States +1") against
+  // that bare "+1" chip and always reported "selection did not commit".
+  {
+    const field = fieldForInputId('gh_phone_country_input');
+    expect('phone Country combobox scanned as its own combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const itiBtn = byId('gh_phone_iti_button');
+    expect('fixture sanity: the paired intl-tel-input button starts with nothing selected',
+      itiBtn.getAttribute('aria-label') === 'Select country');
+
+    // "United" alone types down to a filtered set containing BOTH "United States +1" and
+    // "United Kingdom +44" -- ambiguous, so this also exercises the "among filtered options"
+    // reason enrichment (problem 3) with the real rendered option texts.
+    const okBad = await Scanner.applyFill(entry, 'United');
+    expect('phone Country combobox: "United" is ambiguous (States vs Kingdom) -> false, reason names the options it saw',
+      okBad === false && /saw: /.test(entry._lastReason) &&
+      /United States \+1/.test(entry._lastReason) && /United Kingdom \+44/.test(entry._lastReason));
+
+    const ok = await Scanner.applyFill(entry, 'United States');
+    expect('phone Country combobox: "United States" resolves against the rendered "United States +1" and reports success',
+      ok === true);
+    expect('phone Country combobox: the paired intl-tel-input button now names the committed country (not just its dial code)',
+      itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
+    expect('phone Country combobox: its OWN chip only ever shows the dial code, never the country name -- the real bug this guards against',
+      byId('gh_phone_country_value').querySelector('.select__single-value').textContent === '+1');
+  }
+
+  // ---- combobox: Greenhouse phone "Country", ALREADY showing the applicant's country ----
+  // Per the project brief: never overwrite an already-correct value. Proven here by asserting
+  // the mock's menu was never even opened, not just that the end state looks right.
+  {
+    const field = fieldForInputId('gh_phone_prefilled_country_input');
+    const entry = entryFor(field);
+    const itiBtn = byId('gh_phone_prefilled_iti_button');
+    expect('fixture sanity: the paired intl-tel-input button already names "United States" before any fill',
+      itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
+    const opensBefore = dom.window.__gh_phone_country_prefilled__.openCount();
+
+    const ok = await Scanner.applyFill(entry, 'United States');
+    expect('phone Country combobox already correct: reports success without being touched',
+      ok === true);
+    expect('phone Country combobox already correct: the menu was NEVER opened (never reopen/re-click an already-correct selection)',
+      dom.window.__gh_phone_country_prefilled__.openCount() === opensBefore);
+    expect('phone Country combobox already correct: the iti button label is unchanged',
+      itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
+  }
+
+  // ---- combobox: Greenhouse "Location (City)", geocoded "City, State, Country" catalog ----
+  // Ground truth (live probe, 2026-09-24, job-boards.greenhouse.io/twilio): typing "Seattle"
+  // also returns same-state near-misses ("Seattle Hill-Silver Firs", "South Seattle") that
+  // legitimately contain "Seattle" as a whole word -- matchCityStateOption must still resolve
+  // uniquely to the option whose OWN city segment is EXACTLY "Seattle".
+  {
+    const field = fieldByLabel('Location (City)*');
+    expect('Greenhouse Location (City) combobox scanned as a combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Seattle, Washington');
+    expect('Location (City) combobox: "City, State" resolves against "City, State, Country" options, never a same-state near-miss',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'Seattle, Washington, United States');
+  }
+
+  // ---- combobox: Location (City), two geocode results render identically -> never guess ----
+  {
+    const field = fieldByLabel('Location (City) duplicate*');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Seattle, Washington');
+    expect('Location (City) combobox: two identically-rendered options -> ambiguous, stays unfilled',
+      ok === false && Scanner.getComboboxCommittedValue(entry) === '');
+    expect('Location (City) ambiguous case: the reason still names the (repeated) options it saw',
+      /saw: /.test(entry._lastReason) && /Seattle, Washington, United States/.test(entry._lastReason));
   }
 
   // ---- Ashby Yes/No button groups: scoped to their OWN question ----

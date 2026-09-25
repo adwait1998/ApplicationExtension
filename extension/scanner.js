@@ -1667,7 +1667,7 @@
       return scrollRound(15, 0, texts.join('␟')).then(function () {
         if (idx === -1) {
           dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape', 27);
-          return { ok: false, reason: 'no confident match for "' + target + '" among dropdown options' };
+          return { ok: false, reason: reasonWithOptions('no confident match for "' + target + '" among dropdown options', texts) };
         }
 
         var matched = optionEls[idx];
@@ -2191,6 +2191,19 @@
   // widget kind so it is never scanned or filled as a text field again.
   // ---------------------------------------------------------------------
 
+  /** Appends up to 8 of the option texts a failed match actually saw, so a report shows WHY a
+   * fill was left rather than just THAT it was ('no confident match for "Yes" among filtered
+   * options (saw: "Yes, I am a US citizen", "Yes, I will need sponsorship", "No")' instead of
+   * a bare "no confident match"). Shared by every choice-shaped widget (combobox, button-group,
+   * checkbox-group, Workday dropdown). Purely the page's own furniture -- the options IT
+   * rendered, never anything the applicant typed or the profile holds -- so always safe to
+   * surface. A no-op (returns `reason` unchanged) when there is nothing to show. */
+  function reasonWithOptions(reason, optionTexts) {
+    var shown = (optionTexts || []).map(cleanText).filter(Boolean).slice(0, 8);
+    if (!shown.length) return reason;
+    return reason + ' (saw: ' + shown.map(function (t) { return JSON.stringify(t); }).join(', ') + ')';
+  }
+
   /** A single, unadorned mouse event -- ground truth: react-select's flyout toggles on
    * `mouseup`, never `click` (a bare click is preventDefault()'d by the button). */
   function dispatchMouseEvent(el, type) {
@@ -2327,11 +2340,54 @@
 
   function normEqText(a, b) { return cleanText(a).toLowerCase() === cleanText(b).toLowerCase(); }
 
+  /**
+   * Ground truth (live probe, 2026-09-24, job-boards.greenhouse.io/gitlab and /twilio): a
+   * phone number's "Country" combobox (`input.select__input#country`, role=combobox) is
+   * rendered inside the SAME `<fieldset>` as the phone number's own purely-visual
+   * intl-tel-input widget (`.iti`, with its `button.iti__selected-country` flag/dial-code
+   * control) -- the two mirror one selection. That fieldset-plus-`.iti__selected-country`
+   * shape is specific to this ONE widget: a plain "Country"/"Country of residence" combobox
+   * elsewhere on the same page sits in a fieldset with no such button, so this can never
+   * misfire on those. Bounded to the input's own fieldset so it can never reach into another
+   * field's phone widget either.
+   */
+  function pairedPhoneCountryButton(input) {
+    var fieldset = input.closest ? input.closest('fieldset') : null;
+    if (!fieldset) return null;
+    var btn = fieldset.querySelector('button.iti__selected-country');
+    return (btn && isVisible(btn)) ? btn : null;
+  }
+
+  /** The country NAME the paired intl-tel-input button currently reports as selected, or ''
+   * once none is set yet. Ground truth: unset reads `aria-label="Select country"`; committed
+   * reads `aria-label="Change country, selected United States (+1)"` -- the ONLY place this
+   * widget still renders the full country name once a country is picked (see
+   * verifyComboboxSelection below: the paired react-select's own single-value chip collapses
+   * to just the bare dial code, e.g. "+1", so it alone can never say WHICH country that is). */
+  function phoneCountrySelectedName(btn) {
+    var label = (btn && btn.getAttribute && btn.getAttribute('aria-label')) || '';
+    var m = /selected\s+(.+?)\s*\(\s*\+\d+\s*\)\s*$/i.exec(cleanText(label));
+    return m ? cleanText(m[1]) : '';
+  }
+
+  /** Strips a trailing " +<dial code>" off a phone-country OPTION's accessible text
+   * ("United States +1" -> "United States") for comparison against
+   * phoneCountrySelectedName()'s own parsed name. A no-op for any other option text (nothing
+   * to strip). */
+  function phoneCountryOptionName(text) {
+    return cleanText(String(text || '').replace(/\s*\+\d+\s*$/, ''));
+  }
+
   /** True only once `matchedText` shows up as a genuinely COMMITTED chip/aria-state AND the
    * search input itself is empty — leftover search text sitting in the input is explicitly
    * NOT a commit (react-select drops it on blur; see the project brief). */
   function verifyComboboxSelection(entry, matchedText) {
     if (cleanText(entry.input.value || '')) return false;
+    var phoneBtn = pairedPhoneCountryButton(entry.input);
+    if (phoneBtn) {
+      var selectedName = phoneCountrySelectedName(phoneBtn);
+      return !!selectedName && normEqText(selectedName, phoneCountryOptionName(matchedText));
+    }
     var chips = getComboboxChipTexts(entry);
     if (chips.length) {
       for (var i = 0; i < chips.length; i++) { if (normEqText(chips[i], matchedText)) return true; }
@@ -2429,9 +2485,25 @@
     var target = String(value == null ? '' : value).trim();
     if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
 
+    // Ground truth (live probe, 2026-09-24): a phone "Country" combobox's own committed chip
+    // never shows the country name (see verifyComboboxSelection) -- only its paired
+    // intl-tel-input button does -- so the ordinary chip-text "already" check just below can
+    // never recognise this widget already holds the applicant's country. Checked FIRST and
+    // unconditionally: never reopen/re-click an already-correct selection just because that
+    // generic check can't read it here.
+    var phoneBtn = pairedPhoneCountryButton(entry.input);
+    if (phoneBtn) {
+      var alreadyCountry = phoneCountrySelectedName(phoneBtn);
+      if (alreadyCountry && matchChoiceOption(target, [alreadyCountry]) === 0) {
+        return Promise.resolve({ ok: true, matchedText: alreadyCountry });
+      }
+    }
+
     var already = getComboboxChipTexts(entry);
     for (var ai = 0; ai < already.length; ai++) {
-      if (matchChoiceOption(target, [already[ai]]) === 0) return Promise.resolve({ ok: true, matchedText: already[ai] });
+      if (matchChoiceOption(target, [already[ai]]) === 0 || matchCityStateOption(target, [already[ai]]) === 0) {
+        return Promise.resolve({ ok: true, matchedText: already[ai] });
+      }
     }
 
     return openCombobox(entry, doc).then(function (menu) {
@@ -2454,12 +2526,13 @@
       function matchAndCommitOrFilter(els) {
         var texts = els.map(optionAccessibleText);
         var idx = matchChoiceOption(target, texts);
+        if (idx === -1) idx = matchCityStateOption(target, texts);
         if (idx !== -1) return commitComboboxOption(entry, menu, els, idx, doc);
 
         var query = comboboxFilterQuery(target);
         if (!query) {
           dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
-          return { ok: false, reason: 'no confident match for "' + target + '" among combobox options' };
+          return { ok: false, reason: reasonWithOptions('no confident match for "' + target + '" among combobox options', texts) };
         }
         setNativeValue(entry.input, query);
         return waitForComboboxFilterResults(entry, doc).then(function (found) {
@@ -2470,10 +2543,11 @@
           }
           var texts2 = found.els.map(optionAccessibleText);
           var idx2 = matchChoiceOption(target, texts2);
+          if (idx2 === -1) idx2 = matchCityStateOption(target, texts2);
           if (idx2 === -1) {
             dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
             setNativeValue(entry.input, '');
-            return { ok: false, reason: 'no confident match for "' + target + '" among filtered options' };
+            return { ok: false, reason: reasonWithOptions('no confident match for "' + target + '" among filtered options', texts2) };
           }
           return commitComboboxOption(entry, found.menu, found.els, idx2, doc);
         });
@@ -2639,7 +2713,7 @@
     var texts = entry.buttons.map(accessibleControlText);
     var idx = matchChoiceOption(target, texts);
     if (idx === -1) {
-      return Promise.resolve({ ok: false, reason: 'no confident match for "' + target + '" among button options' });
+      return Promise.resolve({ ok: false, reason: reasonWithOptions('no confident match for "' + target + '" among button options', texts) });
     }
     var button = entry.buttons[idx];
     if (!isChoiceButtonSafe(button, entry.container, texts)) {
@@ -2745,19 +2819,22 @@
    * multi-value rule. */
   function applyCheckboxGroupValue(entry, value) {
     var elements = entry.elements;
+    var labels = elements.map(function (e) { return getLabel(e); });
     if (Array.isArray(value)) {
       var anyOk = false;
       var failedTerms = [];
       for (var i = 0; i < value.length; i++) {
         if (setCheckboxGroupOne(elements, value[i])) anyOk = true; else failedTerms.push(value[i]);
       }
-      entry._lastReason = failedTerms.length ? ('no confident match for: ' + failedTerms.join(', ')) : '';
+      entry._lastReason = failedTerms.length
+        ? reasonWithOptions('no confident match for: ' + failedTerms.join(', '), labels)
+        : '';
       return anyOk;
     }
     var single = String(value == null ? '' : value).trim();
     if (!single) { entry._lastReason = 'empty value'; return false; }
     var ok = setCheckboxGroupOne(elements, single);
-    entry._lastReason = ok ? '' : ('no confident match for "' + single + '" among checkbox options');
+    entry._lastReason = ok ? '' : reasonWithOptions('no confident match for "' + single + '" among checkbox options', labels);
     return ok;
   }
 
@@ -2873,6 +2950,44 @@
     if (code) out.push(code);
     if (name) out.push(name);
     return out;
+  }
+
+  /**
+   * For a "City, State" (or "City, State, Country") value against a GENERIC combobox's own
+   * rendered option texts -- e.g. Greenhouse's "Location (City)" react-select field, whose
+   * geocoded options render as "Seattle, Washington, United States" (live probe, 2026-09-24,
+   * job-boards.greenhouse.io/twilio): the ONE option whose OWN city segment EXACTLY equals the
+   * target city AND whose state segment matches (full name or 2-letter code, via the same US
+   * state table leverStateVariants already uses for Lever's own dedicated location widget).
+   *
+   * Deliberately an EXACT per-segment comparison (via the same splitCityState() used to parse
+   * `target`), never a word-boundary "contains" test: the real catalog that motivated this
+   * (job-boards.greenhouse.io/twilio, typing "Seattle") returns "Seattle Hill-Silver Firs,
+   * Washington, United States" and "South Seattle, Washington, United States" ALONGSIDE
+   * "Seattle, Washington, United States" -- all three contain "Seattle" as a whole word AND
+   * "Washington" as the state, so a word-boundary test would wrongly call plain "Seattle,
+   * Washington" ambiguous across all of them. Comparing each option's own FIRST comma-segment
+   * for exact equality tells the actual city "Seattle" apart from a same-state neighbourhood
+   * that merely contains it.
+   *
+   * Returns -1 (leave it, never guess) when `value` isn't recognisably "City, <a real US
+   * state>" at all, when no option's city+state segments match, or when more than one does.
+   */
+  function matchCityStateOption(target, optionTexts) {
+    var parts = splitCityState(target);
+    if (!parts.city || !parts.state) return -1;
+    var cityNorm = cleanText(parts.city).toLowerCase();
+    var stateNorm = cleanText(parts.state).toLowerCase();
+    if (!US_STATE_NAME_TO_CODE[stateNorm] && !US_STATE_CODE_TO_NAME[stateNorm]) return -1;
+    var variants = leverStateVariants(parts.state);
+    var matches = [];
+    for (var i = 0; i < optionTexts.length; i++) {
+      var optParts = splitCityState(optionTexts[i]);
+      if (cleanText(optParts.city).toLowerCase() !== cityNorm) continue;
+      var optState = cleanText(optParts.state).toLowerCase();
+      if (variants.indexOf(optState) !== -1) matches.push(i);
+    }
+    return matches.length === 1 ? matches[0] : -1;
   }
 
   function isLeverLocationRowSafe(el, resultsContainer) {
@@ -4390,6 +4505,11 @@
     getLeverLocationLabel: getLeverLocationLabel,
     extractLocationName: extractLocationName,
     splitCityState: splitCityState,
-    fillLeverLocation: fillLeverLocation
+    fillLeverLocation: fillLeverLocation,
+    reasonWithOptions: reasonWithOptions,
+    pairedPhoneCountryButton: pairedPhoneCountryButton,
+    phoneCountrySelectedName: phoneCountrySelectedName,
+    phoneCountryOptionName: phoneCountryOptionName,
+    matchCityStateOption: matchCityStateOption
   };
 });
