@@ -42,7 +42,7 @@ def test_load_settings_reads_persisted_values(tmp_path):
         encoding="utf-8",
     )
     assert ext_settings.load_settings(tmp_path) == {
-        "answers_enabled": False, "drafts_enabled": True, "max_drafts": 3,
+        "answers_enabled": False, "drafts_enabled": True, "max_drafts": 3, "cloud_llm_allowed": False,
     }
 
 
@@ -71,7 +71,7 @@ def test_load_settings_non_dict_json_degrades_to_defaults(tmp_path):
 
 def test_save_settings_writes_and_returns_merged_dict(tmp_path):
     out = ext_settings.save_settings(tmp_path, {"drafts_enabled": True})
-    assert out == {"answers_enabled": True, "drafts_enabled": True, "max_drafts": 5}
+    assert out == {"answers_enabled": True, "drafts_enabled": True, "max_drafts": 5, "cloud_llm_allowed": False}
     on_disk = json.loads((tmp_path / "extension_settings.json").read_text(encoding="utf-8"))
     assert on_disk == out
 
@@ -79,7 +79,7 @@ def test_save_settings_writes_and_returns_merged_dict(tmp_path):
 def test_save_settings_merges_over_previous_save(tmp_path):
     ext_settings.save_settings(tmp_path, {"answers_enabled": False})
     out = ext_settings.save_settings(tmp_path, {"max_drafts": 9})
-    assert out == {"answers_enabled": False, "drafts_enabled": False, "max_drafts": 9}
+    assert out == {"answers_enabled": False, "drafts_enabled": False, "max_drafts": 9, "cloud_llm_allowed": False}
 
 
 @pytest.mark.parametrize("updates", [
@@ -122,7 +122,7 @@ def test_effective_settings_no_app_dir_no_env_is_pure_defaults():
 def test_effective_settings_uses_persisted_file_when_no_env(tmp_path):
     ext_settings.save_settings(tmp_path, {"answers_enabled": False, "max_drafts": 2})
     assert ext_settings.effective_settings(tmp_path) == {
-        "answers_enabled": False, "drafts_enabled": False, "max_drafts": 2,
+        "answers_enabled": False, "drafts_enabled": False, "max_drafts": 2, "cloud_llm_allowed": False,
     }
 
 

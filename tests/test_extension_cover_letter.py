@@ -97,6 +97,7 @@ def test_no_job_description_is_an_honest_error():
 def _client(tmp_path, monkeypatch, available=True):
     (tmp_path / "profile.json").write_text(json.dumps(PROFILE), encoding="utf-8")
     monkeypatch.setattr(llm_util, "llm_available", lambda: (available, "fake"))
+    monkeypatch.setenv("APPLYPILOT_CLOUD_LLM", "1")  # "fake" is not a local model: opted in
 
     class Fake:
         def chat(self, messages, **kw):

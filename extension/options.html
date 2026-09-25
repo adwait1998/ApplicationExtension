@@ -326,7 +326,7 @@
 </head>
 <body>
   <h1>ApplyPilot Copilot</h1>
-  <p class="sub">Connect the extension to your local ApplyPilot service. Nothing here ever leaves your machine.</p>
+  <p class="sub">Connect the extension to your local ApplyPilot service. It runs on this computer and your profile stays here.</p>
 
   <div class="card">
     <label for="serviceUrl">Service URL</label>
@@ -365,6 +365,13 @@
     </div>
     <div class="hint draft-note">Drafts are written by an AI model, not pulled from your profile — always review a drafted answer before you submit.</div>
     <div class="hint warn" id="smartFillLlmWarning" style="display:none;">No AI model available — drafts will be skipped.</div>
+
+    <div class="hint" id="smartFillModelLine" style="margin-top:12px;">AI model: checking…</div>
+    <div class="checkbox-line" style="margin-top:8px;">
+      <input type="checkbox" id="smartFillCloud">
+      <label for="smartFillCloud" style="margin:0;font-weight:600;">Allow AI features to use a model that isn't on this computer</label>
+    </div>
+    <div class="hint">When on, drafts, cover letters and the résumé import's AI step send the question and the relevant résumé text to that provider. When off, they only run with a model on this computer; everything else works either way.</div>
 
     <label for="smartFillMaxDrafts" style="margin-top:16px;">Max drafts per page</label>
     <input type="number" id="smartFillMaxDrafts" min="0" max="50" value="5" style="max-width:120px;">
@@ -408,7 +415,7 @@
       <span id="resumeFileLabelText">Choose file</span>
     </label>
     <input type="file" id="resumeFile" accept=".pdf,.docx,.txt" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
-    <div class="onboard-foot">Nothing leaves your machine. PDF, DOCX or TXT, up to 8&nbsp;MB.</div>
+    <div class="onboard-foot">Stored on this computer. Its AI step uses a model on this computer only, unless you allow another under Smart fill. PDF, DOCX or TXT, up to 8&nbsp;MB.</div>
     <div id="importStatus"></div>
   </div>
 

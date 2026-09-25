@@ -784,6 +784,7 @@ def test_import_resume_endpoint_requires_token(tmp_path):
 
 
 def test_import_resume_endpoint_returns_draft_and_provenance(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_CLOUD_LLM", "1")  # a configured cloud provider, opted in
     _patch_llm(monkeypatch)
     app, token = _disk_app(tmp_path)
     client = TestClient(app)
@@ -828,6 +829,7 @@ def test_import_resume_endpoint_degrades_without_llm(tmp_path, monkeypatch):
 
 
 def test_import_resume_endpoint_uses_claude_cli_when_no_provider_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLYPILOT_CLOUD_LLM", "1")  # a configured cloud provider, opted in
     # Bug 3, résumé-import side: no LLM_PROVIDER/API key set, but the
     # Claude Code CLI is "installed" (monkeypatched) -- the import should
     # use it automatically rather than degrading to a warning.

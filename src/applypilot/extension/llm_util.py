@@ -119,3 +119,61 @@ def llm_available() -> tuple[bool, str]:
         return True, "claude-cli"
 
     return False, ""
+
+
+# ---------------------------------------------------------------------------
+# Where the text goes. The extension used to say "nothing leaves your
+# machine" while its AI features could use a cloud model (Gemini/OpenAI
+# keys, the Claude CLI, or a non-localhost LLM_URL). A local model is used
+# freely; anything else needs the applicant's explicit opt-in.
+# ---------------------------------------------------------------------------
+
+_PROVIDER_LABELS = {
+    "gemini": "Google Gemini",
+    "openai": "OpenAI",
+    "claude-cli": "Anthropic Claude (via the Claude CLI)",
+    "remote-endpoint": "a remote model endpoint",
+    "local": "a model on this computer",
+}
+
+
+def _is_localhost(url: str) -> bool:
+    import urllib.parse
+
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
+def provider_info() -> dict:
+    """{"available", "provider", "label", "local"} — never raises, never spawns."""
+    ok, provider = llm_available()
+    if provider == "local" and not _is_localhost(os.environ.get("LLM_URL", "")):
+        provider = "remote-endpoint"
+    return {"available": ok, "provider": provider, "label": _PROVIDER_LABELS.get(provider, provider),
+            "local": provider == "local"}
+
+
+class CloudBlocked(RuntimeError):
+    """An AI feature would send text to a non-local model without opt-in."""
+
+
+# The directory whose extension_settings.json holds the opt-in. The service
+# sets it at startup (server.create_app); None reads defaults + env only.
+SETTINGS_DIR = None
+
+
+def cloud_block_reason(app_dir=None) -> str | None:
+    """Why an AI feature must not run right now, or None. Only a model that
+    is available, NOT on this computer, and not explicitly allowed blocks."""
+    info = provider_info()
+    if not info["available"] or info["local"]:
+        return None
+    from applypilot.extension import settings as ext_settings
+
+    if ext_settings.effective_settings(app_dir if app_dir is not None else SETTINGS_DIR).get("cloud_llm_allowed"):
+        return None
+    return (f"AI features would send text off this computer to {info['label']} — "
+            "allow that in Settings → Smart fill, or use a local model")

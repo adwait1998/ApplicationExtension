@@ -144,6 +144,7 @@ class SettingsIn(BaseModel):
     answers_enabled: bool | None = None
     drafts_enabled: bool | None = None
     max_drafts: int | None = None
+    cloud_llm_allowed: bool | None = None
 
 
 def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
@@ -345,6 +346,8 @@ def create_app(
     root = Path(root)
 
     token = get_or_create_token(app_dir)
+    # AI call sites read the cloud-LLM opt-in from this service's own settings.
+    llm_util.SETTINGS_DIR = app_dir
 
     if profile is not None:
         def _load_profile() -> dict:
@@ -414,12 +417,16 @@ def create_app(
 
     @app.get("/health")
     def health(_: None = Depends(_require_token)) -> dict:
-        llm_ok, llm_provider = llm_util.llm_available()
+        info = llm_util.provider_info()
         return {
             "status": "ok",
             "tiers_available": resolve.tiers_available(app_dir=app_dir),
-            "llm_available": llm_ok,
-            "llm_provider": llm_provider,
+            "llm_available": info["available"],
+            "llm_provider": info["provider"],
+            "llm_label": info["label"],
+            "llm_local": info["local"],
+            "cloud_llm_allowed": ext_settings.effective_settings(app_dir).get("cloud_llm_allowed", False),
+            "llm_blocked_reason": llm_util.cloud_block_reason(app_dir),
         }
 
     @app.post("/resolve")
@@ -465,6 +472,8 @@ def create_app(
             "answers_enabled": effective["answers_enabled"],
             "drafts_enabled": effective["drafts_enabled"],
             "max_drafts": effective["max_drafts"],
+            "cloud_llm_allowed": effective["cloud_llm_allowed"],
+            "llm": llm_util.provider_info(),
             # Which (if any) of the three are currently pinned by an env
             # var -- null means "not pinned, the persisted value above is
             # editable from here".
@@ -557,6 +566,9 @@ def create_app(
         ok, provider = llm_util.llm_available()
         if not ok:
             raise HTTPException(status_code=503, detail="no language model available for drafting")
+        blocked = llm_util.cloud_block_reason(app_dir)
+        if blocked:
+            raise HTTPException(status_code=403, detail=blocked)
         profile = _load_profile()
         job = job_context.job_context([u for u in body.urls if u][:6], page_text=body.page_text[:20000],
                                       db_path=app_dir / "applypilot.db")
