@@ -236,14 +236,14 @@ SCAN_JS = """() => {
   return { fields: res.fields, skippedFrames: res.skippedFrames || 0 };
 }"""
 
-FILL_JS = """async ([id, value, values]) => {
+FILL_JS = """async ([id, value, values, isCanary]) => {
   const entry = (window.__AP_REG || {})[id];
   if (!entry) return { ok: false, reason: 'no registry entry' };
   const v = (values && values.length && entry.kind === 'wd-prompt') ? values : value;
   let ok, detail = null;
   try {
     const r = await Promise.race([
-      Promise.resolve(ApplyPilotScanner.applyFill(entry, v)),
+      Promise.resolve(ApplyPilotScanner.applyFill(entry, v, { canary: !!isCanary })),
       new Promise(res => setTimeout(() => res({ ok: false, reason: 'timed out (12s)' }), 12000)),
     ]);
     ok = (r && typeof r === 'object') ? !!r.ok : !!r;
@@ -261,7 +261,9 @@ FILL_JS = """async ([id, value, values]) => {
   // answer"), is what _stuck() below judges a later re-read against.
   let committedText = null;
   try { committedText = (entry._committedText == null) ? null : String(entry._committedText); } catch (e) {}
-  return { ok, detail, readback: readback.slice(0, 200), committedText, kind: entry.kind };
+  let optionsSeen = null;
+  try { optionsSeen = entry._lastOptions ? Array.prototype.slice.call(entry._lastOptions, 0, 60) : null; } catch (e) {}
+  return { ok, detail, readback: readback.slice(0, 200), committedText, kind: entry.kind, optionsSeen };
 }"""
 
 # Interactive things on the page the scanner did NOT report as fields — the
@@ -468,10 +470,32 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
                 if not fill.get("auto_fill"):
                     continue
                 try:
-                    r = frame.evaluate(FILL_JS, [fill["id"], fill["value"], fill.get("values") or []])
+                    r = frame.evaluate(FILL_JS, [fill["id"], fill["value"], fill.get("values") or [],
+                                                 fill.get("source") == "canary"])
                 except Exception as e:
                     r = {"ok": False, "detail": f"evaluate: {str(e)[:120]}", "readback": ""}
                 results[fill["id"]] = (fill, r)
+            # Second, option-aware resolve (as content.js does): a choice that
+            # failed returns the options it saw; the service answers again with
+            # them, and only an answer that IS one of those options is applied.
+            by_id = {f["id"]: f for f in pass_fields}
+            retry = [dict(by_id[fid], options=r["optionsSeen"]) for fid, (_f, r) in results.items()
+                     if not r.get("ok") and r.get("optionsSeen") and fid in by_id]
+            if retry:
+                try:
+                    plan2 = resolve(port, token, page.url, retry)
+                except Exception:
+                    plan2 = {}
+                for fill in plan2.get("fills", []):
+                    seen = next((f["options"] for f in retry if f["id"] == fill["id"]), [])
+                    if not fill.get("auto_fill") or fill.get("value") not in seen:
+                        continue
+                    try:
+                        r = frame.evaluate(FILL_JS, [fill["id"], fill["value"], [], fill.get("source") == "canary"])
+                    except Exception as e:
+                        r = {"ok": False, "detail": f"evaluate: {str(e)[:120]}", "readback": ""}
+                    r["second_resolve"] = True
+                    results[fill["id"]] = (fill, r)
             frec["fill_s"] = round(frec.get("fill_s", 0) + time.time() - t2, 1)
             try:
                 settled = frame.evaluate(REREAD_JS, [fid for fid, (_f, r) in results.items() if r.get("ok")])
