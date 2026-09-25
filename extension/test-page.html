@@ -1224,14 +1224,20 @@
     <label class="ashby-application-form-input-checkbox-group-option-label" for="ashby_loc_la">Los Angeles, CA</label>
   </fieldset>
 
-  <!-- Lever: "Current location" type-ahead. Wrapped in ONE <label> that ALSO holds the
-       dropdown-results container and a "No location found..." status line -- exactly what
-       polluted the label in the real capture; getLeverLocationLabel() must stop before them. -->
-  <label id="lever_location_wrap">Current location<span aria-hidden="true">&#10033;</span>
-    <input type="text" id="lever_location_input" name="location" class="location-input" autocomplete="off">
-    <input type="hidden" id="lever_selected_location" name="selectedLocation">
-    <div class="location-suggestions-list" id="lever_location_results" style="display:none;"></div>
-    <div id="lever_location_status">No location found. Try entering a different location</div>
+  <!-- Lever: "Current location" type-ahead. Real shape (live-checked against
+       jobs.lever.co/palantir on 2026-09-24): the question text lives in its OWN
+       ".application-label" div, a SIBLING of ".application-field" (which holds the input,
+       the hidden commit target, AND the dropdown-results / "No location found" status text) --
+       both direct children of the wrapping <label>. getLeverLocationLabel() must read the
+       label div's own text, never the field div's polluting siblings. -->
+  <label id="lever_location_wrap">
+    <div class="application-label">Current location <span class="required" aria-hidden="true">&#10033;</span></div>
+    <div class="application-field">
+      <input type="text" id="lever_location_input" name="location" class="location-input" autocomplete="off">
+      <input type="hidden" id="lever_selected_location" name="selectedLocation">
+      <div class="location-suggestions-list" id="lever_location_results" style="display:none;"></div>
+      <div id="lever_location_status">No location found. Try entering a different location</div>
+    </div>
   </label>
 
   <!-- Lever: a "cards[<uuid>][field0]" checkbox group -- the real question text lives in

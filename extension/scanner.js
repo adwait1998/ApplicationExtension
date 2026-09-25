@@ -2763,19 +2763,37 @@
 
   // ---- Lever location type-ahead --------------------------------------------------------
 
-  // Ground truth (docs/research/live-captures-2026-09-24/structure-08/09-lever-f0.json):
-  //   <input type="text" id="location-input" name="location" class="location-input">
-  //   <input type="hidden" id="selected-location" name="selectedLocation">
-  // both wrapped in ONE <label> that ALSO contains the results dropdown / "No location found"
-  // status text -- a naive getLabel() on the input picks up all of that concatenated together.
+  // Ground truth (docs/research/live-captures-2026-09-24/structure-08/09-lever-f0.json, plus a
+  // live re-check of jobs.lever.co/palantir on 2026-09-24 that found the ACTUAL wrapper shape):
+  //   <label>
+  //     <div class="application-label">Current location <span class="required">✱</span></div>
+  //     <div class="application-field">
+  //       <input class="location-input" name="location" ...>
+  //       <input type="hidden" name="selectedLocation">
+  //       <div class="... dropdown-container">...results / "No location found" / loading...</div>
+  //     </div>
+  //   </label>
+  // The question text is NOT bare content directly inside the <label> (an earlier, simplified
+  // assumption had it that way) -- it lives in its own ".application-label" div, a SIBLING of
+  // the ".application-field" div holding the input and the results/status text. A naive
+  // getLabel() on the input concatenates all of that together, and so does a walk that merely
+  // stops at the first block-level child of <label> -- that first child IS the label div, whose
+  // OWN contents must be read, not skipped.
   var LEVER_STOP_TAGS = { UL: 1, OL: 1, DIV: 1, INPUT: 1, SELECT: 1, TEXTAREA: 1, SCRIPT: 1, STYLE: 1 };
 
-  /** The wrapping <label>'s own leading text/inline content ONLY, stopping at the first
-   * block-level/list/results container -- never the dropdown suggestions or status text Lever
-   * renders inside that same <label>. */
+  /** Prefers the wrapping <label>'s own ".application-label" child (Lever's real shape);
+   * falls back to the wrapping <label>'s leading text/inline content up to the first
+   * block-level/list/results container, for any other shape that puts the text as bare
+   * content instead. Either way, never the dropdown suggestions or status text Lever renders
+   * inside that same <label>. */
   function getLeverLocationLabel(input) {
     var wrap = input.closest ? input.closest('label') : null;
     if (!wrap) return getLabel(input);
+    var labelDiv = wrap.querySelector ? wrap.querySelector('.application-label') : null;
+    if (labelDiv) {
+      var ld = cleanText(labelDiv.textContent);
+      if (ld) return stripRequiredMarker(ld);
+    }
     var parts = [];
     for (var node = wrap.firstChild; node; node = node.nextSibling) {
       if (node.nodeType === 3) {
