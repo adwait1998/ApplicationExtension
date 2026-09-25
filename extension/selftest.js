@@ -64,6 +64,17 @@ if (!Scanner) {
   process.exit(1);
 }
 
+// capture.js leans on ApplyPilotScanner (getLabel/isVisible/findOpenShadowRoots) exactly like
+// content.js loads them together in a real page, so it must be eval'd into the SAME window
+// after scanner.js, not tested standalone.
+const captureSrc = fs.readFileSync(path.join(__dirname, 'capture.js'), 'utf8');
+dom.window.eval(captureSrc);
+const Capture = dom.window.ApplyPilotCapture;
+if (!Capture) {
+  console.error('capture.js did not attach ApplyPilotCapture to the window — aborting.');
+  process.exit(1);
+}
+
 const { fields, registry } = Scanner.scanFields(dom.window.document);
 
 console.log(`Scanned ${fields.length} field descriptor(s):\n`);
@@ -1143,6 +1154,25 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
     Scanner.degreeFamilyOf('BFA') === 'bachelor');
   expect('Workday degree family: "Master of Human-Computer Interaction" normalises to the master family (hyphen-tolerant)',
     Scanner.degreeFamilyOf('Master of Human-Computer Interaction') === 'master');
+
+  // Reviewer round 3: the degree-family step must apply the SAME "exactly one" rule as every
+  // other matchChoiceOption tier -- it must never pick the FIRST family member when a tenant
+  // lists several SPECIFIC degree titles (a live gap: "Bachelor of Design" was picking
+  // "Bachelor of Arts", and "MS"/"MA" were picking "Master of Arts" -- a false degree claim).
+  const SPECIFIC_BACHELOR_TITLES = ['Bachelor of Arts', 'Bachelor of Design (BDes)', 'Bachelor of Science'];
+  expect('Workday degree family, SEVERAL specific titles: "Bachelor of Design" still resolves to its OWN specific title, never the first ("Bachelor of Arts")',
+    mwdo('Bachelor of Design', SPECIFIC_BACHELOR_TITLES) === 1);
+  expect('matchChoiceOption has the SAME fix (shared matchDegreeFamily helper, not just the Workday-specific path)',
+    Scanner.matchChoiceOption('Bachelor of Design', SPECIFIC_BACHELOR_TITLES) === 1);
+
+  const SPECIFIC_MASTER_TITLES = ['Master of Arts', 'Master of Science', 'Master of Business Administration'];
+  expect('Workday degree family, SEVERAL specific titles: a bare "MS" acronym is -1, never the first ("Master of Arts") -- a false degree claim',
+    mwdo('MS', SPECIFIC_MASTER_TITLES) === -1);
+  expect('Workday degree family, SEVERAL specific titles: a bare "MA" acronym is ALSO -1 (every title starts with "Master", so "ma" cannot discriminate)',
+    mwdo('MA', SPECIFIC_MASTER_TITLES) === -1);
+
+  expect('Workday degree family: a GENERIC level list ("Bachelor\'s Degree"/"Master\'s Degree"/...) still resolves via the exactly-one-in-family tier (no regression)',
+    mwdo('Bachelor of Design', ["High School Diploma", "Associate's Degree", "Bachelor's Degree", "Master's Degree", 'Doctorate']) === 2);
 })();
 
 // --- matchWorkdayPromptOption: exact/acronym-only matching (skills), and the tie rule ------
@@ -1485,6 +1515,10 @@ pending.push((async () => {
     expect('checkbox-group: no confident match leaves the group completely untouched', okBad === false);
     expect('...the previously-checked answer is still checked (nothing was cleared by the failed attempt)',
       doc.getElementById('wd_disability_decline').checked === true);
+    // Reviewer round 3: the reason must NEVER quote the attempted (here, self-identification)
+    // value -- an exported fill report must not carry EEO/disability answers.
+    expect('wd-checkbox-group failure reason never quotes the attempted self-identification value',
+      !String(cgEntry._lastReason || '').includes('Something Unrelated Entirely'));
 
     const agreementCb = doc.getElementById('wd_agreement_checkbox');
     expect('agreementCheckbox is refused by the checkbox-group option guard even if somehow targeted directly',
@@ -1780,6 +1814,15 @@ pending.push((async () => {
 
   const okBad = Scanner.applyFill(ghEntry, 'Klingon');
   expect('checkbox-group: no confident match among the options -> false', okBad === false);
+  expect('checkbox-group failure reason never quotes the attempted value, only the options it saw',
+    !String(ghEntry._lastReason || '').includes('Klingon') && /saw: /.test(ghEntry._lastReason));
+
+  const okListBad = Scanner.applyFill(ghEntry, ['English', 'Klingon', 'Vulcan']);
+  expect('checkbox-group LIST value: the two unmatched terms never block the one that DOES match',
+    okListBad === true && doc.getElementById('gh_lang_en').checked === true);
+  expect('checkbox-group LIST failure reason reports a COUNT of unmatched terms, never the terms themselves',
+    /2 of 3/.test(ghEntry._lastReason) &&
+    !String(ghEntry._lastReason).includes('Klingon') && !String(ghEntry._lastReason).includes('Vulcan'));
 
   // Ambiguous negative control: "CA" contains-matches all three California cities.
   const ashby = cgFields.find(f => f.name === 'Mountain View, CA');
@@ -1867,6 +1910,47 @@ pending.push((async () => {
     Scanner.isChoiceButtonSafe(yesBtn, doc.getElementById('ashby_sponsor_entry')) === false);
   expect('isChoiceButtonSafe REFUSES null', Scanner.isChoiceButtonSafe(null, container) === false);
 
+  // Reviewer round 3: isChoiceButtonSelected must match "active"/"selected" as a whole class
+  // TOKEN (a real word-break, or the "_"/"-" a hashed CSS-module class glues pieces with),
+  // never a bare substring -- "_inactive_..."/"_interactive_..." must NOT read as selected.
+  const scratchBtn = doc.createElement('button');
+  scratchBtn.className = '_inactive_1234_56';
+  expect('isChoiceButtonSelected: a class containing "active" as part of "inactive" is NOT selected',
+    Scanner.isChoiceButtonSelected(scratchBtn) === false);
+  scratchBtn.className = '_interactive_1234_56';
+  expect('isChoiceButtonSelected: a class containing "active" as part of "interactive" is NOT selected either',
+    Scanner.isChoiceButtonSelected(scratchBtn) === false);
+  scratchBtn.className = '_option_1svni_32--selected_9xk2'; // the REAL Ashby hashed shape
+  expect('isChoiceButtonSelected: the real Ashby hashed "--selected_" class STILL matches (no regression)',
+    Scanner.isChoiceButtonSelected(scratchBtn) === true);
+  scratchBtn.className = 'active';
+  expect('isChoiceButtonSelected: a plain "active" class still matches', Scanner.isChoiceButtonSelected(scratchBtn) === true);
+
+  // Reviewer round 3: the radio-group dispatcher reason must never quote the attempted value
+  // either (an EEO/disability answer is exactly the kind of value that must never land in an
+  // exported report) -- only the radio group's own option LABELS (page furniture) are safe.
+  const radioA = doc.createElement('input');
+  radioA.type = 'radio';
+  radioA.name = 'scratch_radio_leak_test';
+  const radioLabelA = doc.createElement('label');
+  radioLabelA.appendChild(radioA);
+  radioLabelA.appendChild(doc.createTextNode('Yes'));
+  const radioB = doc.createElement('input');
+  radioB.type = 'radio';
+  radioB.name = 'scratch_radio_leak_test';
+  const radioLabelB = doc.createElement('label');
+  radioLabelB.appendChild(radioB);
+  radioLabelB.appendChild(doc.createTextNode('No'));
+  doc.body.appendChild(radioLabelA);
+  doc.body.appendChild(radioLabelB);
+  const radioEntry = { kind: 'radio-group', elements: [radioA, radioB] };
+  const radioOk = Scanner.applyFill(radioEntry, 'A Very Specific Unmatched Radio Value');
+  expect('radio-group: no confident match -> false', radioOk === false);
+  expect('radio-group failure reason never quotes the attempted value, only the options it saw',
+    !String(radioEntry._lastReason || '').includes('A Very Specific Unmatched Radio Value') && /saw: /.test(radioEntry._lastReason));
+  radioLabelA.remove();
+  radioLabelB.remove();
+
   const decoySubmit = doc.getElementById('ashby_decoy_submit');
   const decoyContainer = doc.getElementById('ashby_decoy_entry');
   expect('the decoy submit button really is type=submit (no type="" attribute -- the same HTML trap isAddAnotherButtonSafe guards against)',
@@ -1904,6 +1988,23 @@ pending.push((async () => {
     Scanner.isChoiceButtonSafe(noFormYes, noFormContainer) === false);
 })();
 
+// --- matchCityStateOption: direct unit checks (edge cases the end-to-end combobox fixtures
+//     below don't otherwise exercise) -------------------------------------------------------
+(() => {
+  const CATALOG = ['Seattle, Washington, United States', 'Seattle Hill-Silver Firs, Washington, United States',
+    'South Seattle, Washington, United States', 'Seattle Bar, Oregon, United States'];
+  expect('matchCityStateOption: exact city+state resolves uniquely, never a same-state neighbour that merely contains the word',
+    Scanner.matchCityStateOption('Seattle, Washington', CATALOG) === 0);
+  expect('matchCityStateOption: a 2-letter state code resolves the same option as the full name',
+    Scanner.matchCityStateOption('Seattle, WA', CATALOG) === 0);
+  expect('matchCityStateOption: a plain value with no comma at all is never mistaken for "City, State" (-1, not a crash)',
+    Scanner.matchCityStateOption('Seattle', CATALOG) === -1);
+  expect('matchCityStateOption: a comma-bearing value whose second part is not a real US state never unlocks this tier',
+    Scanner.matchCityStateOption('Seattle, Mars', CATALOG) === -1);
+  expect('matchCityStateOption: wrong state for an otherwise-matching city -> -1, never guesses the city alone',
+    Scanner.matchCityStateOption('Seattle, Oregon', CATALOG) === -1);
+})();
+
 // --- combobox / button-group / Lever-location: async fill + verify behavior, run STRICTLY
 //     SEQUENTIALLY (same reasoning as the Workday dropdown/prompt block above: shared timers
 //     and MutationObservers on one document behave most predictably one step at a time). -----
@@ -1937,6 +2038,8 @@ pending.push((async () => {
     const okBad = await Scanner.applyFill(entry, 'Atlantis');
     expect('Country combobox: no confident match -> false, the earlier commit is untouched',
       okBad === false && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
+    expect('Country combobox failure reason never quotes the attempted value ("Atlantis")',
+      !String(entry._lastReason || '').includes('Atlantis'));
   }
 
   // ---- combobox: ambiguous negative control (two rendered options both contain "Engineer") ----
@@ -1978,9 +2081,117 @@ pending.push((async () => {
   {
     const field = fieldByLabel('Preferred office');
     const entry = entryFor(field);
+    const input = byId('generic_combo_input');
+    const highlightOnly = byId('generic_combo_opt_2'); // "Remote" -- never actually chosen below
+
+    // Reviewer round 3, negative control FIRST: aria-activedescendant tracks the HIGHLIGHTED
+    // row during ArrowDown navigation per the real ARIA combobox pattern, not a completed
+    // choice -- a page that only moves focus (hover, or ArrowDown with no Enter/click) must
+    // never be read as a committed value just because activedescendant now names an option.
+    input.setAttribute('aria-activedescendant', highlightOnly.id);
+    expect('generic ARIA combobox: aria-activedescendant ALONE (option not aria-selected) is never read as a committed value',
+      Scanner.getComboboxCommittedValue(entry) === '');
+    highlightOnly.setAttribute('aria-selected', 'true'); // now aria-selected too, but...
+    input.setAttribute('aria-expanded', 'true'); // ...the listbox is still open -- still not a commit
+    expect('generic ARIA combobox: aria-selected="true" while the listbox is STILL OPEN is also never read as committed',
+      Scanner.getComboboxCommittedValue(entry) === '');
+    input.setAttribute('aria-expanded', 'false');
+    expect('generic ARIA combobox: only once aria-selected="true" AND the listbox is closed does it read as committed',
+      Scanner.getComboboxCommittedValue(entry) === 'Remote');
+    // restore untouched fixture state for the real fill immediately below
+    input.removeAttribute('aria-activedescendant');
+    highlightOnly.removeAttribute('aria-selected');
+    input.setAttribute('aria-expanded', 'false');
+
     const ok = await Scanner.applyFill(entry, 'Austin');
     expect('generic ARIA combobox (opened via ArrowDown, no "Toggle flyout" button) filled and verified via aria-activedescendant',
       ok === true && Scanner.getComboboxCommittedValue(entry) === 'Austin');
+  }
+
+  // Looks a scanned combobox field up by its OWN input element rather than by label text --
+  // several fixtures on this page are deliberately labelled just "Country" (the phone-country
+  // widget matches the REAL Greenhouse markup, which carries no distinguishing label of its
+  // own beyond "Country" -- see gh_phone_country_label), so fieldByLabel() alone would resolve
+  // to whichever one happens to scan first.
+  const fieldForInputId = id => {
+    const el = byId(id);
+    return scanned.fields.find(f => { const e = scanned.registry[f.id]; return e && e.input === el; });
+  };
+
+  // ---- combobox: Greenhouse phone "Country" (dial-code widget) ----
+  // Ground truth (live probe, 2026-09-24, job-boards.greenhouse.io/gitlab and /twilio): once
+  // committed, the combobox's OWN chip collapses to just the dial code ("+1") -- ONLY the
+  // paired intl-tel-input button's aria-label still names the country. Before this fix,
+  // verifyComboboxSelection compared the matched option text ("United States +1") against
+  // that bare "+1" chip and always reported "selection did not commit".
+  {
+    const field = fieldForInputId('gh_phone_country_input');
+    expect('phone Country combobox scanned as its own combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const itiBtn = byId('gh_phone_iti_button');
+    expect('fixture sanity: the paired intl-tel-input button starts with nothing selected',
+      itiBtn.getAttribute('aria-label') === 'Select country');
+
+    // "United" alone types down to a filtered set containing BOTH "United States +1" and
+    // "United Kingdom +44" -- ambiguous, so this also exercises the "among filtered options"
+    // reason enrichment (problem 3) with the real rendered option texts.
+    const okBad = await Scanner.applyFill(entry, 'United');
+    expect('phone Country combobox: "United" is ambiguous (States vs Kingdom) -> false, reason names the options it saw',
+      okBad === false && /saw: /.test(entry._lastReason) &&
+      /United States \+1/.test(entry._lastReason) && /United Kingdom \+44/.test(entry._lastReason));
+
+    const ok = await Scanner.applyFill(entry, 'United States');
+    expect('phone Country combobox: "United States" resolves against the rendered "United States +1" and reports success',
+      ok === true);
+    expect('phone Country combobox: the paired intl-tel-input button now names the committed country (not just its dial code)',
+      itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
+    expect('phone Country combobox: its OWN chip only ever shows the dial code, never the country name -- the real bug this guards against',
+      byId('gh_phone_country_value').querySelector('.select__single-value').textContent === '+1');
+  }
+
+  // ---- combobox: Greenhouse phone "Country", ALREADY showing the applicant's country ----
+  // Per the project brief: never overwrite an already-correct value. Proven here by asserting
+  // the mock's menu was never even opened, not just that the end state looks right.
+  {
+    const field = fieldForInputId('gh_phone_prefilled_country_input');
+    const entry = entryFor(field);
+    const itiBtn = byId('gh_phone_prefilled_iti_button');
+    expect('fixture sanity: the paired intl-tel-input button already names "United States" before any fill',
+      itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
+    const opensBefore = dom.window.__gh_phone_country_prefilled__.openCount();
+
+    const ok = await Scanner.applyFill(entry, 'United States');
+    expect('phone Country combobox already correct: reports success without being touched',
+      ok === true);
+    expect('phone Country combobox already correct: the menu was NEVER opened (never reopen/re-click an already-correct selection)',
+      dom.window.__gh_phone_country_prefilled__.openCount() === opensBefore);
+    expect('phone Country combobox already correct: the iti button label is unchanged',
+      itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
+  }
+
+  // ---- combobox: Greenhouse "Location (City)", geocoded "City, State, Country" catalog ----
+  // Ground truth (live probe, 2026-09-24, job-boards.greenhouse.io/twilio): typing "Seattle"
+  // also returns same-state near-misses ("Seattle Hill-Silver Firs", "South Seattle") that
+  // legitimately contain "Seattle" as a whole word -- matchCityStateOption must still resolve
+  // uniquely to the option whose OWN city segment is EXACTLY "Seattle".
+  {
+    const field = fieldByLabel('Location (City)*');
+    expect('Greenhouse Location (City) combobox scanned as a combobox field', !!field && field.widget === 'combobox');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Seattle, Washington');
+    expect('Location (City) combobox: "City, State" resolves against "City, State, Country" options, never a same-state near-miss',
+      ok === true && Scanner.getComboboxCommittedValue(entry) === 'Seattle, Washington, United States');
+  }
+
+  // ---- combobox: Location (City), two geocode results render identically -> never guess ----
+  {
+    const field = fieldByLabel('Location (City) duplicate*');
+    const entry = entryFor(field);
+    const ok = await Scanner.applyFill(entry, 'Seattle, Washington');
+    expect('Location (City) combobox: two identically-rendered options -> ambiguous, stays unfilled',
+      ok === false && Scanner.getComboboxCommittedValue(entry) === '');
+    expect('Location (City) ambiguous case: the reason still names the (repeated) options it saw',
+      /saw: /.test(entry._lastReason) && /Seattle, Washington, United States/.test(entry._lastReason));
   }
 
   // ---- Ashby Yes/No button groups: scoped to their OWN question ----
@@ -2011,6 +2222,33 @@ pending.push((async () => {
       ok === true && byId('ashby_decoy_yes').getAttribute('aria-pressed') === 'true');
     expect('the decoy submit button next to the group was NEVER clicked (zero submissions)',
       (dom.window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0) === before);
+  }
+
+  // Reviewer round 3: fillButtonGroup's verification must require the state CHANGED because
+  // of OUR click. A hidden-checkbox mirror that was ALREADY checked before anything happened
+  // (e.g. still reflecting some earlier, unrelated state) must never be trusted as evidence
+  // that a click the page's own handler completely ignores actually selected anything.
+  {
+    const container = doc.createElement('div');
+    const yesBtn = doc.createElement('button');
+    yesBtn.type = 'button';
+    yesBtn.textContent = 'Yes';
+    const noBtn = doc.createElement('button');
+    noBtn.type = 'button';
+    noBtn.textContent = 'No';
+    const mirror = doc.createElement('input');
+    mirror.type = 'checkbox';
+    mirror.checked = true; // already checked before the click -- and NO listener ever changes it
+    container.appendChild(yesBtn);
+    container.appendChild(noBtn);
+    container.appendChild(mirror);
+    doc.body.appendChild(container);
+
+    const brokenEntry = { buttons: [yesBtn, noBtn], container: container, label: 'Broken button group (negative control)' };
+    const r = await Scanner.fillButtonGroup(brokenEntry, 'No', doc);
+    expect('fillButtonGroup: a stale, already-checked hidden-mirror checkbox is NOT trusted as evidence that a click the page ignores actually selected "No"',
+      r.ok === false);
+    container.remove();
   }
 
   // ---- real Ashby shape: no <form> at all, every button (including the decoy) type-less ----
@@ -2078,6 +2316,64 @@ pending.push((async () => {
     expect('bypassing every guard and clicking the type-less, form-less decoy directly DOES fire its own click handler (a genuine trap, not vacuous)',
       (dom.window.__ASHBY_NOFORM_SUBMIT_COUNT__ || 0) === before + 1);
   }
+})());
+
+// --- Shadow DOM: scanAll/scanFields and capture.js must traverse OPEN shadow roots
+//     (recursively), with fills/guards working on elements inside them. See test-page.html's
+//     "Shadow DOM" fixture block for the exact shapes covered here. -------------------------
+pending.push((async () => {
+  const doc = dom.window.document;
+  const shadowHost = doc.getElementById('shadow_dom_host');
+  const shadowRoot = shadowHost.shadowRoot;
+  const nameInput = shadowRoot.getElementById('shadow_name_input');
+  const submitBtn = shadowRoot.getElementById('shadow_submit_btn');
+  const nestedInput = shadowRoot.getElementById('shadow_nested_host').shadowRoot.getElementById('shadow_nested_input');
+  const hiddenInput = doc.getElementById('shadow_dom_hidden_host').shadowRoot.getElementById('shadow_hidden_input');
+
+  expect('fixture sanity: the shadow host really does carry an open shadow root', !!shadowRoot);
+  expect('a plain scanFields() over the whole document (no shadow-DOM awareness) does NOT see into an open shadow root',
+    !Scanner.scanFields(doc).fields.some(f => f.name === 'shadow_name' || f.name === 'shadow_nested'));
+
+  const scanned = Scanner.scanAll(doc);
+  const shadowField = scanned.fields.find(f => f.name === 'shadow_name');
+  const nestedField = scanned.fields.find(f => f.name === 'shadow_nested');
+  expect('scanAll() finds the field inside the open shadow root, tagged shadow:true',
+    !!shadowField && shadowField.shadow === true);
+  expect('scanAll() also finds the field inside the NESTED open shadow root (recursion)',
+    !!nestedField && nestedField.shadow === true);
+  expect('scanAll() reports zero fields for the CLOSED shadow root (unreachable, by design)',
+    !scanned.fields.some(f => f.name === 'shadow_closed_unreachable'));
+  expect('isVisible() crosses the shadow boundary via .host: a field inside an open shadow root is still hidden by an aria-hidden LIGHT-DOM ancestor OUTSIDE the host',
+    Scanner.isVisible(hiddenInput) === false);
+  expect('...and that hidden shadow field never turns up in scanAll() at all',
+    !scanned.fields.some(f => f.name === 'shadow_hidden'));
+  expect('fixture sanity: the genuinely visible shadow field IS reported visible', Scanner.isVisible(nameInput) === true);
+
+  const entry = scanned.registry[shadowField.id];
+  const ok = await Scanner.applyFill(entry, 'Ada Lovelace');
+  expect('applyFill() fills a text input living inside an open shadow root, and it reads back',
+    ok === true && nameInput.value === 'Ada Lovelace');
+
+  expect('none of the scanning/filling above ever clicked the submit button living inside the SAME shadow root',
+    (dom.window.__SHADOW_FORM_SUBMIT_COUNT__ || 0) === 0);
+
+  // Genuine trap, not vacuous: a direct click (bypassing every guard) DOES submit -- same
+  // discipline as every other decoy submit button on this page.
+  submitBtn.click();
+  expect('bypassing every guard and clicking the shadow-DOM submit button directly DOES fire its form\'s submit handler',
+    (dom.window.__SHADOW_FORM_SUBMIT_COUNT__ || 0) === 1);
+
+  // ---- capture.js: structure-only capture also reaches into open shadow roots ----
+  const structure = Capture.captureStructure(doc);
+  const shadowNodes = structure.nodes.filter(n => n.shadow === true);
+  expect('captureStructure() includes nodes captured from inside open shadow roots, tagged shadow:true',
+    shadowNodes.some(n => n.id === 'shadow_name_input') && shadowNodes.some(n => n.id === 'shadow_submit_btn'));
+  expect('captureStructure() also reaches the NESTED open shadow root',
+    shadowNodes.some(n => n.id === 'shadow_nested_input'));
+  expect('captureStructure() never captures anything from the CLOSED shadow root (unreachable)',
+    !structure.nodes.some(n => n.id === 'shadow_closed_input'));
+  expect('captureStructure() never records a real field VALUE for the shadow text input (structure only, per its own privacy invariant)',
+    !structure.nodes.some(n => n.id === 'shadow_name_input' && JSON.stringify(n).includes('Ada Lovelace')));
 })());
 
 Promise.all(pending).then(() => {

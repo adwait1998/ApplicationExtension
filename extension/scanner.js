@@ -66,7 +66,17 @@
       if (style.display === 'none') return false;
       if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
       if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') return false;
-      node = node.parentElement;
+      var next = node.parentElement;
+      // `parentElement` alone stops dead at the top of an open shadow tree (a ShadowRoot is a
+      // DocumentFragment, not an Element, so it has no `.parentElement`) -- continuing the walk
+      // from its `.host` instead means an aria-hidden/display/visibility ancestor OUTSIDE an
+      // open shadow root still correctly hides everything the shadow root contains. Every
+      // click/fill guard in this file relies on isVisible(), so this matters well beyond
+      // scanning itself.
+      if (!next && node.parentNode && node.parentNode.nodeType === 11 && node.parentNode.host) {
+        next = node.parentNode.host;
+      }
+      node = next;
     }
     var rect = el.getBoundingClientRect();
     if (rect.width === 0 && rect.height === 0) return false;
@@ -1314,6 +1324,41 @@
     return null;
   }
 
+  /**
+   * Resolves `value` against `optionTexts` within its OWN recognised degree family ONLY
+   * (bachelor/master/doctorate/associate/highschool) -- never a blind first match. Exactly one
+   * option in the family resolves directly (the common case: a generic level list like
+   * "Bachelor's Degree"/"Master's Degree"). When SEVERAL options share the family (a tenant
+   * that lists specific degree TITLES, e.g. "Bachelor of Arts"/"Bachelor of Design (BDes)"/
+   * "Bachelor of Science"), this narrows further by `value`'s OWN specific token (e.g.
+   * "Bachelor of Design" normalises to "bachelorofdesign", found inside "Bachelor of Design
+   * (BDes)" but not "Bachelor of Arts") -- resolving ONLY when that narrows to exactly one.
+   *
+   * Returns -1 (never guess) when `value` isn't a recognised degree token at all, when nothing
+   * in the family renders, or when several remain indistinguishable even after narrowing --
+   * e.g. a bare acronym like "MS" or "MA" against several specific degree TITLES: "master of
+   * science"/"master of arts" as expanded text share no literal token overlap with "ms" once
+   * the word "of" breaks them apart (a real gap found live, 2026-09-24: "MS"/"MA" were
+   * previously picking whichever specific title happened to render first -- a false degree
+   * claim). Leaving it for the human beats a wrong one.
+   */
+  function matchDegreeFamily(value, optionTexts) {
+    var fam = degreeFamilyOf(value);
+    if (!fam) return -1;
+    var famRe = WD_DEGREE_FAMILY_OPTION_RE[fam];
+    var famMatches = [];
+    for (var i = 0; i < optionTexts.length; i++) {
+      if (famRe.test(optionTexts[i])) famMatches.push(i);
+    }
+    if (famMatches.length === 1) return famMatches[0];
+    if (famMatches.length < 2) return -1;
+    var specificTok = normalizeToken(value);
+    var specificMatches = famMatches.filter(function (idx) {
+      return normalizeToken(optionTexts[idx]).indexOf(specificTok) !== -1;
+    });
+    return specificMatches.length === 1 ? specificMatches[0] : -1;
+  }
+
   var WD_COUNTRY_ALIASES = {
     'unitedstates': 'united states of america',
     'usa': 'united states of america',
@@ -1514,15 +1559,8 @@
     // against ["High School Diploma", "Associate's Degree", "Bachelor's Degree", ...]), so it
     // is promoted here to benefit every matchChoiceOption caller (combobox, checkbox-group,
     // radio, native select), not only Workday's dropdown.
-    var fam = degreeFamilyOf(value);
-    if (fam) {
-      var famRe = WD_DEGREE_FAMILY_OPTION_RE[fam];
-      var famMatches = [];
-      for (i = 0; i < optionTexts.length; i++) {
-        if (famRe.test(optionTexts[i])) famMatches.push(i);
-      }
-      if (famMatches.length === 1) return famMatches[0];
-    }
+    var degreeIdx = matchDegreeFamily(value, optionTexts);
+    if (degreeIdx !== -1) return degreeIdx;
     var alias = countryAliasOf(value);
     if (alias) {
       for (i = 0; i < optionTexts.length; i++) {
@@ -1588,13 +1626,8 @@
       if (norm(optionTexts[i]) === t) return i;
     }
 
-    var fam = degreeFamilyOf(target);
-    if (fam) {
-      var famRe = WD_DEGREE_FAMILY_OPTION_RE[fam];
-      for (i = 0; i < optionTexts.length; i++) {
-        if (famRe.test(optionTexts[i])) return i;
-      }
-    }
+    var degreeIdx = matchDegreeFamily(target, optionTexts);
+    if (degreeIdx !== -1) return degreeIdx;
 
     var alias = countryAliasOf(target);
     if (alias) {
@@ -1667,7 +1700,10 @@
       return scrollRound(15, 0, texts.join('␟')).then(function () {
         if (idx === -1) {
           dispatchKeyboardEvent(button, 'keydown', 'Escape', 'Escape', 27);
-          return { ok: false, reason: 'no confident match for "' + target + '" among dropdown options' };
+          // Never quote `target` (the value being filled in) -- an EEO/disability answer or
+          // other applicant-provided value must never land in an exported report; the
+          // dropdown's OWN option texts are page furniture and safe to list.
+          return { ok: false, reason: reasonWithOptions('no confident match among the dropdown options', texts) };
         }
 
         var matched = optionEls[idx];
@@ -1905,6 +1941,7 @@
   function matchWorkdayPromptRows(entry, input, doc, t, popup, rows) {
     var texts = rows.map(workdayPromptRowLabel);
     var idx = matchWorkdayPromptOption(t, texts);
+    var lastSeenTexts = texts; // page-furniture only; refreshed as arrowWalk sees new rows
 
     function withMatch(matchedRow, matchedText) {
       if (!isWorkdayOptionSafe(matchedRow, popup)) {
@@ -1920,7 +1957,11 @@
         }
         return waitFor(function () { return workdayPromptHasPill(entry, matchedText) ? true : null; }, 2000, doc).then(function (added) {
           return closeWorkdayPromptPopup(input, popup).then(function () {
-            if (!added) return { ok: false, reason: 'click did not add "' + t + '" to the selected item list' };
+            // Never quote the term being filled in a reason (it can be an EEO/disability
+            // answer or other applicant-provided value that must never land in an exported
+            // report) -- the matched RESULT's own text is page furniture and safe, but isn't
+            // useful here either (it's the thing that failed to stick, not an option list).
+            if (!added) return { ok: false, reason: 'the matched result did not get added to the selected item list' };
             return { ok: true, matchedText: matchedText };
           });
         });
@@ -1938,7 +1979,9 @@
     function arrowWalk(triesLeft, staleRounds, lastKey) {
       if (triesLeft <= 0 || staleRounds >= 2) {
         return closeWorkdayPromptPopup(input, popup).then(function () {
-          return { ok: false, reason: 'no confident match among results for "' + t + '"' };
+          // Never quote `t` (the applicant-provided search term) -- only the RESULT ROW texts
+          // the popup itself rendered (page furniture) are safe to list in a report.
+          return { ok: false, reason: reasonWithOptions('no confident match among the results rendered', lastSeenTexts) };
         });
       }
       dispatchKeyboardEvent(input, 'keydown', 'ArrowDown', 'ArrowDown', 40);
@@ -1950,6 +1993,7 @@
         }
         var freshRows = workdayPromptRows(popup);
         var freshTexts = freshRows.map(workdayPromptRowLabel);
+        if (freshTexts.length) lastSeenTexts = freshTexts;
         var freshIdx = matchWorkdayPromptOption(t, freshTexts);
         if (freshIdx !== -1) return withMatch(freshRows[freshIdx], freshTexts[freshIdx]);
         var key = currentLabel + '␟' + freshTexts.join('␟');
@@ -2022,12 +2066,15 @@
 
         if (outcome.kind === 'empty') {
           return closeWorkdayPromptPopup(input, outcome.popup).then(function () {
-            return { ok: false, reason: 'Workday reported no results for "' + t + '"' };
+            // Never quote `t` -- an EEO/disability answer or other applicant-provided value
+            // must never land in an exported report; "reported no results" needs no options
+            // list either (there is nothing rendered to show).
+            return { ok: false, reason: 'Workday reported no results' };
           });
         }
         if (outcome.kind === 'timeout') {
           clearWorkdayPromptInput(input);
-          return { ok: false, reason: 'no results returned for "' + t + '"', noPopupAtAll: !sawPopupEver };
+          return { ok: false, reason: 'no results returned before timing out', noPopupAtAll: !sawPopupEver };
         }
         return matchWorkdayPromptRows(entry, input, doc, t, outcome.popup, outcome.rows);
       });
@@ -2191,6 +2238,19 @@
   // widget kind so it is never scanned or filled as a text field again.
   // ---------------------------------------------------------------------
 
+  /** Appends up to 8 of the option texts a failed match actually saw, so a report shows WHY a
+   * fill was left rather than just THAT it was ('no confident match for "Yes" among filtered
+   * options (saw: "Yes, I am a US citizen", "Yes, I will need sponsorship", "No")' instead of
+   * a bare "no confident match"). Shared by every choice-shaped widget (combobox, button-group,
+   * checkbox-group, Workday dropdown). Purely the page's own furniture -- the options IT
+   * rendered, never anything the applicant typed or the profile holds -- so always safe to
+   * surface. A no-op (returns `reason` unchanged) when there is nothing to show. */
+  function reasonWithOptions(reason, optionTexts) {
+    var shown = (optionTexts || []).map(cleanText).filter(Boolean).slice(0, 8);
+    if (!shown.length) return reason;
+    return reason + ' (saw: ' + shown.map(function (t) { return JSON.stringify(t); }).join(', ') + ')';
+  }
+
   /** A single, unadorned mouse event -- ground truth: react-select's flyout toggles on
    * `mouseup`, never `click` (a bare click is preventDefault()'d by the button). */
   function dispatchMouseEvent(el, type) {
@@ -2300,20 +2360,30 @@
     return texts;
   }
 
-  /** Generic ARIA combobox fallback (no react-select classes at all): aria-activedescendant
-   * naming the chosen option stands in for the chip text react-select renders. */
+  /**
+   * Generic ARIA combobox fallback (no react-select classes at all): trusts
+   * aria-activedescendant only as evidence a selection genuinely COMMITTED, never merely that
+   * an option is HIGHLIGHTED -- per the ARIA combobox pattern, aria-activedescendant tracks
+   * the focused/highlighted row during arrow-key navigation, not necessarily a completed
+   * choice, so a page that only moves focus (on hover, or ArrowDown without ever choosing)
+   * would otherwise be misread as a successful fill even though nothing was actually
+   * selected. Requires the referenced option to ALSO report aria-selected="true" AND the
+   * listbox to be closed (input's aria-expanded !== "true", and its own resolved popup no
+   * longer visible) -- the same "genuinely committed, not just highlighted" evidence a real,
+   * spec-compliant ARIA 1.2 combobox exposes once a choice is actually made.
+   */
   function getGenericComboboxValue(entry) {
     var input = entry.input;
     var doc = ownerDoc(input);
     var activeId = input.getAttribute && input.getAttribute('aria-activedescendant');
-    if (activeId && doc && doc.getElementById) {
-      var opt = doc.getElementById(activeId);
-      if (opt) {
-        var t = cleanText(opt.textContent);
-        if (t) return t;
-      }
-    }
-    return '';
+    if (!activeId || !doc || !doc.getElementById) return '';
+    var opt = doc.getElementById(activeId);
+    if (!opt) return '';
+    if ((opt.getAttribute && opt.getAttribute('aria-selected')) !== 'true') return '';
+    if (input.getAttribute && input.getAttribute('aria-expanded') === 'true') return '';
+    var menu = resolveComboboxMenu(entry);
+    if (menu && isVisible(menu)) return '';
+    return cleanText(opt.textContent);
   }
 
   /** The field's current COMMITTED value (for getCurrentValue/undo) — never the search
@@ -2327,11 +2397,60 @@
 
   function normEqText(a, b) { return cleanText(a).toLowerCase() === cleanText(b).toLowerCase(); }
 
+  /**
+   * Ground truth (live probe, 2026-09-24, job-boards.greenhouse.io/gitlab and /twilio): a
+   * phone number's "Country" combobox (`input.select__input#country`, role=combobox) is
+   * rendered inside the SAME `<fieldset>` as the phone number's own purely-visual
+   * intl-tel-input widget (`.iti`, with its `button.iti__selected-country` flag/dial-code
+   * control) -- the two mirror one selection. That fieldset-plus-`.iti__selected-country`
+   * shape is specific to this ONE widget: a plain "Country"/"Country of residence" combobox
+   * elsewhere on the same page sits in a fieldset with no such button, so this can never
+   * misfire on those. Bounded to the input's own fieldset so it can never reach into another
+   * field's phone widget either.
+   */
+  function pairedPhoneCountryButton(input) {
+    var fieldset = input.closest ? input.closest('fieldset') : null;
+    if (!fieldset) return null;
+    // Deliberately NOT an isVisible() check -- a live probe (2026-09-24,
+    // job-boards.greenhouse.io/gitlab) found this button's own `.iti__country-container`
+    // wrapper rendered `display: none` on the real page (the accessible "Country" combobox is
+    // the actual interactive control in this layout; the intl-tel-input flag button is a
+    // hidden mirror kept in sync purely for its aria-label text). It is never clicked, only
+    // ever READ from -- so its own visibility is irrelevant; only that it is a genuine
+    // `.iti__selected-country` element inside THIS field's own fieldset matters.
+    return fieldset.querySelector('button.iti__selected-country');
+  }
+
+  /** The country NAME the paired intl-tel-input button currently reports as selected, or ''
+   * once none is set yet. Ground truth: unset reads `aria-label="Select country"`; committed
+   * reads `aria-label="Change country, selected United States (+1)"` -- the ONLY place this
+   * widget still renders the full country name once a country is picked (see
+   * verifyComboboxSelection below: the paired react-select's own single-value chip collapses
+   * to just the bare dial code, e.g. "+1", so it alone can never say WHICH country that is). */
+  function phoneCountrySelectedName(btn) {
+    var label = (btn && btn.getAttribute && btn.getAttribute('aria-label')) || '';
+    var m = /selected\s+(.+?)\s*\(\s*\+\d+\s*\)\s*$/i.exec(cleanText(label));
+    return m ? cleanText(m[1]) : '';
+  }
+
+  /** Strips a trailing " +<dial code>" off a phone-country OPTION's accessible text
+   * ("United States +1" -> "United States") for comparison against
+   * phoneCountrySelectedName()'s own parsed name. A no-op for any other option text (nothing
+   * to strip). */
+  function phoneCountryOptionName(text) {
+    return cleanText(String(text || '').replace(/\s*\+\d+\s*$/, ''));
+  }
+
   /** True only once `matchedText` shows up as a genuinely COMMITTED chip/aria-state AND the
    * search input itself is empty — leftover search text sitting in the input is explicitly
    * NOT a commit (react-select drops it on blur; see the project brief). */
   function verifyComboboxSelection(entry, matchedText) {
     if (cleanText(entry.input.value || '')) return false;
+    var phoneBtn = pairedPhoneCountryButton(entry.input);
+    if (phoneBtn) {
+      var selectedName = phoneCountrySelectedName(phoneBtn);
+      return !!selectedName && normEqText(selectedName, phoneCountryOptionName(matchedText));
+    }
     var chips = getComboboxChipTexts(entry);
     if (chips.length) {
       for (var i = 0; i < chips.length; i++) { if (normEqText(chips[i], matchedText)) return true; }
@@ -2429,9 +2548,25 @@
     var target = String(value == null ? '' : value).trim();
     if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
 
+    // Ground truth (live probe, 2026-09-24): a phone "Country" combobox's own committed chip
+    // never shows the country name (see verifyComboboxSelection) -- only its paired
+    // intl-tel-input button does -- so the ordinary chip-text "already" check just below can
+    // never recognise this widget already holds the applicant's country. Checked FIRST and
+    // unconditionally: never reopen/re-click an already-correct selection just because that
+    // generic check can't read it here.
+    var phoneBtn = pairedPhoneCountryButton(entry.input);
+    if (phoneBtn) {
+      var alreadyCountry = phoneCountrySelectedName(phoneBtn);
+      if (alreadyCountry && matchChoiceOption(target, [alreadyCountry]) === 0) {
+        return Promise.resolve({ ok: true, matchedText: alreadyCountry });
+      }
+    }
+
     var already = getComboboxChipTexts(entry);
     for (var ai = 0; ai < already.length; ai++) {
-      if (matchChoiceOption(target, [already[ai]]) === 0) return Promise.resolve({ ok: true, matchedText: already[ai] });
+      if (matchChoiceOption(target, [already[ai]]) === 0 || matchCityStateOption(target, [already[ai]]) === 0) {
+        return Promise.resolve({ ok: true, matchedText: already[ai] });
+      }
     }
 
     return openCombobox(entry, doc).then(function (menu) {
@@ -2454,26 +2589,31 @@
       function matchAndCommitOrFilter(els) {
         var texts = els.map(optionAccessibleText);
         var idx = matchChoiceOption(target, texts);
+        if (idx === -1) idx = matchCityStateOption(target, texts);
         if (idx !== -1) return commitComboboxOption(entry, menu, els, idx, doc);
 
         var query = comboboxFilterQuery(target);
         if (!query) {
           dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
-          return { ok: false, reason: 'no confident match for "' + target + '" among combobox options' };
+          // Never quote `target` (the value being filled in) -- an EEO/disability answer or
+          // other applicant-provided value must never land in an exported report; the
+          // combobox's OWN option texts are page furniture and safe to list.
+          return { ok: false, reason: reasonWithOptions('no confident match among the combobox options', texts) };
         }
         setNativeValue(entry.input, query);
         return waitForComboboxFilterResults(entry, doc).then(function (found) {
           if (!found) {
             dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
             setNativeValue(entry.input, '');
-            return { ok: false, reason: 'no options rendered while filtering for "' + query + '"' };
+            return { ok: false, reason: 'no options rendered while filtering' };
           }
           var texts2 = found.els.map(optionAccessibleText);
           var idx2 = matchChoiceOption(target, texts2);
+          if (idx2 === -1) idx2 = matchCityStateOption(target, texts2);
           if (idx2 === -1) {
             dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape');
             setNativeValue(entry.input, '');
-            return { ok: false, reason: 'no confident match for "' + target + '" among filtered options' };
+            return { ok: false, reason: reasonWithOptions('no confident match among the filtered options', texts2) };
           }
           return commitComboboxOption(entry, found.menu, found.els, idx2, doc);
         });
@@ -2610,6 +2750,13 @@
    * change (Ashby's real classes are hashed CSS-modules names, e.g. "_option_1svni_32", so
    * this matches "selected"/"active" etc. as a bare substring rather than a whole word), or
    * (Ashby's own real markup) a hidden checkbox mirror inside the same container. */
+  // Matches a keyword as its OWN token within a class attribute, where a token boundary is a
+  // real word-break OR the "_"/"-" that CSS-module/BEM hashed class names use to glue pieces
+  // together (e.g. Ashby's real "_option_1svni_32--selected_9xk2") -- never a bare substring:
+  // plain `\b` alone does not help here since "_"/"-" both count as `\w`-adjacent-safe in a
+  // hashed class name but a LETTER run like "inactive"/"interactive" must NOT match "active".
+  var CHOICE_BUTTON_SELECTED_TOKEN_RE = /(?:^|[-_])(?:active|selected|is-selected|is-checked)(?:[-_]|$)/i;
+
   function isChoiceButtonSelected(button) {
     if (!button) return false;
     var ariaPressed = ((button.getAttribute && button.getAttribute('aria-pressed')) || '').toLowerCase();
@@ -2618,39 +2765,55 @@
     if (ariaChecked === 'true') return true;
     var dataState = ((button.getAttribute && button.getAttribute('data-state')) || '').toLowerCase();
     if (dataState === 'checked' || dataState === 'selected' || dataState === 'active' || dataState === 'on') return true;
-    var cls = String(button.className || '').toLowerCase();
-    if (/active|selected|is-checked|is-selected/.test(cls)) return true;
+    var tokens = String(button.className || '').split(/\s+/);
+    for (var i = 0; i < tokens.length; i++) {
+      if (tokens[i] && CHOICE_BUTTON_SELECTED_TOKEN_RE.test(tokens[i])) return true;
+    }
     return false;
-  }
-
-  function verifyChoiceButtonSelected(button, container) {
-    if (isChoiceButtonSelected(button)) return true;
-    var hidden = container && container.querySelector ? container.querySelector('input[type="checkbox"]') : null;
-    return !!(hidden && hidden.checked);
   }
 
   /** Matches `value` against the group's own button texts (matchChoiceOption — never the
    * first of several) and clicks the match through isChoiceButtonSafe. A decoy submit button
    * beside the group is never even considered a candidate: it is not one of `entry.buttons`,
-   * and even if it were, its text would not equal a known option (see isChoiceButtonSafe). */
+   * and even if it were, its text would not equal a known option (see isChoiceButtonSafe).
+   *
+   * Verification requires evidence the click ITSELF caused the selection, never a snapshot
+   * that merely looks right afterwards: if the matched button already reads as selected
+   * before any click, that is reported as success WITHOUT clicking at all (never re-click an
+   * already-correct answer); otherwise, a hidden-checkbox mirror (shared by the whole group,
+   * not tied to any ONE button) is only trusted as evidence if it CHANGED from its own
+   * pre-click state -- a mirror that was already checked before we ever touched the page (e.g.
+   * still reflecting a DIFFERENT button's earlier selection) proves nothing about whether
+   * clicking THIS button did anything. */
   function fillButtonGroup(entry, value, doc) {
     var target = String(value == null ? '' : value).trim();
     if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
     var texts = entry.buttons.map(accessibleControlText);
     var idx = matchChoiceOption(target, texts);
     if (idx === -1) {
-      return Promise.resolve({ ok: false, reason: 'no confident match for "' + target + '" among button options' });
+      // Never quote `target` (the value being filled in) -- an EEO/disability answer or other
+      // applicant-provided value must never land in an exported report; the button group's
+      // OWN option texts are page furniture and safe to list.
+      return Promise.resolve({ ok: false, reason: reasonWithOptions('no confident match among the button options', texts) });
     }
     var button = entry.buttons[idx];
     if (!isChoiceButtonSafe(button, entry.container, texts)) {
       return Promise.resolve({ ok: false, reason: 'matched button failed the safety guard' });
     }
+    if (isChoiceButtonSelected(button)) {
+      return Promise.resolve({ ok: true, matchedText: texts[idx] });
+    }
+    var hidden = entry.container && entry.container.querySelector ? entry.container.querySelector('input[type="checkbox"]') : null;
+    var hiddenCheckedBefore = !!(hidden && hidden.checked);
     button.click();
-    return waitFor(function () { return verifyChoiceButtonSelected(button, entry.container) ? true : null; }, 800, doc)
-      .then(function (verified) {
-        if (!verified) return { ok: false, reason: 'button click did not register as selected' };
-        return { ok: true, matchedText: texts[idx] };
-      });
+    return waitFor(function () {
+      if (isChoiceButtonSelected(button)) return true;
+      if (hidden && hidden.checked && !hiddenCheckedBefore) return true;
+      return null;
+    }, 800, doc).then(function (verified) {
+      if (!verified) return { ok: false, reason: 'button click did not register as selected' };
+      return { ok: true, matchedText: texts[idx] };
+    });
   }
 
   // ---- checkbox groups (several checkboxes = one question) ---------------------------------
@@ -2745,19 +2908,26 @@
    * multi-value rule. */
   function applyCheckboxGroupValue(entry, value) {
     var elements = entry.elements;
+    var labels = elements.map(function (e) { return getLabel(e); });
     if (Array.isArray(value)) {
       var anyOk = false;
       var failedTerms = [];
       for (var i = 0; i < value.length; i++) {
         if (setCheckboxGroupOne(elements, value[i])) anyOk = true; else failedTerms.push(value[i]);
       }
-      entry._lastReason = failedTerms.length ? ('no confident match for: ' + failedTerms.join(', ')) : '';
+      // Never join/quote the actual failedTerms (EEO/disability answers and other
+      // applicant-provided values must never land in an exported report) -- a count is honest
+      // and useful without naming any of them; the group's OWN option labels are page
+      // furniture and safe to list.
+      entry._lastReason = failedTerms.length
+        ? reasonWithOptions('no confident match for ' + failedTerms.length + ' of ' + value.length + ' selections', labels)
+        : '';
       return anyOk;
     }
     var single = String(value == null ? '' : value).trim();
     if (!single) { entry._lastReason = 'empty value'; return false; }
     var ok = setCheckboxGroupOne(elements, single);
-    entry._lastReason = ok ? '' : ('no confident match for "' + single + '" among checkbox options');
+    entry._lastReason = ok ? '' : reasonWithOptions('no confident match among the checkbox options', labels);
     return ok;
   }
 
@@ -2875,6 +3045,44 @@
     return out;
   }
 
+  /**
+   * For a "City, State" (or "City, State, Country") value against a GENERIC combobox's own
+   * rendered option texts -- e.g. Greenhouse's "Location (City)" react-select field, whose
+   * geocoded options render as "Seattle, Washington, United States" (live probe, 2026-09-24,
+   * job-boards.greenhouse.io/twilio): the ONE option whose OWN city segment EXACTLY equals the
+   * target city AND whose state segment matches (full name or 2-letter code, via the same US
+   * state table leverStateVariants already uses for Lever's own dedicated location widget).
+   *
+   * Deliberately an EXACT per-segment comparison (via the same splitCityState() used to parse
+   * `target`), never a word-boundary "contains" test: the real catalog that motivated this
+   * (job-boards.greenhouse.io/twilio, typing "Seattle") returns "Seattle Hill-Silver Firs,
+   * Washington, United States" and "South Seattle, Washington, United States" ALONGSIDE
+   * "Seattle, Washington, United States" -- all three contain "Seattle" as a whole word AND
+   * "Washington" as the state, so a word-boundary test would wrongly call plain "Seattle,
+   * Washington" ambiguous across all of them. Comparing each option's own FIRST comma-segment
+   * for exact equality tells the actual city "Seattle" apart from a same-state neighbourhood
+   * that merely contains it.
+   *
+   * Returns -1 (leave it, never guess) when `value` isn't recognisably "City, <a real US
+   * state>" at all, when no option's city+state segments match, or when more than one does.
+   */
+  function matchCityStateOption(target, optionTexts) {
+    var parts = splitCityState(target);
+    if (!parts.city || !parts.state) return -1;
+    var cityNorm = cleanText(parts.city).toLowerCase();
+    var stateNorm = cleanText(parts.state).toLowerCase();
+    if (!US_STATE_NAME_TO_CODE[stateNorm] && !US_STATE_CODE_TO_NAME[stateNorm]) return -1;
+    var variants = leverStateVariants(parts.state);
+    var matches = [];
+    for (var i = 0; i < optionTexts.length; i++) {
+      var optParts = splitCityState(optionTexts[i]);
+      if (cleanText(optParts.city).toLowerCase() !== cityNorm) continue;
+      var optState = cleanText(optParts.state).toLowerCase();
+      if (variants.indexOf(optState) !== -1) matches.push(i);
+    }
+    return matches.length === 1 ? matches[0] : -1;
+  }
+
   function isLeverLocationRowSafe(el, resultsContainer) {
     if (!el || el.nodeType !== 1) return false;
     if (!resultsContainer || !resultsContainer.contains(el)) return false;
@@ -2897,7 +3105,6 @@
     if (!isVisible(entry.input) || entry.input.disabled) {
       return Promise.resolve({ ok: false, reason: 'safety guard refused the location input' });
     }
-    var displayValue = extractLocationName(value);
     var parts = splitCityState(value);
     if (!parts.city) return Promise.resolve({ ok: false, reason: 'empty value' });
 
@@ -2908,7 +3115,9 @@
       var rows = Array.prototype.slice.call(doc.querySelectorAll('[class*="dropdown-location" i]')).filter(isVisible);
       return rows.length ? rows : null;
     }, 3500, doc).then(function (rows) {
-      if (!rows) return { ok: false, reason: 'no location suggestions appeared for "' + parts.city + '"' };
+      // Never quote the applicant's location value in a reason -- only what the page itself
+      // rendered (the suggestion rows' own text) is safe to list.
+      if (!rows) return { ok: false, reason: 'no location suggestions appeared' };
 
       var cityRe = new RegExp('\\b' + escapeRegExp(parts.city.toLowerCase()) + '\\b', 'i');
       var variants = leverStateVariants(parts.state);
@@ -2926,11 +3135,14 @@
         matches.push(rows[i]);
       }
       if (matches.length !== 1) {
+        // Never quote `displayValue` (the applicant's location) -- the suggestion rows' own
+        // rendered text is page furniture and safe to list instead.
+        var rowTexts = rows.map(function (r) { return cleanText(r.textContent); });
         return {
           ok: false,
           reason: matches.length === 0
-            ? ('no suggestion matched city and state for "' + displayValue + '"')
-            : ('ambiguous: ' + matches.length + ' suggestions matched "' + displayValue + '", never guessing')
+            ? reasonWithOptions('no suggestion matched city and state', rowTexts)
+            : reasonWithOptions('ambiguous: ' + matches.length + ' suggestions matched, never guessing', rowTexts)
         };
       }
 
@@ -3437,12 +3649,67 @@
    * Cross-origin iframes cannot be introspected by a normal content script and are
    * reported back separately so the caller can tell the user fields were skipped there.
    */
-  function scanAll(doc) {
-    doc = doc || (typeof document !== 'undefined' ? document : null);
-    var result = scanFields(doc);
+  /**
+   * Every OPEN shadow root nested anywhere inside `root` (including one open shadow root
+   * nested inside another), found by walking every element and reading its own `.shadowRoot` --
+   * the only way to discover one, since `querySelectorAll` never pierces a shadow boundary. A
+   * CLOSED shadow root's `.shadowRoot` reads back `null` from outside (that is the entire point
+   * of "closed"), so this can never see one -- there is no way in from here, and the field(s) it
+   * hides count as unreachable rather than something this code could paper over.
+   */
+  function findOpenShadowRoots(root) {
+    var out = [];
+    if (!root || !root.querySelectorAll) return out;
+    var all = root.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      var sr = all[i].shadowRoot;
+      if (sr) {
+        out.push(sr);
+        out = out.concat(findOpenShadowRoots(sr)); // nested open shadow roots, if any
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Scans `root` itself, plus every OPEN shadow root nested anywhere inside it (recursively) --
+   * each one via its own scanFields() call, exactly like a same-origin iframe's document gets
+   * its own scanFields() call below, since a ShadowRoot supports the same querySelectorAll/
+   * getElementById scanFields already relies on. Every field found inside a shadow root is
+   * tagged `shadow: true` (mirroring the iframe loop's own `frame: 'same-origin-iframe'` tag)
+   * so a caller can tell a field's fill/guard paths are operating on shadow content.
+   *
+   * NOTE: `.closest(...)` (used throughout this file's guards, e.g. `.closest('form')` /
+   * `.closest('fieldset')`) never crosses a shadow boundary either -- a guard looking for an
+   * ancestor that happens to live in the LIGHT dom outside the shadow root will not find it.
+   * That is fine for a self-contained widget (its own form/fieldset inside the same shadow
+   * root, same as this file's own shadow-DOM fixture), but is a known limit for one split
+   * across the boundary.
+   */
+  function scanRootAndShadows(root, startId) {
+    var result = scanFields(root, { startId: startId });
     var fields = result.fields.slice();
     var registry = result.registry;
     var nextId = result.nextId;
+    var shadowRoots = findOpenShadowRoots(root);
+    for (var s = 0; s < shadowRoots.length; s++) {
+      var sub = scanFields(shadowRoots[s], { startId: nextId });
+      nextId = sub.nextId;
+      for (var k = 0; k < sub.fields.length; k++) sub.fields[k].shadow = true;
+      fields = fields.concat(sub.fields);
+      for (var key in sub.registry) {
+        if (Object.prototype.hasOwnProperty.call(sub.registry, key)) registry[key] = sub.registry[key];
+      }
+    }
+    return { fields: fields, registry: registry, nextId: nextId };
+  }
+
+  function scanAll(doc) {
+    doc = doc || (typeof document !== 'undefined' ? document : null);
+    var top = scanRootAndShadows(doc, 0);
+    var fields = top.fields;
+    var registry = top.registry;
+    var nextId = top.nextId;
     var skippedFrames = 0;
 
     var iframes = doc ? Array.prototype.slice.call(doc.querySelectorAll('iframe')) : [];
@@ -3458,7 +3725,7 @@
         skippedFrames++;
         continue;
       }
-      var sub = scanFields(frameDoc, { startId: nextId });
+      var sub = scanRootAndShadows(frameDoc, nextId);
       nextId = sub.nextId;
       for (var k = 0; k < sub.fields.length; k++) {
         sub.fields[k].frame = 'same-origin-iframe';
@@ -3910,7 +4177,13 @@
   function applyFill(entry, value) {
     if (entry.kind === 'radio-group') {
       var rgOk = setRadioValue(entry.elements, value);
-      if (!rgOk) entry._lastReason = 'no confident match for "' + value + '" among the radio options, or the selection did not stick';
+      // Never quote `value` (the answer being filled in -- an EEO/disability answer or other
+      // applicant-provided value must never land in an exported report); the radio group's
+      // OWN option labels are page furniture and safe to list.
+      if (!rgOk) {
+        var radioLabels = entry.elements.map(function (r) { return getLabel(r); });
+        entry._lastReason = reasonWithOptions('no confident match among the radio options, or the selection did not stick', radioLabels);
+      }
       return rgOk;
     }
     if (entry.kind === 'date-parts') return setDatePartsValue(entry, value);
@@ -3925,8 +4198,10 @@
     }
     if (entry.kind === 'wd-prompt') {
       return fillWorkdayPromptValue(entry, value).then(function (r) {
+        // Never join/quote the actual failedTerms here either -- a count is honest and useful
+        // without naming any of the (possibly sensitive) requested terms.
         entry._lastReason = r.reason ||
-          (r.failedTerms && r.failedTerms.length ? ('no confident match for: ' + r.failedTerms.join(', ')) : '');
+          (r.failedTerms && r.failedTerms.length ? ('no confident match for ' + r.failedTerms.length + ' of ' + value.length + ' requested terms') : '');
         return !!r.ok;
       });
     }
@@ -3934,7 +4209,7 @@
     if (entry.kind === 'combobox') {
       return fillComboboxValue(entry, value, ownerDoc(entry.input)).then(function (r) {
         entry._lastReason = r.reason ||
-          (r.failedTerms && r.failedTerms.length ? ('no confident match for: ' + r.failedTerms.join(', ')) : '');
+          (r.failedTerms && r.failedTerms.length ? ('no confident match for ' + r.failedTerms.length + ' of ' + value.length + ' requested terms') : '');
         return !!r.ok;
       });
     }
@@ -3952,7 +4227,12 @@
     }
     if (entry.kind === 'wd-checkbox-group') {
       var cgResult = setWorkdayCheckboxGroupValue(entry, value);
-      entry._lastReason = cgResult ? '' : ('no confident match for "' + value + '" among ' + entry.label);
+      // Never quote `value` (a self-identification answer) -- the group's own option labels
+      // (page furniture) are safe to list; `entry.label` is the FORM'S OWN question text, not
+      // an applicant value.
+      entry._lastReason = cgResult ? '' : reasonWithOptions(
+        'no confident match among "' + entry.label + '"',
+        entry.boxes.map(getWorkdayCheckboxGroupOptionLabel));
       return cgResult;
     }
     var el = entry.el;
@@ -4390,6 +4670,16 @@
     getLeverLocationLabel: getLeverLocationLabel,
     extractLocationName: extractLocationName,
     splitCityState: splitCityState,
-    fillLeverLocation: fillLeverLocation
+    fillLeverLocation: fillLeverLocation,
+    reasonWithOptions: reasonWithOptions,
+    pairedPhoneCountryButton: pairedPhoneCountryButton,
+    phoneCountrySelectedName: phoneCountrySelectedName,
+    phoneCountryOptionName: phoneCountryOptionName,
+    matchCityStateOption: matchCityStateOption,
+    // Shadow DOM traversal -- exported primarily for selftest.js and capture.js (capture.js
+    // has no scanning logic of its own and leans on these two, same as it already does for
+    // getLabel()/isVisible()).
+    findOpenShadowRoots: findOpenShadowRoots,
+    scanRootAndShadows: scanRootAndShadows
   };
 });

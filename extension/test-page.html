@@ -1163,6 +1163,102 @@
     </div>
   </div>
 
+  <!-- Greenhouse-style phone "Country" combobox (live probe, 2026-09-24,
+       job-boards.greenhouse.io/gitlab and /twilio): a react-select "Country" combobox sits
+       inside the SAME <fieldset> as the phone number's own purely-visual intl-tel-input
+       widget (`.iti`, with its `button.iti__selected-country`). Its options render as
+       "<Country> +<dial code>"; once committed, the combobox's OWN chip collapses to just the
+       bare dial code ("+1") -- the paired button's aria-label is the only place the full
+       country name still appears afterwards. Proves fillComboboxOne/verifyComboboxSelection
+       read THAT, not the chip. -->
+  <fieldset id="gh_phone_fieldset">
+    <legend class="visually-hidden">Phone</legend>
+    <div class="select" id="gh_phone_country_field">
+      <label id="gh_phone_country_label">Country</label>
+      <div class="select-shell">
+        <div class="select__control">
+          <div class="select__value-container" id="gh_phone_country_value">
+            <input type="text" role="combobox" id="gh_phone_country_input" class="select__input"
+                   aria-labelledby="gh_phone_country_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+          </div>
+          <div class="select__indicators">
+            <button type="button" aria-label="Toggle flyout" id="gh_phone_country_toggle">&#9662;</button>
+          </div>
+        </div>
+        <div class="select__menu" id="gh_phone_country_menu" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="iti">
+      <button type="button" class="iti__selected-country" id="gh_phone_iti_button" aria-label="Select country"></button>
+    </div>
+  </fieldset>
+
+  <!-- Same widget shape, but ALREADY showing the applicant's country when the fill starts --
+       fillComboboxOne must leave it alone (never reopen/re-click the menu) and still count it
+       verified. -->
+  <fieldset id="gh_phone_prefilled_fieldset">
+    <legend class="visually-hidden">Phone</legend>
+    <div class="select" id="gh_phone_prefilled_country_field">
+      <label id="gh_phone_prefilled_country_label">Country (prefilled)</label>
+      <div class="select-shell">
+        <div class="select__control">
+          <div class="select__value-container" id="gh_phone_prefilled_country_value">
+            <input type="text" role="combobox" id="gh_phone_prefilled_country_input" class="select__input"
+                   aria-labelledby="gh_phone_prefilled_country_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+          </div>
+          <div class="select__indicators">
+            <button type="button" aria-label="Toggle flyout" id="gh_phone_prefilled_country_toggle">&#9662;</button>
+          </div>
+        </div>
+        <div class="select__menu" id="gh_phone_prefilled_country_menu" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="iti">
+      <button type="button" class="iti__selected-country" id="gh_phone_prefilled_iti_button" aria-label="Select country"></button>
+    </div>
+  </fieldset>
+
+  <!-- Greenhouse-style "Location (City)" combobox: geocoded ASYNC options render as
+       "City, State, United States" (live probe, 2026-09-24, job-boards.greenhouse.io/twilio,
+       typing "Seattle" returns decoy near-misses in the SAME state: "Seattle Hill-Silver
+       Firs", "South Seattle" -- both contain "Seattle" as a whole word). The service sends a
+       plain "City, State" value ("Seattle, Washington"); matchCityStateOption must pick the
+       ONE option whose OWN city segment is EXACTLY "Seattle", never a same-state neighbour
+       that merely contains the word. -->
+  <div class="select" id="gh_location_field">
+    <label id="gh_location_label">Location (City)<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_location_value">
+          <input type="text" role="combobox" id="gh_location_input" class="select__input"
+                 aria-labelledby="gh_location_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_location_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_location_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- NEGATIVE CONTROL: two geocode results render the SAME "City, State, Country" text
+       (a real catalog can return near-duplicate places) -- must never guess between them. -->
+  <div class="select" id="gh_location_dup_field">
+    <label id="gh_location_dup_label">Location (City) duplicate<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_location_dup_value">
+          <input type="text" role="combobox" id="gh_location_dup_input" class="select__input"
+                 aria-labelledby="gh_location_dup_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_location_dup_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_location_dup_menu" style="display:none;"></div>
+    </div>
+  </div>
+
   <!-- Generic ARIA combobox, no react-select classes at all -- aria-controls wires the input
        directly to its role=listbox popup. -->
   <div id="generic_combo_field">
@@ -1325,8 +1421,9 @@
     var toggle = document.getElementById(cfg.toggleId);
     var menu = document.getElementById(cfg.menuId);
     var valueContainer = document.getElementById(cfg.valueId);
-    var committed = [];
+    var committed = cfg.initial ? [cfg.initial] : [];
     var mousedownArmed = null;
+    var openCount = 0;
 
     function renderValue() {
       Array.prototype.slice.call(valueContainer.querySelectorAll('.select__single-value,.select__multi-value')).forEach(function (n) { n.remove(); });
@@ -1341,14 +1438,31 @@
           chip.appendChild(label);
           valueContainer.insertBefore(chip, input);
         });
-      } else {
+      } else if (cfg.phoneCountry) {
+        // Ground truth (live probe, 2026-09-24): Greenhouse's phone "Country" combobox
+        // collapses its OWN committed chip down to just the dial code once a country is
+        // picked -- never the country name -- and mirrors the real selection onto a paired
+        // intl-tel-input button's aria-label instead. Mirrored here so
+        // fillComboboxOne/verifyComboboxSelection are exercised against the real shape, not a
+        // stand-in that happens to leave the country name somewhere easy.
+        var dial = /\+\d+\s*$/.exec(committed[0]);
         var sv = document.createElement('div');
         sv.className = 'select__single-value';
-        sv.textContent = committed[0];
+        sv.textContent = dial ? dial[0] : committed[0];
         valueContainer.insertBefore(sv, input);
+        var btn = document.getElementById(cfg.phoneCountry.buttonId);
+        if (btn) {
+          var nameOnly = committed[0].replace(/\s*\+\d+\s*$/, '');
+          btn.setAttribute('aria-label', 'Change country, selected ' + nameOnly + ' (' + (dial ? dial[0] : '') + ')');
+        }
+      } else {
+        var sv2 = document.createElement('div');
+        sv2.className = 'select__single-value';
+        sv2.textContent = committed[0];
+        valueContainer.insertBefore(sv2, input);
       }
     }
-    function openMenu() { menu.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
+    function openMenu() { openCount++; menu.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
     function closeMenu() { menu.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
     function renderOptions(list) {
       menu.innerHTML = '';
@@ -1379,6 +1493,7 @@
     }
     renderOptions([]);
     menu.style.display = 'none';
+    if (committed.length) renderValue(); // cfg.initial: already-selected before any interaction
 
     toggle.addEventListener('mouseup', function () {
       if (menu.style.display === 'block') { closeMenu(); return; }
@@ -1412,33 +1527,76 @@
       setTimeout(function () { input.value = ''; closeMenu(); }, 0);
     });
 
-    return { committedValues: function () { return committed.slice(); } };
+    return { committedValues: function () { return committed.slice(); }, openCount: function () { return openCount; } };
   }
 
   makeReactSelect({ inputId: 'gh_country_input', toggleId: 'gh_country_toggle', menuId: 'gh_country_menu', valueId: 'gh_country_value',
     options: ['Canada', 'United States of America', 'Mexico'], multi: false, async: false });
   makeReactSelect({ inputId: 'gh_school_input', toggleId: 'gh_school_toggle', menuId: 'gh_school_menu', valueId: 'gh_school_value',
     options: ['University of Washington', 'University of Wisconsin', 'Western Washington University'], multi: false, async: true, filterDelayMs: 200 });
+
+  // ---- Greenhouse phone "Country" combobox (dial-code widget) ----------------------------
+  var PHONE_COUNTRY_OPTIONS = ['United States +1', 'Canada +1', 'United Kingdom +44', 'Afghanistan +93'];
+  window.__gh_phone_country__ = makeReactSelect({
+    inputId: 'gh_phone_country_input', toggleId: 'gh_phone_country_toggle',
+    menuId: 'gh_phone_country_menu', valueId: 'gh_phone_country_value',
+    options: PHONE_COUNTRY_OPTIONS, multi: false, async: false,
+    phoneCountry: { buttonId: 'gh_phone_iti_button' }
+  });
+  window.__gh_phone_country_prefilled__ = makeReactSelect({
+    inputId: 'gh_phone_prefilled_country_input', toggleId: 'gh_phone_prefilled_country_toggle',
+    menuId: 'gh_phone_prefilled_country_menu', valueId: 'gh_phone_prefilled_country_value',
+    options: PHONE_COUNTRY_OPTIONS, multi: false, async: false,
+    phoneCountry: { buttonId: 'gh_phone_prefilled_iti_button' }, initial: 'United States +1'
+  });
+
+  // ---- Greenhouse "Location (City)" combobox (geocoded async catalog) --------------------
+  makeReactSelect({ inputId: 'gh_location_input', toggleId: 'gh_location_toggle', menuId: 'gh_location_menu', valueId: 'gh_location_value',
+    options: ['Seattle, Washington, United States', 'Seattle Bar, Oregon, United States',
+      'Seattle Hill-Silver Firs, Washington, United States', 'South Seattle, Washington, United States'],
+    multi: false, async: true, filterDelayMs: 150 });
+  makeReactSelect({ inputId: 'gh_location_dup_input', toggleId: 'gh_location_dup_toggle', menuId: 'gh_location_dup_menu', valueId: 'gh_location_dup_value',
+    options: ['Seattle, Washington, United States', 'Seattle, Washington, United States'],
+    multi: false, async: true, filterDelayMs: 150 });
   makeReactSelect({ inputId: 'gh_lang_multi_input', toggleId: 'gh_lang_multi_toggle', menuId: 'gh_lang_multi_menu', valueId: 'gh_lang_multi_value',
     options: ['English', 'Spanish', 'French', 'Mandarin Chinese'], multi: true, async: false });
   makeReactSelect({ inputId: 'gh_ambiguous_input', toggleId: 'gh_ambiguous_toggle', menuId: 'gh_ambiguous_menu', valueId: 'gh_ambiguous_value',
     options: ['Software Engineer', 'Site Engineer'], multi: false, async: false });
 
   // ---- generic ARIA combobox (no react-select classes) -----------------------------------
+  // Spec-compliant ARIA 1.2 combobox behavior, deliberately distinguishing HIGHLIGHT from
+  // COMMIT (see scanner.js's getGenericComboboxValue): ArrowDown alone only moves
+  // aria-activedescendant to highlight a row (real focus-follows-highlight navigation,
+  // matching the "highlight-only, never committed" negative control below) -- only a real
+  // click/Enter also marks that option aria-selected="true" and closes the listbox.
   (function () {
     var input = document.getElementById('generic_combo_input');
     var listbox = document.getElementById('generic_combo_listbox');
+    var options = Array.prototype.slice.call(listbox.querySelectorAll('[role="option"]'));
+    var highlighted = -1;
     function openMenu() { listbox.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
     function closeMenu() { listbox.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
-    input.addEventListener('keyup', function (e) { if (e.key === 'ArrowDown') openMenu(); });
-    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
-    Array.prototype.forEach.call(listbox.querySelectorAll('[role="option"]'), function (opt) {
+    function highlight(idx) {
+      highlighted = idx;
+      input.setAttribute('aria-activedescendant', options[idx].id); // highlight only -- NOT a commit
+    }
+    function commit(idx) {
+      options.forEach(function (o) { o.setAttribute('aria-selected', 'false'); });
+      options[idx].setAttribute('aria-selected', 'true');
+      highlight(idx);
+      input.value = '';
+      closeMenu();
+    }
+    input.addEventListener('keyup', function (e) {
+      if (e.key === 'ArrowDown') { openMenu(); highlight(Math.min(highlighted + 1, options.length - 1)); }
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeMenu();
+      if (e.key === 'Enter' && highlighted !== -1) commit(highlighted);
+    });
+    options.forEach(function (opt, idx) {
       opt.addEventListener('mousedown', function (e) { e.preventDefault(); });
-      opt.addEventListener('click', function () {
-        input.setAttribute('aria-activedescendant', opt.id);
-        input.value = '';
-        closeMenu();
-      });
+      opt.addEventListener('click', function () { commit(idx); });
     });
     input.addEventListener('blur', function () { setTimeout(closeMenu, 0); });
   })();
@@ -1551,5 +1709,60 @@
     <label><input type="radio" name="eeo_negative_control_fixture" value="no"> No</label>
   </div>
 </div>
+
+<!-- ===================================================================
+     Shadow DOM (2026-09-24): scanAll/scanFields and capture.js must also traverse OPEN shadow
+     roots (recursively). Covers: a self-contained <form> entirely inside an open shadow root
+     (with its OWN submit button -- must never be clicked by any scan/fill path, but a DIRECT
+     click bypassing every guard must still genuinely submit, same "real trap, not vacuous"
+     discipline as every other decoy submit button on this page); a nested open shadow root one
+     level deeper (proves the traversal recurses); an aria-hidden LIGHT-DOM ancestor wrapping a
+     shadow host (proves isVisible() actually crosses the shadow boundary via .host, not just
+     that a plain shadow form scans at all -- jsdom's getBoundingClientRect() is patched to
+     always report a non-zero box, so that check alone could never catch this); and a CLOSED
+     shadow root, which must stay completely unreachable -- there is no way in from outside.
+     =================================================================== -->
+<div id="shadow_dom_host"></div>
+<div id="shadow_dom_hidden_wrapper" aria-hidden="true">
+  <div id="shadow_dom_hidden_host"></div>
+</div>
+<div id="shadow_dom_closed_host"></div>
+<script>
+(function () {
+  var host = document.getElementById('shadow_dom_host');
+  var shadow = host.attachShadow({ mode: 'open' });
+  shadow.innerHTML =
+    '<form id="shadow_form">' +
+      '<label for="shadow_name_input">Full Name (shadow DOM)</label>' +
+      '<input type="text" id="shadow_name_input" name="shadow_name">' +
+      '<button type="submit" id="shadow_submit_btn">Submit</button>' +
+      '<div id="shadow_nested_host"></div>' +
+    '</form>';
+  shadow.getElementById('shadow_form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__SHADOW_FORM_SUBMIT_COUNT__ = (window.__SHADOW_FORM_SUBMIT_COUNT__ || 0) + 1;
+  });
+
+  // Nested OPEN shadow root, one level deeper -- proves findOpenShadowRoots() recurses.
+  var nestedHost = shadow.getElementById('shadow_nested_host');
+  var nestedShadow = nestedHost.attachShadow({ mode: 'open' });
+  nestedShadow.innerHTML =
+    '<label for="shadow_nested_input">Nested Shadow Field</label>' +
+    '<input type="text" id="shadow_nested_input" name="shadow_nested">';
+
+  // A field inside an open shadow root, but the HOST sits under a LIGHT-DOM aria-hidden
+  // wrapper -- must scan as invisible/unfillable.
+  var hiddenHost = document.getElementById('shadow_dom_hidden_host');
+  var hiddenShadow = hiddenHost.attachShadow({ mode: 'open' });
+  hiddenShadow.innerHTML = '<input type="text" id="shadow_hidden_input" name="shadow_hidden">';
+
+  // CLOSED shadow root -- must stay completely unreachable; nothing this file does can see
+  // inside one (that is the entire point of "closed"). Structural negative control: scanAll()
+  // must not error out or hang on it, and must report zero fields for it.
+  var closedHost = document.getElementById('shadow_dom_closed_host');
+  closedHost.attachShadow({ mode: 'closed' }).innerHTML =
+    '<input type="text" id="shadow_closed_input" name="shadow_closed_unreachable">';
+})();
+</script>
 </body>
 </html>
