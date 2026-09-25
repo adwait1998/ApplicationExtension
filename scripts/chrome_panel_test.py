@@ -29,6 +29,12 @@ import json
 import pathlib
 import socket
 import sys
+
+# Check marks and accented text in output must not crash a Windows (cp1252) console.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import tempfile
 import threading
 import time
