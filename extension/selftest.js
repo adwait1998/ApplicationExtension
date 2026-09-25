@@ -1376,10 +1376,18 @@ pending.push((async () => {
     expect('the prompt input is cleared after a successful add', fosInput.value === '');
     expect('the popup is closed (Escape) after a successful add', doc.getElementById('wd_fos_popup').style.display !== 'block');
 
+    const fosBadStart = Date.now();
     const okBad = await Scanner.applyFill(fosEntry, 'Zoology');
+    const fosBadMs = Date.now() - fosBadStart;
     expect('Field of Study: a term with NO confident match among the (non-empty) results selects NOTHING',
       okBad === false && fosSelected().length === 1 && !fosSelected().includes('Zoology'));
     expect('the typed text is cleared after no confident match', fosInput.value === '');
+    // Regression guard: a non-virtualized prompt (this fixed 3-option "live search") whose
+    // ArrowDown walk never sees anything change must stop within ~2 stale rounds, NOT burn the
+    // full 40-try/150ms budget (~6s) on every single no-match term -- an earlier version of
+    // this rewrite did exactly that, which is worse than the ORIGINAL "hangs" bug, just moved.
+    expect('a no-match term on a non-virtualized prompt fails within ~1s, not ~6s (stale-round early exit)',
+      fosBadMs < 2000);
   }
 
   // ---- prompt: Skills -- the adversarial suite from the project brief §2.3 (the most likely

@@ -1826,8 +1826,14 @@
 
     if (idx !== -1) return withMatch(rows[idx], texts[idx]);
 
-    function arrowWalk(triesLeft) {
-      if (triesLeft <= 0) {
+    // Stops after 2 consecutive rounds where NEITHER the highlighted row NOR the rendered set
+    // actually changed (the same discipline as fillWorkdayDropdown's scrollRound) -- a prompt
+    // that isn't virtualized at all (Field of Study's fixed 3-option "live search" mock, or a
+    // real single-select prompt with a short, fully-rendered list) would otherwise walk the
+    // FULL 40 tries x 150ms (~6s) on every single no-match term. That is worse than the
+    // original 3s-per-term bug this rewrite exists to fix, just relocated to a different case.
+    function arrowWalk(triesLeft, staleRounds, lastKey) {
+      if (triesLeft <= 0 || staleRounds >= 2) {
         return closeWorkdayPromptPopup(input, popup).then(function () {
           return { ok: false, reason: 'no confident match among results for "' + t + '"' };
         });
@@ -1835,18 +1841,20 @@
       dispatchKeyboardEvent(input, 'keydown', 'ArrowDown', 'ArrowDown', 40);
       return wdSleep(WD_PROMPT_ARROWDOWN_DELAY_MS).then(function () {
         var current = popup.querySelector('[data-automation-id="menuItem"][data-automation-selected="true"]');
-        if (current) {
-          var label = workdayPromptRowLabel(current);
-          if (cleanText(label).toLowerCase() === cleanText(t).toLowerCase()) return withMatch(current, label);
+        var currentLabel = current ? workdayPromptRowLabel(current) : '';
+        if (current && cleanText(currentLabel).toLowerCase() === cleanText(t).toLowerCase()) {
+          return withMatch(current, currentLabel);
         }
         var freshRows = workdayPromptRows(popup);
         var freshTexts = freshRows.map(workdayPromptRowLabel);
         var freshIdx = matchWorkdayPromptOption(t, freshTexts);
         if (freshIdx !== -1) return withMatch(freshRows[freshIdx], freshTexts[freshIdx]);
-        return arrowWalk(triesLeft - 1);
+        var key = currentLabel + '␟' + freshTexts.join('␟');
+        var grew = key !== lastKey;
+        return arrowWalk(triesLeft - 1, grew ? 0 : staleRounds + 1, key);
       });
     }
-    return arrowWalk(WD_PROMPT_ARROWDOWN_MAX);
+    return arrowWalk(WD_PROMPT_ARROWDOWN_MAX, 0, texts.join('␟'));
   }
 
   /**
