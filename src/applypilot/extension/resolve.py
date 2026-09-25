@@ -9,6 +9,11 @@
                    through to a lower tier — a canary with no resolvable
                    answer stays a canary skip (mirrors the pipeline's
                    invariant 7).
+1b. Screening    applypilot.extension.screening — criminal record,
+                   background check, drug test, non-compete, travel, how
+                   you heard: answered only from profile.screening.*, never
+                   falling through to the answer bank or a draft (except
+                   "how did you hear", which is not an attestation).
 2. Deterministic  applypilot.extension.matcher — autocomplete, then
                    name/id/label regex.
 3. Structured     applypilot.extension.structured — work_history[] /
@@ -36,7 +41,7 @@ import re
 from typing import Protocol
 
 from applypilot.apply import canary
-from applypilot.extension import answers, matcher, structured
+from applypilot.extension import answers, matcher, screening, structured
 from applypilot.extension.schema import FieldDescriptor, FillPlan, FillResult, SkipResult
 
 # ---------------------------------------------------------------------------
@@ -55,6 +60,10 @@ _SECRET_FIELD_RE = re.compile(
     r"api[_ -]?key|secret)\b",
     re.I,
 )
+
+
+_WORK_AUTH_CONTEXT_RE = re.compile(
+    r"\b(legally|eligible to work|work in|authori[sz]ed to work|visa|sponsor\w*|citizen\w*)\b", re.I)
 
 
 def is_secret_path(path: str | None) -> bool:
@@ -161,6 +170,17 @@ def resolve_field(
 
     label = field.label or field.name or field.placeholder or ""
 
+    # "Do you authorize a background check?" trips the canary's work-auth
+    # marker (authoriz\w+) and would be answered with the applicant's WORK
+    # AUTHORIZATION. When the question is about a background check or drug
+    # test and says nothing about working legally, it is a screening
+    # question, not a work-auth one.
+    if (screening.family_of(label) in ("background_check", "drug_test")
+            and not _WORK_AUTH_CONTEXT_RE.search(label)):
+        pre = screening.match(field, profile)
+        if pre is not None:
+            return pre
+
     # tier 1: canary — never falls through to a lower tier
     if canary.is_canary(label):
         answer = canary.resolve_canary(label, profile)
@@ -181,6 +201,14 @@ def resolve_field(
             reason=f"canary:{category} not resolvable from profile — answer this yourself",
             auto_fill=False,
         )
+
+    # tier 1b: common screening questions (criminal record, background
+    # check, drug test, non-compete, travel, how you heard) — answered only
+    # from the applicant's own settings. Like canary, a recognised
+    # attestation never falls through to the answer bank or a draft.
+    scr = screening.match(field, profile)
+    if scr is not None:
+        return scr
 
     # tier 5 pre-empt: "have you previously worked here?" (see answers.py's
     # previously_employed_check docstring). This is a screening QUESTION,
