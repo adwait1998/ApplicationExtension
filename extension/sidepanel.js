@@ -65,6 +65,11 @@
   var rememberStatusEl = document.getElementById('rememberStatus');
   var rememberDetailsEl = document.getElementById('rememberDetails');
 
+  // -- application log (item 4) --
+  var logLineEl = document.getElementById('logLine');
+  var logStatusTextEl = document.getElementById('logStatusText');
+  var markAppliedBtn = document.getElementById('markAppliedBtn');
+
   // TEST-ONLY: "?tabId=<id>" pins this panel instance to a specific tab for its whole lifetime
   // instead of following chrome.tabs.onActivated/onUpdated in its own window. This exists
   // purely so scripts/chrome_panel_test.py can point two independent panel page loads at two
@@ -445,6 +450,7 @@
       resumeLineEl.hidden = true;
       resultsBox.innerHTML = '';
       rememberBoxEl.hidden = true;
+      logLineEl.hidden = true;
       return;
     }
 
@@ -462,6 +468,18 @@
     // left for the operator to answer themselves, on a result that's actually current for this
     // page (never a stale, previous-page result — see `stale` above).
     rememberBoxEl.hidden = stale || !((state.needsYou || []).length > 0);
+
+    // Application log (item 4): background.js logs a fill automatically right after it
+    // completes (see logFillCompletion() there) and stores the result as state.logEntry — this
+    // is a pure renderer for that, never itself the thing that decides to log.
+    if (!stale && state.logEntry && state.logEntry.id) {
+      logLineEl.hidden = false;
+      var applied = state.logEntry.status === 'applied';
+      logStatusTextEl.textContent = applied ? 'Logged — marked as applied.' : 'Logged.';
+      markAppliedBtn.hidden = applied;
+    } else {
+      logLineEl.hidden = true;
+    }
   }
 
   function setActiveTab(tabId) {
@@ -827,6 +845,32 @@
       setRememberStatus('Could not save your answers: ' + (e && e.message ? e.message : e), 'error');
     } finally {
       rememberBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // APPLICATION LOG (item 4). Logging itself already happened automatically (background.js,
+  // right after the fill this state belongs to completed) — this button only ever sets the
+  // status the applicant themselves knows is true (did you actually submit it?).
+  // ---------------------------------------------------------------------
+  markAppliedBtn.addEventListener('click', async function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    var stored = await chrome.storage.session.get(stateKey(tabId));
+    var state = stored[stateKey(tabId)];
+    var id = state && state.logEntry && state.logEntry.id;
+    if (!id) return;
+    markAppliedBtn.disabled = true;
+    try {
+      var resp = await chrome.runtime.sendMessage({ type: 'LOG_STATUS', tabId: tabId, id: id, status: 'applied' });
+      if (!resp || !resp.ok) {
+        setStatus((resp && (resp.detail || resp.message)) || 'Could not mark this application as applied.', true);
+      }
+      await renderForTab(tabId);
+    } catch (e) {
+      setStatus('Could not mark this application as applied: ' + (e && e.message ? e.message : e), true);
+    } finally {
+      markAppliedBtn.disabled = false;
     }
   });
 

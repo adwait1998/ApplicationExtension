@@ -786,6 +786,9 @@
     return {
       status: status,
       url: location.href,
+      // The top frame's own document.title — background.js only reads this off frame 0's own
+      // report (see applyFrameReport()), but every frame sets it the same way, harmlessly.
+      title: document.title || '',
       startedAt: startedAt || null,
       updatedAt: Date.now(),
       progress: null,

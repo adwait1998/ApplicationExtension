@@ -529,6 +529,85 @@ function rememberAnswersForTab(tabId) {
 }
 
 // ---------------------------------------------------------------------
+// APPLICATION LOG (item 4) — POST /log {url, title, company, counts} -> the log entry
+// ({id, status, ...}); POST /log/{id}/status {status} -> {ok:true}. Logging itself is automatic
+// (right after a fill completes, see the FILL_STATE_UPDATE handler below) — nothing here is
+// gated on a click; only "Mark as applied" is.
+// ---------------------------------------------------------------------
+function callLogRaw(payload) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/log', payload, handleResponseVerbatim);
+  });
+}
+function callLog(payload) {
+  return requestWithAutoConnect(function () { return callLogRaw(payload); });
+}
+
+function callLogStatusRaw(id, status) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/log/' + encodeURIComponent(id) + '/status', { status: status }, handleResponseVerbatim);
+  });
+}
+function callLogStatus(id, status) {
+  return requestWithAutoConnect(function () { return callLogStatusRaw(id, status); });
+}
+
+// A handful of well-known ATS domains already get a much better company name out of the service
+// itself (job_context.parse_ats_url reads the real posting slug/org name) — POST /log's own
+// `company = company or parsed.get("slug", "")` means whatever non-empty string we send here
+// WINS over that smarter lookup, so this deliberately sends '' for those hosts and lets the
+// service do the better job. For everything else (a company's own careers page on its own
+// domain, which parse_ats_url doesn't recognize at all), a plain hostname-derived guess is
+// better than nothing.
+var KNOWN_ATS_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com)$/i;
+var GENERIC_HOST_SUBDOMAINS = { www: 1, jobs: 1, careers: 1, apply: 1, applications: 1, boards: 1, career: 1, recruiting: 1, talent: 1 };
+function guessCompanyFromUrl(url) {
+  try {
+    var host = new URL(url).hostname.toLowerCase();
+    if (KNOWN_ATS_HOST_RE.test(host)) return '';
+    var labels = host.split('.').filter(Boolean);
+    while (labels.length > 2 && GENERIC_HOST_SUBDOMAINS[labels[0]]) labels.shift();
+    var core = labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+    if (!core) return '';
+    return core.charAt(0).toUpperCase() + core.slice(1);
+  } catch (e) {
+    return '';
+  }
+}
+
+/** Fire-and-forget: POSTs /log for a tab's just-completed fill and stashes the resulting
+ * {id, status} into that tab's own stored state (as `logEntry`) so the panel can render
+ * "Logged" and a "Mark as applied" button. Never throws — a failed log call just means no
+ * logEntry appears; it never blocks or undoes anything about the fill itself. */
+function logFillCompletion(tabId, state) {
+  if (!state || !state.url || !/^https?:\/\//.test(state.url)) return Promise.resolve();
+  var counts = state.counts || {};
+  var payload = {
+    url: state.url,
+    title: state.title || '',
+    company: guessCompanyFromUrl(state.url),
+    counts: {
+      filled: counts.filled || 0,
+      drafts: counts.drafts || 0,
+      needs_you: counts.needsYou || 0,
+      failed: counts.failed || 0,
+      unreadable: state.couldNotRead || 0
+    }
+  };
+  return callLog(payload).then(function (resp) {
+    return updateStoredState(tabId, function (existing) {
+      var combined = existing || initialCombinedState([]);
+      combined.logEntry = (resp && resp.ok && resp.data && resp.data.id)
+        ? { id: resp.data.id, status: resp.data.status || 'filled' }
+        : null;
+      return combined;
+    });
+  }).catch(function () {});
+}
+
+// ---------------------------------------------------------------------
 // cross-frame coordination — see the file header.
 // ---------------------------------------------------------------------
 
@@ -632,6 +711,7 @@ function initialCombinedState(frameIds) {
     note: null,
     skippedFrames: 0,
     couldNotRead: 0,
+    logEntry: null,
     _frameStates: {},
     _expectedFrameIds: (frameIds || []).slice()
   };
@@ -666,6 +746,9 @@ function applyFrameReport(combined, frameId, frameState) {
 
   var topState = combined._frameStates[0];
   combined.url = (topState && topState.url) || (reported[0] && reported[0].url) || combined.url || '';
+  // The top frame's own document.title (see content.js's freshState()) — used only for the
+  // application log (item 4), which wants a human-readable title, not a URL.
+  combined.title = (topState && topState.title) || combined.title || '';
   combined.startedAt = combined.startedAt || (reported[0] && reported[0].startedAt) || Date.now();
   combined.updatedAt = Date.now();
 
@@ -969,11 +1052,38 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     }
     var tabId = sender.tab.id;
     var frameId = typeof sender.frameId === 'number' ? sender.frameId : 0;
+    // Captured from inside the updater (see below) so the log call can fire once the write has
+    // actually landed, without a second read-modify-write cycle just to notice the transition.
+    var justCompletedState = null;
     updateStoredState(tabId, function (existing) {
+      var previousStatus = existing ? existing.status : null;
       var combined = existing || initialCombinedState([frameId]);
-      return applyFrameReport(combined, frameId, msg.state);
+      var result = applyFrameReport(combined, frameId, msg.state);
+      // Application log (item 4): log exactly on the RUNNING -> DONE transition, never on a
+      // status that was already 'done' (e.g. inserting a cover-letter draft afterwards, item 2,
+      // reports 'done' again but nothing about the fill itself changed) — see logFillCompletion().
+      // A same-URL refill (multi-step continuation, item 8, or just clicking Fill again) still
+      // gets its own transition and its own /log call; the SERVICE'S own /log de-dupes same-URL
+      // calls within an hour into one updated entry (see app_log.record()) rather than this file
+      // needing to track that itself.
+      if (previousStatus !== 'done' && result.status === 'done') justCompletedState = result;
+      return result;
     }).then(function () {
       sendResponse({ ok: true });
+      if (justCompletedState) logFillCompletion(tabId, justCompletedState);
+    }, function (e) {
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+    });
+    return true;
+  }
+  if (msg.type === 'LOG_STATUS') {
+    callLogStatus(msg.id, msg.status).then(function (resp) {
+      if (!resp || !resp.ok) { sendResponse(resp); return; }
+      updateStoredState(msg.tabId, function (existing) {
+        var combined = existing || initialCombinedState([]);
+        if (combined.logEntry && combined.logEntry.id === msg.id) combined.logEntry.status = msg.status;
+        return combined;
+      }).then(function () { sendResponse(resp); }, function () { sendResponse(resp); });
     }, function (e) {
       sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
     });

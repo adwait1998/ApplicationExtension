@@ -212,6 +212,18 @@ answers** button. Clicking it (never automatic):
 If nothing you were left with has an answer typed in yet, clicking the button says so and makes no
 service call at all.
 
+## Application log
+
+Every completed fill is logged automatically — no click required. `background.js` POSTs
+`/log` with the page URL, the page's own `document.title`, a best-effort company guess (a
+recognized ATS host — Greenhouse/Lever/Ashby/Workday — is left for the service's own smarter,
+posting-aware lookup; anything else gets a plain hostname-derived guess), and the fill's counts
+translated into the service's own key names (`needs_you`, `unreadable`). The panel then shows
+**Logged** and a **Mark as applied** button; clicking it posts `/log/{id}/status` and the line
+updates to say so. A second fill of the same page within the hour updates that one entry rather
+than creating a duplicate (the service's own behavior — see `app_log.record()`) — exactly what a
+multi-step form's later steps, or just clicking Fill again, produce.
+
 ## Fill every frame
 
 About a quarter of real job postings are a company's own careers page embedding the actual

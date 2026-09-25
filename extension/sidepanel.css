@@ -325,6 +325,23 @@ button.secondary.cancel:hover { background: var(--err-bg); }
 .remember-row.saved { background: var(--ok-bg); border: 1px solid var(--ok-border); }
 .remember-row.skipped { background: var(--warn-bg); border: 1px solid var(--warn-border); }
 
+/* -- application log (item 4) -- */
+.log-line {
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.log-line button.secondary { flex: none; padding: 4px 10px; font-size: 12px; }
+
 .results {
   max-height: 60vh;
   overflow-y: auto;

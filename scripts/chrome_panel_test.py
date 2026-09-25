@@ -105,6 +105,8 @@ check("manifest has a pinned \"key\" that derives to the native host's allowed e
 resolve_calls = []  # (url, [field names requested]) — lets a check below prove RESOLVE ran
 cover_letter_calls = []  # every /cover-letter request body — item 2
 answers_learn_calls = []  # every /answers/learn request's `items` list — item 3
+log_calls = []  # every /log request body — item 4
+log_status_calls = []  # every (entry_id, status) POSTed to /log/{id}/status — item 4
 
 
 def value_for_field(f):
@@ -367,6 +369,22 @@ class StubHandler(BaseHTTPRequestHandler):
                 else:
                     saved.append(q)
             self._json(200, {"saved": saved, "skipped": skipped})
+        elif self.path == "/log":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            log_calls.append(body)
+            entry_id = f"log-{len(log_calls)}"
+            self._json(200, {
+                "id": entry_id, "url": body.get("url"), "title": body.get("title"),
+                "company": body.get("company"), "status": "filled",
+                "counts": body.get("counts"), "fills": 1,
+            })
+        elif self.path.startswith("/log/") and self.path.endswith("/status"):
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            entry_id = self.path.split("/")[2]
+            log_status_calls.append((entry_id, body.get("status")))
+            self._json(200, {"ok": True})
         else:
             self._json(404, {"detail": "not found"})
 
@@ -1166,6 +1184,58 @@ with sync_playwright() as p:
               repr(details_text))
 
         # =====================================================================
+        # TAB 12 — APPLICATION LOG (item 4): a completed fill automatically POSTs /log (never a
+        #          click) with the page URL, the page's own document title, and counts translated
+        #          into the service's own key names (needs_you/unreadable, not needsYou/
+        #          couldNotRead); the panel shows "Logged" and a "Mark as applied" button that
+        #          POSTs /log/{id}/status and updates the panel to reflect it.
+        # =====================================================================
+        log_calls_before = len(log_calls)
+        tab12 = ctx.new_page()
+        tab12.goto(PAGE_BASE + "#t=12")
+        tab12_id = find_tab_id(helper, "#t=12")
+        check("found tab 12's chrome tab id", tab12_id is not None)
+
+        panel12 = ctx.new_page()
+        panel12.goto(f"{panel_url}?tabId={tab12_id}")
+        panel12.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel12.click("#scanBtn")
+        state12 = wait_for_done(helper, tab12_id, timeout_s=20)
+        check("tab 12's fill reached a terminal status",
+              state12 is not None and state12.get("status") == "done", str(state12)[:200])
+
+        panel12.wait_for_function("() => !document.getElementById('logLine').hidden", timeout=5000)
+        check("the panel shows 'Logged' once the fill completes, with no click needed",
+              "logged" in (panel12.eval_on_selector("#logStatusText", "el => el.textContent") or "").lower())
+        check("the Mark as applied button is shown (not yet applied)",
+              panel12.eval_on_selector("#markAppliedBtn", "el => el.hidden") is False)
+
+        new_log_calls = log_calls[log_calls_before:]
+        check("logging a completed fill made exactly one automatic /log call (no click involved)",
+              len(new_log_calls) == 1, json.dumps(new_log_calls)[:300])
+        if new_log_calls:
+            logged = new_log_calls[0]
+            check("the /log call named this tab's own URL", logged.get("url", "").endswith("#t=12"), logged.get("url"))
+            check("the /log call sent the page's own document.title",
+                  logged.get("title") == "Mock Job Application (ApplyPilot Copilot test page)", logged.get("title"))
+            c = logged.get("counts") or {}
+            check("the /log call's counts use the service's own key names (needs_you, unreadable) "
+                  "translated from the panel's own state, and match it",
+                  c.get("filled") == (state12.get("counts") or {}).get("filled")
+                  and c.get("needs_you") == (state12.get("counts") or {}).get("needsYou")
+                  and c.get("unreadable") == (state12.get("couldNotRead") or 0),
+                  json.dumps({"sent": c, "state_counts": state12.get("counts"), "state_couldNotRead": state12.get("couldNotRead")}))
+
+        panel12.click("#markAppliedBtn")
+        panel12.wait_for_function(
+            "() => (document.getElementById('logStatusText').textContent || "
+            "'').toLowerCase().includes('applied')", timeout=5000)
+        check("exactly one /log/{id}/status call was made, with status 'applied'",
+              len(log_status_calls) == 1 and log_status_calls[0][1] == "applied", json.dumps(log_status_calls))
+        check("clicking Mark as applied hides the button once it succeeds",
+              panel12.eval_on_selector("#markAppliedBtn", "el => el.hidden") is True)
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -1176,7 +1246,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))
