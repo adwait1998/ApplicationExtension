@@ -221,7 +221,8 @@ sign-in or SSO page, "Keep filling as I go" must stop there (it never follows a 
 
 **D. Your real profile (10 min).** One Greenhouse job-boards posting and one Ashby posting: the
 work-authorization and sponsorship answers match your situation (for a visa holder: authorized,
-needs sponsorship — never a citizenship option); any EEO answers you set (not just declines), the
+needs sponsorship — never a citizenship option, even when "Yes, I am a U.S. citizen…" is the only
+"Yes" offered: that question must be left for you); any EEO answers you set (not just declines), the
 salary, the phone Country and the Location (City) come out right. Export the fill reports.
 
 **E. Privacy (3 min).** In Settings → Smart fill, with "Allow AI features to use a model that isn't
