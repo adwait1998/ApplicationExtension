@@ -248,6 +248,58 @@ button.secondary.cancel:hover { background: var(--err-bg); }
   line-height: 1.4;
 }
 
+/* -- cover letter draft box (item 2): blue like every other "generated text, review before
+   using" surface in this panel (see .field-row.draft above) — never green, never presented as
+   a fact. -- */
+.cover-letter-status {
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info);
+}
+.cover-letter-status.error { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+.cover-letter-status.ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
+.cover-letter-box {
+  margin: 0 12px 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--draft-bg);
+  border: 1px solid var(--draft-border);
+}
+.cover-letter-job {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 2px 0 8px;
+}
+.cover-letter-text {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+.cover-letter-warnings {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.cover-letter-box .actions { padding: 10px 0 0; }
+
 .results {
   max-height: 60vh;
   overflow-y: auto;

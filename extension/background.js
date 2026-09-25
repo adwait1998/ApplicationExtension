@@ -401,6 +401,69 @@ function handleResponse(resp, serviceUrl) {
   });
 }
 
+/**
+ * Like handleResponse(), but on a non-2xx JSON body carries the FastAPI-style {"detail": "..."}
+ * through VERBATIM (as `.detail`, never truncated) instead of handleResponse()'s generic
+ * "HTTP <code>: <first 200 chars>" text — used for endpoints whose error detail is itself the
+ * whole point of showing the operator something (cover-letter's 403 "model not allowed on this
+ * computer" / 422 "no job description", see the build spec). `.message` is kept in sync with
+ * `.detail` so a caller that only reads `.message` (the older convention every other call* here
+ * uses) still gets something sensible.
+ */
+function handleResponseVerbatim(resp, serviceUrl) {
+  if (resp.status === 401) {
+    return { ok: false, error: 'unauthorized', message: 'The service rejected the token (401 Unauthorized). Check the token in the extension options page.' };
+  }
+  if (!resp.ok) {
+    return resp.json().then(function (body) {
+      var detail = body && body.detail;
+      var text = typeof detail === 'string' ? detail : (detail != null ? JSON.stringify(detail) : ('HTTP ' + resp.status));
+      return { ok: false, error: 'http-' + resp.status, status: resp.status, detail: text, message: text };
+    }, function () {
+      var text = 'Service returned HTTP ' + resp.status;
+      return { ok: false, error: 'http-' + resp.status, status: resp.status, detail: text, message: text };
+    });
+  }
+  return resp.json().then(function (data) {
+    return { ok: true, data: data };
+  }, function () {
+    return { ok: false, error: 'bad-json', message: 'Service at ' + serviceUrl + ' returned a response that was not valid JSON.' };
+  });
+}
+
+function postJson(cfg, path, body, responseHandler) {
+  return fetch(cfg.serviceUrl + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-ApplyPilot-Token': cfg.token },
+    body: JSON.stringify(body)
+  }).then(function (resp) {
+    return responseHandler(resp, cfg.serviceUrl);
+  }, function () {
+    return { ok: false, error: 'unreachable', message: friendlyFetchError(cfg.serviceUrl) };
+  });
+}
+
+function noTokenResult() {
+  return { ok: false, error: 'no-token', message: 'No service token configured. Open the extension options page and paste the token printed by `applypilot serve-extension`.' };
+}
+
+// ---------------------------------------------------------------------
+// COVER LETTER (item 2) — POST /cover-letter {urls, page_text} -> {text, warnings, draft:true,
+// provider, job:{title,company,source}}. Errors (403 "model not allowed on this computer yet",
+// 422 "no job description"/"drafting refused", or anything else) are surfaced with their real
+// `detail` text intact — see handleResponseVerbatim() above — so the panel can show them
+// verbatim rather than a generic failure.
+// ---------------------------------------------------------------------
+function callCoverLetterRaw(urls, pageText) {
+  return getConfig().then(function (cfg) {
+    if (!cfg.token) return noTokenResult();
+    return postJson(cfg, '/cover-letter', { urls: urls || [], page_text: pageText || '' }, handleResponseVerbatim);
+  });
+}
+function callCoverLetter(urls, pageText) {
+  return requestWithAutoConnect(function () { return callCoverLetterRaw(urls, pageText); });
+}
+
 // ---------------------------------------------------------------------
 // cross-frame coordination — see the file header.
 // ---------------------------------------------------------------------
@@ -524,9 +587,10 @@ function applyFrameReport(combined, frameId, frameState) {
   combined._expectedFrameIds = expected;
 
   var reported = [];
+  var reportedFrameIds = []; // same index correspondence as `reported` — see concatList() below
   for (var i = 0; i < expected.length; i++) {
     var s = combined._frameStates[expected[i]];
-    if (s) reported.push(s);
+    if (s) { reported.push(s); reportedFrameIds.push(expected[i]); }
   }
   var anyRunning = reported.length < expected.length || reported.some(function (s) { return s.status === 'running'; });
 
@@ -541,9 +605,26 @@ function applyFrameReport(combined, frameId, frameState) {
   combined.startedAt = combined.startedAt || (reported[0] && reported[0].startedAt) || Date.now();
   combined.updatedAt = Date.now();
 
+  // Every entry's `id` is re-qualified with ITS OWN frame's id (reusing the same qualifyId() the
+  // /resolve round trip uses) as it's folded into the combined, panel-visible state — so a row in
+  // filled/drafts/needsYou/failed is always independently routable back to "which frame, which
+  // local field id" (e.g. to scroll/flash it, or to read a field back for "remember my answers"),
+  // never just a same-shaped local id two frames could otherwise collide on. Everything else on
+  // the entry (label/value/reason/...) passes through unchanged; a `frame` field is added too
+  // (this frame's own last-reported url) for anything that wants to show/report where a field
+  // lives without a second round trip.
   function concatList(key) {
     var out = [];
-    reported.forEach(function (s) { out = out.concat(s[key] || []); });
+    reported.forEach(function (s, idx) {
+      var frameId = reportedFrameIds[idx];
+      (s[key] || []).forEach(function (item) {
+        var copy = {};
+        for (var k in item) if (Object.prototype.hasOwnProperty.call(item, k)) copy[k] = item[k];
+        if (copy.id != null) copy.id = qualifyId(frameId, copy.id);
+        copy.frame = { frameId: frameId, url: s.url || '' };
+        out.push(copy);
+      });
+    });
     return out;
   }
   combined.filled = concatList('filled');
@@ -802,6 +883,10 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'PROFILE_COUNTS') {
     callProfileCounts().then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'DRAFT_COVER_LETTER') {
+    callCoverLetter(msg.urls, msg.pageText).then(sendResponse);
     return true;
   }
   if (msg.type === 'FILL_STATE_UPDATE') {

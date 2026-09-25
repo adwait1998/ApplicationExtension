@@ -103,6 +103,7 @@ check("manifest has a pinned \"key\" that derives to the native host's allowed e
 # 1. a tiny stub of the local ApplyPilot service — stdlib only, ephemeral port.
 # ---------------------------------------------------------------------------
 resolve_calls = []  # (url, [field names requested]) — lets a check below prove RESOLVE ran
+cover_letter_calls = []  # every /cover-letter request body — item 2
 
 
 def value_for_field(f):
@@ -200,6 +201,32 @@ WRAPPER_HTML_BYTES = f"""<!DOCTYPE html>
 </body></html>
 """.encode("utf-8")
 
+# A tiny fixture for item 2 (Draft cover letter): visible job-posting-shaped copy (proves the
+# extracted page text excludes form-field text and includes real body copy) plus one
+# textarea whose label says "cover letter" (proves the panel's Insert button/flow). Which
+# /cover-letter response the stub below returns is picked by a marker in the URL's OWN hash
+# fragment (never sent over the wire by the browser, but still part of the JSON `urls` this
+# test's own JS sends as DATA) — see StubHandler.do_POST — so this one page can drive the
+# success AND the 403/422 paths without extra fixture files.
+COVER_LETTER_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Great Company Careers</title></head>
+<body>
+<h1>Great Company Careers</h1>
+<p>We are looking for a fantastic engineer to join our team and build great things every day.</p>
+<form id="cl-form">
+  <label for="cl">Cover Letter (optional)</label>
+  <textarea id="cl" name="cover_letter"></textarea>
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('cl-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+</script>
+</body></html>
+"""
+
 
 class StubHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -237,6 +264,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/cover-letter-page.html"):
+            body = COVER_LETTER_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/health":
             self._json(200, {"tiers_available": ["test-stub"]})
         elif self.path == "/profile/counts":
@@ -255,6 +289,26 @@ class StubHandler(BaseHTTPRequestHandler):
             resolve_calls.append((body.get("url"), [f.get("name") for f in fields]))
             fills, skipped = build_fills(fields)
             self._json(200, {"fills": fills, "skipped": skipped})
+        elif self.path == "/cover-letter":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            cover_letter_calls.append(body)
+            # Which response to give is picked by a marker in the first url's OWN hash fragment
+            # (see COVER_LETTER_PAGE_BYTES's comment above) rather than needing separate fixture
+            # pages for the success/403/422 paths.
+            first_url = (body.get("urls") or [""])[0]
+            if "cl403" in first_url:
+                self._json(403, {"detail": "cloud model not allowed on this computer yet"})
+            elif "cl422" in first_url:
+                self._json(422, {"detail": "couldn't find this job's description to write a letter against"})
+            else:
+                self._json(200, {
+                    "text": "Dear Hiring Manager,\n\nI am excited to apply.\n\nSincerely,\nTest Applicant",
+                    "warnings": ["mentions a specific salary figure"],
+                    "draft": True,
+                    "provider": "test-stub-llm",
+                    "job": {"title": "Test Engineer", "company": "Great Company", "source": "page text"},
+                })
         else:
             self._json(404, {"detail": "not found"})
 
@@ -891,6 +945,102 @@ with sync_playwright() as p:
                   inner7_val in ("", None), repr(inner7_val))
 
         # =====================================================================
+        # TAB 8 — DRAFT COVER LETTER (item 2), success path through the REAL panel button: page
+        #         text extraction (excludes form fields, includes real visible copy), the
+        #         DRAFT box, Copy/Download availability, the Insert button appearing only because
+        #         this fixture has a cover-letter-labelled textarea, insertion through the normal
+        #         guarded fill path (highlighted 'draft', reported in state, undoable).
+        # =====================================================================
+        tab8 = ctx.new_page()
+        tab8.goto(f"{SERVICE_URL}/cover-letter-page.html#t=8")
+        tab8_id = find_tab_id(helper, "#t=8")
+        check("found tab 8's chrome tab id", tab8_id is not None)
+
+        panel8b = ctx.new_page()
+        panel8b.goto(f"{panel_url}?tabId={tab8_id}")
+        panel8b.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+
+        panel8b.click("#coverLetterBtn")
+        panel8b.wait_for_function("() => !document.getElementById('coverLetterBox').hidden", timeout=10000)
+        draft_text = panel8b.eval_on_selector("#coverLetterText", "el => el.value")
+        check("the draft box shows the service's returned draft text",
+              "excited to apply" in (draft_text or ""), repr(draft_text))
+        job_line = panel8b.eval_on_selector("#coverLetterJob", "el => el.textContent")
+        check("the draft box names the job/company the service identified",
+              "Test Engineer" in (job_line or "") and "Great Company" in (job_line or ""), repr(job_line))
+        check("a non-empty warnings list from the service is shown, not hidden",
+              panel8b.eval_on_selector("#coverLetterWarnings", "el => el.hidden") is False)
+        check("the Insert button appears because this fixture has a cover-letter-labelled textarea",
+              panel8b.eval_on_selector("#coverLetterInsertBtn", "el => el.hidden") is False)
+
+        check("exactly one /cover-letter call was made, naming this tab's URL",
+              len(cover_letter_calls) == 1 and "cover-letter-page.html" in (cover_letter_calls[0].get("urls") or [""])[0],
+              json.dumps(cover_letter_calls[-1]) if cover_letter_calls else "none")
+        sent_text = cover_letter_calls[0].get("page_text", "") if cover_letter_calls else ""
+        check("the extracted page text includes the page's own visible copy",
+              "fantastic engineer" in sent_text, sent_text[:200])
+        check("the extracted page text excludes form-field content (e.g. the textarea's own name/id)",
+              "cover_letter" not in sent_text, sent_text[:200])
+
+        panel8b.click("#coverLetterInsertBtn")
+        panel8b.wait_for_function(
+            "() => (document.getElementById('coverLetterStatus').textContent || "
+            "'').toLowerCase().includes('inserted')", timeout=5000)
+        inserted_value = tab8.eval_on_selector("#cl", "el => el.value")
+        check("Insert wrote the draft text into the page's own cover-letter textarea",
+              inserted_value == draft_text and bool(inserted_value), repr(inserted_value)[:200])
+        highlight_kind = tab8.eval_on_selector("#cl", "el => el.getAttribute('data-applypilot-highlighted')")
+        check("the inserted field is highlighted as a DRAFT (blue), never a plain fact-fill (green)",
+              highlight_kind == "draft", repr(highlight_kind))
+
+        state8 = get_state(helper, tab8_id)
+        check("inserting the cover letter is reported through the normal per-tab state "
+              "(counts.drafts, undoAvailable) — same shape a fill's own drafts use",
+              bool(state8) and (state8.get("counts") or {}).get("drafts", 0) >= 1 and state8.get("undoAvailable") is True,
+              json.dumps(state8))
+
+        undo8 = helper.evaluate("(tabId) => chrome.runtime.sendMessage({ type: 'UNDO_TAB', tabId })", tab8_id)
+        check("UNDO_TAB restores an inserted cover-letter draft exactly like any other filled field",
+              bool(undo8 and undo8.get("restored", 0) >= 1), json.dumps(undo8))
+        after_undo8 = tab8.eval_on_selector("#cl", "el => el.value")
+        check("after Undo, the cover-letter textarea is back to empty", after_undo8 == "", repr(after_undo8))
+        panel8b.close()
+
+        # =====================================================================
+        # TAB 9 / 10 — 403 and 422 from /cover-letter are shown to the operator VERBATIM (the
+        #              service's own `.detail` text), never a generic failure message, and no
+        #              draft box is shown.
+        # =====================================================================
+        for marker, code, detail in (
+            ("cl403", 403, "cloud model not allowed on this computer yet"),
+            ("cl422", 422, "couldn't find this job's description to write a letter against"),
+        ):
+            tab_err = ctx.new_page()
+            tab_err.goto(f"{SERVICE_URL}/cover-letter-page.html#t={marker}")
+            tab_err_id = find_tab_id(helper, f"#t={marker}")
+            check(f"found the {code} cover-letter test tab's chrome tab id", tab_err_id is not None)
+            panel_err = ctx.new_page()
+            panel_err.goto(f"{panel_url}?tabId={tab_err_id}")
+            panel_err.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+            panel_err.click("#coverLetterBtn")
+            # Waits for the DETAIL text specifically (not just "any non-empty status"), since the
+            # transient "Drafting…" status is ALSO non-empty and would otherwise race this check.
+            try:
+                panel_err.wait_for_function(
+                    "(needle) => (document.getElementById('coverLetterStatus').textContent || "
+                    "'').includes(needle)",
+                    arg=detail, timeout=10000)
+            except Exception:
+                pass
+            status_text = panel_err.eval_on_selector("#coverLetterStatus", "el => el.textContent")
+            check(f"a {code} from /cover-letter is shown to the operator VERBATIM (the service's own detail)",
+                  detail in (status_text or ""), repr(status_text))
+            check(f"no draft box is shown after a {code} error",
+                  panel_err.eval_on_selector("#coverLetterBox", "el => el.hidden") is True)
+            panel_err.close()
+            tab_err.close()
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -901,7 +1051,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))

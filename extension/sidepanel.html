@@ -37,6 +37,22 @@
     <button id="undoBtn" class="secondary" disabled>Undo</button>
     <button id="reportBtn" class="secondary" title="Save this page's form structure (no values) to diagnose a bad fill">Report page</button>
   </div>
+  <div class="actions">
+    <button id="coverLetterBtn" class="secondary" title="Draft a cover letter for this job from your profile and résumé">Draft cover letter</button>
+  </div>
+
+  <div id="coverLetterStatus" class="cover-letter-status" hidden></div>
+  <div id="coverLetterBox" class="cover-letter-box" hidden>
+    <div class="draft-badge">DRAFT — review before using</div>
+    <div id="coverLetterJob" class="cover-letter-job"></div>
+    <textarea id="coverLetterText" class="cover-letter-text" readonly rows="10"></textarea>
+    <div id="coverLetterWarnings" class="cover-letter-warnings" hidden></div>
+    <div class="actions">
+      <button id="coverLetterCopyBtn" class="secondary">Copy</button>
+      <button id="coverLetterDownloadBtn" class="secondary">Download .txt</button>
+      <button id="coverLetterInsertBtn" class="secondary" hidden>Insert into the cover-letter box</button>
+    </div>
+  </div>
 
   <div id="fillSummary" class="fill-summary" hidden></div>
   <div id="resumeLine" class="resume-line" hidden></div>

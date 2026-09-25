@@ -48,6 +48,17 @@
   var serviceDot = document.getElementById('serviceDot');
   var optionsBtn = document.getElementById('optionsBtn');
 
+  // -- cover letter (item 2) --
+  var coverLetterBtn = document.getElementById('coverLetterBtn');
+  var coverLetterStatusEl = document.getElementById('coverLetterStatus');
+  var coverLetterBoxEl = document.getElementById('coverLetterBox');
+  var coverLetterJobEl = document.getElementById('coverLetterJob');
+  var coverLetterTextEl = document.getElementById('coverLetterText');
+  var coverLetterWarningsEl = document.getElementById('coverLetterWarnings');
+  var coverLetterCopyBtn = document.getElementById('coverLetterCopyBtn');
+  var coverLetterDownloadBtn = document.getElementById('coverLetterDownloadBtn');
+  var coverLetterInsertBtn = document.getElementById('coverLetterInsertBtn');
+
   // TEST-ONLY: "?tabId=<id>" pins this panel instance to a specific tab for its whole lifetime
   // instead of following chrome.tabs.onActivated/onUpdated in its own window. This exists
   // purely so scripts/chrome_panel_test.py can point two independent panel page loads at two
@@ -72,6 +83,9 @@
   // status line can say "Cancelling…" instead of flipping back to a generic "Filling…" while
   // the loop finishes its current field. Cleared once that tab is no longer 'running'.
   var cancelRequestedForTab = null;
+  // The last FIND_COVER_LETTER_FIELD result for activeTabId ({id, label}), or null — see
+  // "DRAFT COVER LETTER" below. Reset whenever the active tab changes (see setActiveTab()).
+  var coverLetterFieldForTab = null;
 
   function stateKey(tabId) {
     return 'fillState_' + tabId;
@@ -440,6 +454,11 @@
 
   function setActiveTab(tabId) {
     activeTabId = tabId;
+    // A cover-letter draft is specific to whichever job/tab it was written for — never carry it
+    // over to a different tab you switch to (see "draft cover letter" below).
+    coverLetterFieldForTab = null;
+    coverLetterBoxEl.hidden = true;
+    setCoverLetterStatus('');
     renderForTab(tabId);
   }
 
@@ -602,6 +621,141 @@
         reportBtn.disabled = false;
       }
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // DRAFT COVER LETTER (item 2). Top frame only, gated on the same permission check as Fill/
+  // Report (it reads the page's visible text and scans for a cover-letter field). The service
+  // call itself goes through background.js (it holds the token); everything else here talks
+  // straight to content.js, the same pattern "Report page" already uses for CAPTURE.
+  // ---------------------------------------------------------------------
+  function setCoverLetterStatus(text, kind) {
+    if (!text) { coverLetterStatusEl.hidden = true; coverLetterStatusEl.textContent = ''; return; }
+    coverLetterStatusEl.hidden = false;
+    coverLetterStatusEl.textContent = text;
+    coverLetterStatusEl.className = 'cover-letter-status' + (kind ? ' ' + kind : '');
+  }
+
+  async function gatherFrameUrls(tabId, topUrl) {
+    var urls = [topUrl];
+    try {
+      if (chrome.webNavigation && typeof chrome.webNavigation.getAllFrames === 'function') {
+        var frames = await chrome.webNavigation.getAllFrames({ tabId: tabId });
+        (frames || []).forEach(function (f) {
+          if (f.url && urls.indexOf(f.url) === -1) urls.push(f.url);
+        });
+      }
+    } catch (e) {
+      // best-effort — the top URL alone is still a useful ATS-recognizable URL most of the time
+    }
+    return urls;
+  }
+
+  function renderCoverLetter(data) {
+    coverLetterBoxEl.hidden = false;
+    var job = data.job || {};
+    var jobBits = [];
+    if (job.title) jobBits.push(job.title);
+    if (job.company) jobBits.push(job.company);
+    var jobLine = jobBits.length ? jobBits.join(' · ') : 'Job details not identified';
+    coverLetterJobEl.textContent = jobLine + ' — drafted by ' + (data.provider || 'the local model') +
+      (job.source ? (' (job source: ' + job.source + ')') : '');
+    coverLetterTextEl.value = data.text || '';
+    var warnings = data.warnings || [];
+    coverLetterWarningsEl.hidden = !warnings.length;
+    if (warnings.length) coverLetterWarningsEl.textContent = 'Review before sending: ' + warnings.join(' · ');
+    coverLetterInsertBtn.hidden = !coverLetterFieldForTab;
+  }
+
+  coverLetterBtn.addEventListener('click', function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    // Synchronous, no `await` before it — see the block comment on gatePermissions() above.
+    var gate = gatePermissions(tabId);
+    gate.promise.then(async function (granted) {
+      if (!granted) {
+        setCoverLetterStatus('ApplyPilot needs permission to read this page on ' +
+          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', 'error');
+        return;
+      }
+      var tab = await safeGetTab(tabId);
+      if (!tab || !canScript(tab.url)) {
+        setCoverLetterStatus('Open a job application page (http/https) in this tab, then try again.', 'error');
+        return;
+      }
+      coverLetterBtn.disabled = true;
+      coverLetterBoxEl.hidden = true;
+      coverLetterFieldForTab = null;
+      setCoverLetterStatus('Drafting…');
+      try {
+        // Top frame only — content.js's EXTRACT_PAGE_TEXT/FIND_COVER_LETTER_FIELD (scanner.js is
+        // a dependency of both; capture.js rides along unused, same as every other injection here).
+        await ensureInjected(tabId);
+        var textResp = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_PAGE_TEXT' });
+        var fieldResp = await chrome.tabs.sendMessage(tabId, { type: 'FIND_COVER_LETTER_FIELD' });
+        coverLetterFieldForTab = (fieldResp && fieldResp.field) || null;
+        var urls = await gatherFrameUrls(tabId, tab.url);
+        var resp = await chrome.runtime.sendMessage({
+          type: 'DRAFT_COVER_LETTER', tabId: tabId, urls: urls,
+          pageText: (textResp && textResp.text) || ''
+        });
+        if (!resp || !resp.ok) {
+          // 403 (model not allowed on this computer) / 422 (no job description / drafting
+          // refused) carry the service's own `.detail` verbatim — see handleResponseVerbatim()
+          // in background.js — shown exactly as the service wrote it, no extra wrapping.
+          setCoverLetterStatus((resp && (resp.detail || resp.message)) || 'Could not draft a cover letter.', 'error');
+          return;
+        }
+        renderCoverLetter(resp.data || {});
+        setCoverLetterStatus('');
+      } catch (e) {
+        setCoverLetterStatus('Could not draft a cover letter: ' + (e && e.message ? e.message : e), 'error');
+      } finally {
+        coverLetterBtn.disabled = false;
+      }
+    });
+  });
+
+  coverLetterCopyBtn.addEventListener('click', async function () {
+    try {
+      await navigator.clipboard.writeText(coverLetterTextEl.value);
+      setCoverLetterStatus('Copied to clipboard.', 'ok');
+    } catch (e) {
+      setCoverLetterStatus('Could not copy: ' + (e && e.message ? e.message : e), 'error');
+    }
+  });
+
+  coverLetterDownloadBtn.addEventListener('click', function () {
+    var blob = new Blob([coverLetterTextEl.value], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cover-letter.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  });
+
+  coverLetterInsertBtn.addEventListener('click', async function () {
+    if (activeTabId == null || !coverLetterFieldForTab) return;
+    var tabId = activeTabId;
+    coverLetterInsertBtn.disabled = true;
+    try {
+      // Goes through content.js's normal guarded applyFill()/highlight() path — recorded as a
+      // draft and undoable exactly like any other field (see insertCoverLetterDraft() there).
+      var resp = await chrome.tabs.sendMessage(tabId, {
+        type: 'INSERT_COVER_LETTER', fieldId: coverLetterFieldForTab.id, text: coverLetterTextEl.value
+      });
+      if (resp && resp.ok) {
+        setCoverLetterStatus('Inserted into "' + (coverLetterFieldForTab.label || 'the cover letter field') +
+          '" — review the page before submitting.', 'ok');
+        await renderForTab(tabId);
+      } else {
+        setCoverLetterStatus((resp && resp.error) || 'Could not insert the draft into that field.', 'error');
+      }
+    } catch (e) {
+      setCoverLetterStatus('Could not insert the draft: ' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      coverLetterInsertBtn.disabled = false;
+    }
   });
 
   optionsBtn.addEventListener('click', function () {

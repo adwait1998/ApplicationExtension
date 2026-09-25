@@ -168,6 +168,32 @@ below.
    just how many restores were attempted. **Report page** (unchanged, top frame only) saves the
    form's structure — never values — for diagnosing a bad fill.
 
+## Draft cover letter
+
+The panel's **Draft cover letter** button asks the local service to write one, from your profile
+and résumé, against the job behind the page you're looking at:
+
+1. `content.js` (top frame only, same as **Report page**) reads the page's own main visible text
+   — capped at ~15,000 characters, walking live text nodes and skipping anything inside a form
+   field (`input`/`select`/`textarea`/`button`/`option`) or anything the scanner would already
+   treat as invisible — and separately scans for a `textarea` or plain text `input` whose resolved
+   label mentions "cover letter".
+2. `background.js` calls `POST /cover-letter` with the tab's URL, every frame's URL (an embedded
+   Greenhouse/Lever/Ashby/Workday iframe's own URL is what lets the service recognize the posting
+   through its public API — see `job_context.py`), and that page text as a last resort.
+3. The result is shown in a clearly-marked **DRAFT** box (blue, "review before using" — the same
+   color this panel uses for every piece of generated text, never green) with the job the service
+   identified, any validator warnings, and **Copy** / **Download .txt** buttons. **Insert into the
+   cover-letter box** only appears when step 1 actually found a field for it.
+4. Inserting goes through the exact same guarded `applyFill()` / highlight path a normal fill
+   uses — so it survives a controlled-input re-render the same way, is highlighted **draft**
+   (blue), is recorded in this frame's own `priorValues`, and **Undo** restores it exactly like
+   any other field.
+5. A 403 ("no language model available on this computer, or the operator hasn't allowed the
+   configured cloud one yet") or 422 ("couldn't find this job's description to write a letter
+   against", or the draft was refused because it claimed experience the profile doesn't have — see
+   `grounding.py`) is shown **verbatim** — the service's own `detail` text, not a generic failure.
+
 ## Fill every frame
 
 About a quarter of real job postings are a company's own careers page embedding the actual

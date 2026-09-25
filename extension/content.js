@@ -802,8 +802,17 @@
     };
   }
 
+  // The most recent state object this frame has reported, kept around so a standalone action
+  // that happens OUTSIDE the normal prepareAndScan/applyFills pipeline (inserting a cover-letter
+  // draft, item 2; "remember my answers" touches no DOM so it doesn't need this) can update just
+  // its own corner of that state (e.g. undoAvailable, or append one more drafted field) and
+  // re-report it, WITHOUT resetting the visible fill summary the way starting a fresh
+  // freshState('running'/'idle') would. Never read by anything outside this file.
+  var lastReportedState = null;
+
   function sendStateUpdate(state) {
     state.updatedAt = Date.now();
+    lastReportedState = state;
     try {
       var p = chrome.runtime.sendMessage({ type: 'FILL_STATE_UPDATE', state: state });
       // Fire-and-forget from this file's point of view — the pipeline must not stall waiting
@@ -932,6 +941,145 @@
       });
   }
 
+  // ---------------------------------------------------------------------
+  // COVER LETTER (item 2) — a "Draft cover letter" click in the panel needs the page's own
+  // visible text (a last-resort job description source — the service tries the operator's jobs
+  // DB and the ATS's own public posting API first, see job_context.py) and, separately, whether
+  // there's somewhere on THIS page to put the finished draft. Both are read-only / additive:
+  // extracting text touches nothing, finding the field only SCANS, and inserting goes through the
+  // exact same guarded applyFill()/highlight()/priorValues path a normal fill uses so Undo can
+  // restore it too — see insertCoverLetterDraft() below. Top frame only, same as "Report page".
+  // ---------------------------------------------------------------------
+  var MAX_PAGE_TEXT_CHARS = 15000;
+  var PAGE_TEXT_EXCLUDED_TAGS = { script: 1, style: 1, noscript: 1, input: 1, select: 1, textarea: 1, button: 1, option: 1, optgroup: 1 };
+
+  function isInsideExcludedField(el) {
+    var n = el;
+    while (n) {
+      if (n.nodeType === 1 && PAGE_TEXT_EXCLUDED_TAGS[n.tagName.toLowerCase()]) return true;
+      n = n.parentElement;
+    }
+    return false;
+  }
+
+  /**
+   * The page's own main visible text, capped at MAX_PAGE_TEXT_CHARS, excluding form fields —
+   * walks live text nodes (never a detached clone: visibility needs real layout, and
+   * ApplyPilotScanner.isVisible() only works on a node that's actually in the rendered document)
+   * so it naturally skips display:none/hidden copy the same way the scanner already does for
+   * fields. Read-only — never touches the DOM.
+   */
+  function extractVisiblePageText(doc) {
+    var root = doc && doc.body;
+    if (!root || typeof doc.createTreeWalker !== 'function') return '';
+    var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var parts = [];
+    var total = 0;
+    var node;
+    while ((node = walker.nextNode())) {
+      if (total >= MAX_PAGE_TEXT_CHARS) break;
+      var raw = node.nodeValue;
+      if (!raw || !raw.trim()) continue;
+      var parentEl = node.parentElement;
+      if (!parentEl || isInsideExcludedField(parentEl)) continue;
+      try {
+        if (!ApplyPilotScanner.isVisible(parentEl)) continue;
+      } catch (e) {
+        continue;
+      }
+      var text = raw.replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      parts.push(text);
+      total += text.length + 1;
+    }
+    return parts.join(' ').slice(0, MAX_PAGE_TEXT_CHARS);
+  }
+
+  var COVER_LETTER_LABEL_RE = /cover\s*letter/i;
+
+  /**
+   * A textarea/text-input FieldDescriptor whose resolved label mentions "cover letter", or null.
+   * Runs a real scanAll() (merged additively into the live `registry` — never replacing it, so
+   * ids an earlier fill's Undo still depends on keep resolving) purely to find candidates; nothing
+   * is written here.
+   */
+  function findCoverLetterField() {
+    var result = ApplyPilotScanner.scanAll(document);
+    for (var id in result.registry) {
+      if (Object.prototype.hasOwnProperty.call(result.registry, id)) registry[id] = result.registry[id];
+    }
+    var match = null;
+    result.fields.forEach(function (f) {
+      if (match) return;
+      var tag = String(f.tag || '').toLowerCase();
+      var type = String(f.type || '').toLowerCase();
+      var isTextish = tag === 'textarea' || (tag === 'input' && (type === '' || type === 'text'));
+      if (isTextish && COVER_LETTER_LABEL_RE.test(f.label || '')) match = f;
+    });
+    return match ? { id: match.id, label: match.label || '' } : null;
+  }
+
+  /**
+   * Republishes whatever this frame last reported, with just `patch` applied, WITHOUT resetting
+   * filled/drafts/needsYou/failed to empty the way starting a brand-new freshState() would — so a
+   * standalone action taken between fills (or before any fill has run at all) never wipes an
+   * already-visible fill summary. If nothing has been reported yet, seeds a minimal 'done' state
+   * so the panel has something to render.
+   */
+  function patchReportedState(patch) {
+    var state = lastReportedState || freshState('done', Date.now());
+    for (var k in patch) if (Object.prototype.hasOwnProperty.call(patch, k)) state[k] = patch[k];
+    sendStateUpdate(state);
+    return state;
+  }
+
+  /**
+   * Inserts `text` into the field `fieldId` (from findCoverLetterField(), or a stale id from a
+   * page that has since changed) through the SAME guarded applyFill() + highlight() path a normal
+   * fill uses, so it survives a controlled-input re-render the same way, is recorded in
+   * `priorValues` (Undo replays it exactly like any other field — see undo() above), and is
+   * highlighted 'draft' (blue), never 'filled' (green) — this is generated text the operator must
+   * review, same rule as every other draft in this extension.
+   */
+  function insertCoverLetterDraft(fieldId, text) {
+    var entry = registry[fieldId];
+    if (!entry) return Promise.resolve({ ok: false, error: 'That field is no longer on the page (did it change since the draft was requested?).' });
+    if (!Object.prototype.hasOwnProperty.call(priorValues, fieldId)) {
+      try { priorValues[fieldId] = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { priorValues[fieldId] = undefined; }
+    }
+    return Promise.resolve().then(function () {
+      return ApplyPilotScanner.applyFill(entry, text);
+    }).then(function (ok) {
+      var targets = ApplyPilotScanner.getHighlightTargets(entry);
+      if (!ok) {
+        return { ok: false, error: 'The page would not accept the draft text in that field.' };
+      }
+      for (var i = 0; i < targets.length; i++) {
+        highlight(targets[i], 'draft', 'Cover letter draft inserted — review before submitting');
+      }
+      var label = (currentPrepare && currentPrepare.fieldsById[fieldId] && currentPrepare.fieldsById[fieldId].label) || 'Cover letter';
+      var state = lastReportedState;
+      var already = state && (state.drafts || []).some(function (d) { return d.id === fieldId; });
+      if (!already) {
+        var drafts = (state && state.drafts || []).concat([{
+          id: fieldId, label: label, value: text, reason: 'Cover letter draft inserted', profile_key: null,
+          source: 'cover-letter', draft: true
+        }]);
+        var counts = (state && state.counts) || emptyCounts();
+        patchReportedState({
+          status: 'done', drafts: drafts,
+          counts: { filled: counts.filled || 0, drafts: drafts.length, needsYou: counts.needsYou || 0, failed: counts.failed || 0 },
+          undoAvailable: true
+        });
+      } else {
+        patchReportedState({ undoAvailable: true });
+      }
+      return { ok: true };
+    }, function (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    });
+  }
+
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || typeof msg !== 'object') return false;
 
@@ -1054,6 +1202,20 @@
         sendResponse(cap ? { ok: true, structure: cap.captureStructure(document) }
                          : { ok: false, error: 'capture.js not loaded' });
         return false;
+      }
+      if (msg.type === 'EXTRACT_PAGE_TEXT') {
+        // Read-only, top frame only (sidepanel.js never sends this to any other frame) — see
+        // "COVER LETTER" above.
+        sendResponse({ ok: true, text: extractVisiblePageText(document) });
+        return false;
+      }
+      if (msg.type === 'FIND_COVER_LETTER_FIELD') {
+        sendResponse({ ok: true, field: findCoverLetterField() });
+        return false;
+      }
+      if (msg.type === 'INSERT_COVER_LETTER') {
+        insertCoverLetterDraft(msg.fieldId, String(msg.text || '')).then(sendResponse);
+        return true; // async response
       }
     } catch (e) {
       sendResponse({ error: String(e && e.message ? e.message : e) });
