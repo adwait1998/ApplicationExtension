@@ -70,3 +70,15 @@ def test_salary_into_a_number_input_is_the_number():
     assert isinstance(r, FillResult) and r.value == "120000"
     r2 = resolve.resolve_field(F(id="s", label="Desired salary", type="text"), NIDA)
     assert r2.value == "120000 USD"
+
+
+@pytest.mark.parametrize("label", ["Veteran", "Person with disability", "Hispanic or Latine"])
+def test_one_checkbox_of_an_eeo_group_is_left_unticked_not_filled(label):
+    r = resolve.resolve_field(F(id="c", label=label, type="checkbox"), {})
+    assert isinstance(r, SkipResult) and "single checkbox" in r.reason
+
+
+def test_a_yes_no_canary_still_ticks_a_single_checkbox():
+    r = resolve.resolve_field(F(id="c", label="I am legally authorized to work in the United States", type="checkbox"),
+                              NIDA)
+    assert isinstance(r, FillResult) and r.value == "Yes"

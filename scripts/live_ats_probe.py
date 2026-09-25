@@ -277,15 +277,36 @@ UNSEEN_JS = """(ids) => {
 # After every fill in a frame: blur, let the page settle, and read EVERYTHING
 # back. A value that reverted (React re-render, a combobox clearing typed text
 # on blur) is "didn't stick", never "filled".
-REREAD_JS = """async (ids) => {
+REREAD_JS = r"""async (ids) => {
   try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
   await new Promise(r => setTimeout(r, 900));
+  // What the PAGE holds as committed, not what we typed:
+  //  - a react-select / ARIA combobox input's own text is only the search
+  //    box; the committed value is the single-value (or multi-value chips)
+  //    rendered in its control, and nothing means nothing was selected;
+  //  - a radio group reads back as the checked radio's LABEL ("on" hides it).
+  const committedCombobox = (el) => {
+    const control = el.closest('[class*="select__control"], [class*="-control"], [class*="Select-control"]')
+      || el.parentElement;
+    if (!control) return '';
+    const single = control.querySelector('[class*="single-value"], [class*="singleValue"], [class*="Select-value"]');
+    if (single) return single.textContent || '';
+    const chips = control.querySelectorAll('[class*="multi-value__label"], [class*="multiValue"] [class*="label"]');
+    return Array.prototype.map.call(chips, c => c.textContent || '').join(', ');
+  };
   const out = {};
   for (const id of ids) {
     const entry = (window.__AP_REG || {})[id];
     let v = '';
-    try { v = entry ? String(ApplyPilotScanner.getCurrentValue(entry) || '') : ''; } catch (e) {}
-    out[id] = v.slice(0, 200);
+    try {
+      if (!entry) v = '';
+      else if (entry.kind === 'element' && entry.el && entry.el.getAttribute('role') === 'combobox') v = committedCombobox(entry.el);
+      else if (entry.kind === 'radio-group') {
+        const on = (entry.elements || []).filter(r => r.checked)[0];
+        v = on ? (ApplyPilotScanner.getLabel(on) || on.value || 'checked') : '';
+      } else v = String(ApplyPilotScanner.getCurrentValue(entry) || '');
+    } catch (e) {}
+    out[id] = String(v).replace(/\s+/g, ' ').trim().slice(0, 200);
   }
   return out;
 }"""

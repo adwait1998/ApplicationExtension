@@ -235,6 +235,15 @@ def resolve_field(
                 return SkipResult(id=field.id, source="canary",
                                   reason=f"canary:{category} — {why}", auto_fill=False)
             answer = chosen
+        if answer and (field.type or "").strip().lower() == "checkbox" \
+                and answer.strip().lower() not in ("yes", "no"):
+            # One checkbox of an EEO group ("Veteran", "Person with
+            # disability") is an OPTION, not the question: it can't record
+            # "Decline to self-identify" or "Female". Leave it unticked and
+            # say so, instead of reporting a fill that changed nothing.
+            return SkipResult(id=field.id, source="canary",
+                              reason=f"canary:{category} — a single checkbox can't take '{answer}'; left unticked",
+                              auto_fill=False)
         if answer and category == "salary" and (field.type or "").strip().lower() == "number":
             digits = re.sub(r"[^\d.]", "", answer.split()[0] if answer.split() else "")
             answer = digits or None  # a number input takes the number, not "120000 USD"
