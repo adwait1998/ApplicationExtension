@@ -60,6 +60,21 @@
   var coverLetterDownloadBtn = document.getElementById('coverLetterDownloadBtn');
   var coverLetterInsertBtn = document.getElementById('coverLetterInsertBtn');
 
+  // -- tailor my résumé --
+  var tailorResumeBtn = document.getElementById('tailorResumeBtn');
+  var tailorResumeStatusEl = document.getElementById('tailorResumeStatus');
+  var tailorResumeBoxEl = document.getElementById('tailorResumeBox');
+  var tailorResumeJobEl = document.getElementById('tailorResumeJob');
+  var tailorResumeVerdictEl = document.getElementById('tailorResumeVerdict');
+  var tailorResumeIssuesEl = document.getElementById('tailorResumeIssues');
+  var tailorResumeWarningsEl = document.getElementById('tailorResumeWarnings');
+  var tailorResumeTextEl = document.getElementById('tailorResumeText');
+  var tailorResumeDownloadBtn = document.getElementById('tailorResumeDownloadBtn');
+  var tailorResumeUseBtn = document.getElementById('tailorResumeUseBtn');
+  var tailorResumeUseStatusEl = document.getElementById('tailorResumeUseStatus');
+  var attachTailoredRowEl = document.getElementById('attachTailoredRow');
+  var attachTailoredBtn = document.getElementById('attachTailoredBtn');
+
   // -- remember my answers (item 3) --
   var rememberBoxEl = document.getElementById('rememberBox');
   var rememberBtn = document.getElementById('rememberBtn');
@@ -102,6 +117,11 @@
   // The last FIND_COVER_LETTER_FIELD result for activeTabId ({id, label}), or null — see
   // "DRAFT COVER LETTER" below. Reset whenever the active tab changes (see setActiveTab()).
   var coverLetterFieldForTab = null;
+  // The last successful /resume/tailor result for activeTabId ({id, filename, text, status,
+  // judge, warnings, job}), or null — see "TAILOR MY RÉSUMÉ" below. Reset whenever the active
+  // tab changes, same reasoning as coverLetterFieldForTab: a tailored résumé is specific to
+  // whichever job/tab it was written for.
+  var tailorResumeForTab = null;
 
   function stateKey(tabId) {
     return 'fillState_' + tabId;
@@ -247,9 +267,15 @@
     var r = resume || { attempted: false };
     resumeLineEl.hidden = false;
 
+    // Build spec item 3: say which file actually got attached — background.js's
+    // callResumeForAttach()/content.js's maybeAttachResume() tag every result with `kind`
+    // ('base' or 'tailored'); a result from before this feature (or one this tab never routed
+    // through the tailored path) simply has no kind, so nothing extra is shown for it.
+    var kindSuffix = r.kind === 'tailored' ? ' (tailored)' : (r.kind === 'base' ? ' (base)' : '');
+
     if (r.attempted && r.attached) {
       resumeLineEl.className = 'resume-line ok';
-      resumeLineEl.textContent = '✓ Attached ' + (r.filename || 'résumé file') + '.';
+      resumeLineEl.textContent = '✓ Attached ' + (r.filename || 'résumé file') + kindSuffix + '.';
       return;
     }
     if (r.attempted && r.alreadyAttached) {
@@ -416,6 +442,9 @@
       undoBtn.disabled = true;
       reportBtn.disabled = true;
       exportReportBtn.disabled = true;
+      tailorResumeBtn.disabled = true;
+      tailorResumeUseBtn.disabled = true;
+      attachTailoredBtn.disabled = true;
       progressBox.hidden = true;
       fillSummaryEl.hidden = true;
       resumeLineEl.hidden = true;
@@ -453,6 +482,12 @@
     scanBtn.disabled = !scriptable || isRunning;
     cancelBtn.hidden = !isRunning;
     undoBtn.disabled = isRunning || stale || !state || !state.undoAvailable;
+    // Tailor my résumé / Use for this application / Attach tailored résumé all touch the page
+    // (page-text extraction, or the résumé file input directly) — same "must not run while a
+    // fill is already touching this frame" reasoning as scanBtn/continuationToggle above.
+    tailorResumeBtn.disabled = !scriptable || isRunning;
+    tailorResumeUseBtn.disabled = isRunning;
+    attachTailoredBtn.disabled = isRunning;
     // Item 6 (Export fill report): anything worth reporting on — enabled once there's at least
     // one row in any of the four lists, on a result that's current for this page.
     var hasRows = !!(state && (((state.filled || []).length) + ((state.drafts || []).length) +
@@ -559,6 +594,13 @@
     coverLetterFieldForTab = null;
     coverLetterBoxEl.hidden = true;
     setCoverLetterStatus('');
+    // Likewise, a tailored résumé (and the offer to attach it) is specific to whichever tab/job
+    // it was drafted for — see "TAILOR MY RÉSUMÉ" below.
+    tailorResumeForTab = null;
+    tailorResumeBoxEl.hidden = true;
+    setTailorResumeStatus('');
+    setTailorResumeUseStatus('');
+    attachTailoredRowEl.hidden = true;
     // Likewise, a "Saved N answers" confirmation is specific to whichever tab/fill produced it.
     setRememberStatus('');
     rememberDetailsEl.innerHTML = '';
@@ -723,7 +765,10 @@
       // not how many restores were merely attempted — see background.js's undoFillForTab() and
       // content.js's undo().
       var resp = await chrome.runtime.sendMessage({ type: 'UNDO_TAB', tabId: activeTabId });
-      setStatus('Restored ' + ((resp && resp.restored) || 0) + ' field(s) to their previous values.');
+      var notRestored = (resp && resp.notRestored) || 0;
+      setStatus('Restored ' + ((resp && resp.restored) || 0) + ' field(s) to their previous values.' +
+        (notRestored ? (' ' + notRestored + ' could not be confirmed restored — check them by hand.') : ''),
+        notRestored > 0);
       await renderForTab(activeTabId);
     } catch (e) {
       setStatus('Could not undo: ' + (e && e.message ? e.message : e), true);
@@ -771,16 +816,20 @@
   // frame, label, tag/widget, status, source and reason — NEVER a value, on purpose, since this
   // is meant to be sent to someone else to diagnose a bad fill.
   // ---------------------------------------------------------------------
-  // A handful of reason strings quote the actual attempted value for the operator's OWN benefit
-  // on screen (e.g. `Could not match "Senior Engineer" to an option`) — genuinely useful there,
-  // but exactly what this export must never carry off the machine. Rather than trust every
-  // reason-generating call site (present and future, including the service's own `fill.reason`
-  // text) to never do this, every quoted substring is redacted here, at the one place this
-  // export is actually built.
-  function redactQuoted(text) {
-    return String(text || '').replace(/"[^"]*"/g, '"[redacted]"');
-  }
-
+  // Reviewer round 3, item 1: a free-text `reason` can carry a real value — a quoted attempted
+  // value ("Senior Engineer"), but just as easily one in single/curly quotes or no quotes at all
+  // (an unquoted skills term, a canary question's own wording), and the SERVICE's own `reason`
+  // text is outside this file's control regardless of how carefully it's written today. Rather
+  // than pattern-match for quotes (the old redactQuoted() approach, which only ever caught the
+  // double-quoted case and is removed here), this export is now built from an ALLOW-LIST: every
+  // field content.js already tags with a fixed, closed-vocabulary `category` at the exact point
+  // it's created (see content.js's categoryForSource() and every push site in applyFills()) — the
+  // free-text `reason` itself never leaves this function, for ANY row, under any circumstance.
+  var KNOWN_REPORT_CATEGORIES = {
+    canary: 1, deterministic: 1, structured: 1, laya: 1, answer_bank: 1, draft: 1,
+    secret_guard: 1, unresolved: 1, other: 1, kept_value: 1, didnt_stick: 1, timed_out: 1,
+    no_match: 1, cancelled: 1, time_budget: 1, field_missing: 1
+  };
   function reportRow(entry) {
     return {
       frame: entry.frame || null,
@@ -789,7 +838,10 @@
       widget: entry.widget || '',
       status: entry.status || '',
       source: entry.source || '',
-      reason: redactQuoted(entry.reason || '')
+      // Defensively re-validated against the SAME allow-list one more time here (belt and
+      // braces, matching this codebase's own habit elsewhere) so a future bug that puts
+      // something unexpected into `category` still can't smuggle free text into this file.
+      category: KNOWN_REPORT_CATEGORIES[entry.category] ? entry.category : 'other'
     };
   }
 
@@ -968,6 +1020,217 @@
     } finally {
       coverLetterInsertBtn.disabled = false;
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // TAILOR MY RÉSUMÉ. Mirrors DRAFT COVER LETTER above: same permission gate, same top-frame
+  // page-text source, same verbatim 403/422/503 handling (POST /resume/tailor -> {id, url,
+  // title, company, status, judge:{verdict,issues}, warnings, created, pdf, text}). The review
+  // box shows the status (and the judge's own issues when there's a warning), the validator
+  // warnings, a collapsible preview of the tailored text, Download PDF and Use for this
+  // application — never auto-inserted anywhere, always reviewed here first.
+  // ---------------------------------------------------------------------
+  function setTailorResumeStatus(text, kind) {
+    if (!text) { tailorResumeStatusEl.hidden = true; tailorResumeStatusEl.textContent = ''; return; }
+    tailorResumeStatusEl.hidden = false;
+    tailorResumeStatusEl.textContent = text;
+    tailorResumeStatusEl.className = 'cover-letter-status' + (kind ? ' ' + kind : '');
+  }
+
+  function setTailorResumeUseStatus(text, kind) {
+    if (!text) { tailorResumeUseStatusEl.hidden = true; tailorResumeUseStatusEl.textContent = ''; return; }
+    tailorResumeUseStatusEl.hidden = false;
+    tailorResumeUseStatusEl.textContent = text;
+    tailorResumeUseStatusEl.className = 'cover-letter-status' + (kind ? ' ' + kind : '');
+  }
+
+  function renderTailorResume(data) {
+    tailorResumeBoxEl.hidden = false;
+    var jobBits = [];
+    if (data.title) jobBits.push(data.title);
+    if (data.company) jobBits.push(data.company);
+    tailorResumeJobEl.textContent = jobBits.length ? jobBits.join(' · ') : 'Job details not identified';
+
+    var warned = data.status === 'approved_with_judge_warning';
+    tailorResumeVerdictEl.className = 'tailor-resume-verdict' + (warned ? ' warn' : '');
+    tailorResumeVerdictEl.textContent = warned
+      ? 'Approved, with a note from the safety check — review carefully before using.'
+      : 'Approved — passed the safety check.';
+
+    var judge = data.judge || {};
+    var issues = judge.issues || [];
+    tailorResumeIssuesEl.hidden = !(warned && issues.length);
+    if (warned && issues.length) tailorResumeIssuesEl.textContent = "The judge's own issues: " + issues.join(' · ');
+
+    var warnings = data.warnings || [];
+    tailorResumeWarningsEl.hidden = !warnings.length;
+    if (warnings.length) tailorResumeWarningsEl.textContent = 'Review before using: ' + warnings.join(' · ');
+
+    tailorResumeTextEl.value = data.text || '';
+    tailorResumeForTab = { id: data.id, status: data.status || '' };
+    setTailorResumeUseStatus('');
+    attachTailoredRowEl.hidden = true;
+  }
+
+  tailorResumeBtn.addEventListener('click', function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    // Synchronous, no `await` before it — see the block comment on gatePermissions() above.
+    var gate = gatePermissions(tabId);
+    gate.promise.then(async function (granted) {
+      if (!granted) {
+        setTailorResumeStatus('ApplyPilot needs permission to read this page on ' +
+          gate.requested.map(hostFromPattern).join(', ') + ' — nothing runs until you allow it.', 'error');
+        return;
+      }
+      var tab = await safeGetTab(tabId);
+      if (!tab || !canScript(tab.url)) {
+        setTailorResumeStatus('Open a job application page (http/https) in this tab, then try again.', 'error');
+        return;
+      }
+      tailorResumeBtn.disabled = true;
+      tailorResumeBoxEl.hidden = true;
+      tailorResumeForTab = null;
+      setTailorResumeStatus('Tailoring…');
+      try {
+        // Top frame only — same content.js EXTRACT_PAGE_TEXT the cover letter uses (scanner.js
+        // is a dependency of both; capture.js rides along unused, same as every other injection).
+        await ensureInjected(tabId);
+        var textResp = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_PAGE_TEXT' });
+        var urls = await gatherFrameUrls(tabId, tab.url);
+        var resp = await chrome.runtime.sendMessage({
+          type: 'RESUME_TAILOR', tabId: tabId, urls: urls,
+          pageText: (textResp && textResp.text) || ''
+        });
+        if (!resp || !resp.ok) {
+          // 403/422/503 carry the service's own `.detail` verbatim — see handleResponseVerbatim()
+          // in background.js, shown exactly as the service wrote it.
+          setTailorResumeStatus((resp && (resp.detail || resp.message)) || 'Could not tailor a résumé.', 'error');
+          return;
+        }
+        renderTailorResume(resp.data || {});
+        setTailorResumeStatus('');
+      } catch (e) {
+        setTailorResumeStatus('Could not tailor a résumé: ' + (e && e.message ? e.message : e), 'error');
+      } finally {
+        tailorResumeBtn.disabled = false;
+      }
+    });
+  });
+
+  function base64ToBlob(base64, contentType) {
+    var binary = atob(base64 || '');
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: contentType || 'application/pdf' });
+  }
+
+  tailorResumeDownloadBtn.addEventListener('click', async function () {
+    if (!tailorResumeForTab || !tailorResumeForTab.id) return;
+    tailorResumeDownloadBtn.disabled = true;
+    try {
+      // The panel can't fetch this itself (it never holds the token — see background.js's file
+      // header); background.js hands back the bytes and this builds the download client-side,
+      // same pattern the cover letter's own Download .txt already uses.
+      var resp = await chrome.runtime.sendMessage({ type: 'GET_TAILORED_RESUME_PDF', id: tailorResumeForTab.id });
+      if (!resp || !resp.ok) {
+        setTailorResumeStatus((resp && resp.message) || 'Could not download the tailored résumé.', 'error');
+        return;
+      }
+      var d = resp.data || {};
+      var blob = base64ToBlob(d.base64, d.contentType);
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = d.filename || 'Resume.pdf'; // the service's own Content-Disposition filename
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    } catch (e) {
+      setTailorResumeStatus('Could not download the tailored résumé: ' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      tailorResumeDownloadBtn.disabled = false;
+    }
+  });
+
+  /** Renders what an ATTACH_RESUME_NOW-shaped result (from USE_TAILORED_RESUME's own immediate
+   * attach, or ATTACH_TAILORED_RESUME_NOW) means for the operator — the three outcomes the build
+   * spec calls for: nothing to attach to yet (fine — the next Fill will use it), something is
+   * already attached (refuse, offer the retry button), or it attached (or failed to). */
+  function renderAttachResult(attach) {
+    if (!attach || !attach.attempted) {
+      setTailorResumeUseStatus('Saved. If this page has a résumé upload, the next Fill will use the tailored PDF instead of the base résumé.', 'ok');
+      attachTailoredRowEl.hidden = true;
+      return;
+    }
+    if (attach.alreadyAttached) {
+      setTailorResumeUseStatus('A résumé is already attached — remove it on the page, then click Attach tailored résumé.', 'error');
+      attachTailoredRowEl.hidden = false;
+      return;
+    }
+    if (attach.attached) {
+      setTailorResumeUseStatus('Attached the tailored résumé to this page.', 'ok');
+      attachTailoredRowEl.hidden = true;
+      return;
+    }
+    setTailorResumeUseStatus('Saved, but could not attach it immediately' + (attach.reason ? (' — ' + attach.reason) : '') +
+      '. The next Fill on this page will try again.', 'error');
+    attachTailoredRowEl.hidden = true;
+  }
+
+  tailorResumeUseBtn.addEventListener('click', function () {
+    if (activeTabId == null || !tailorResumeForTab || !tailorResumeForTab.id) return;
+    var tabId = activeTabId;
+    var useId = tailorResumeForTab.id;
+    // Synchronous, no `await` before it — the immediate-attach half of this needs the page
+    // scripted; a decline here still lets the preference itself save below (nothing about
+    // recording "use the tailored PDF next" requires page access).
+    var gate = gatePermissions(tabId);
+    tailorResumeUseBtn.disabled = true;
+    setTailorResumeUseStatus('Saving…');
+    gate.promise.then(async function (granted) {
+      try {
+        var tab = await safeGetTab(tabId);
+        if (granted && tab && canScript(tab.url)) {
+          try { await ensureInjectedAllFrames(tabId); } catch (e) { /* best-effort — see below */ }
+        }
+        var resp = await chrome.runtime.sendMessage({ type: 'USE_TAILORED_RESUME', tabId: tabId, id: useId });
+        if (!resp || !resp.ok) {
+          setTailorResumeUseStatus((resp && resp.error) || 'Could not save this preference.', 'error');
+          return;
+        }
+        renderAttachResult(resp.attach);
+        await renderForTab(tabId);
+      } catch (e) {
+        setTailorResumeUseStatus('Could not save this preference: ' + (e && e.message ? e.message : e), 'error');
+      } finally {
+        tailorResumeUseBtn.disabled = false;
+      }
+    });
+  });
+
+  attachTailoredBtn.addEventListener('click', function () {
+    if (activeTabId == null) return;
+    var tabId = activeTabId;
+    var gate = gatePermissions(tabId);
+    attachTailoredBtn.disabled = true;
+    gate.promise.then(async function (granted) {
+      try {
+        var tab = await safeGetTab(tabId);
+        if (granted && tab && canScript(tab.url)) {
+          try { await ensureInjectedAllFrames(tabId); } catch (e) { /* best-effort */ }
+        }
+        var resp = await chrome.runtime.sendMessage({ type: 'ATTACH_TAILORED_RESUME_NOW', tabId: tabId });
+        if (!resp || !resp.ok) {
+          setTailorResumeUseStatus((resp && resp.error) || 'Could not attach the tailored résumé.', 'error');
+          return;
+        }
+        renderAttachResult(resp.attach);
+        await renderForTab(tabId);
+      } catch (e) {
+        setTailorResumeUseStatus('Could not attach the tailored résumé: ' + (e && e.message ? e.message : e), 'error');
+      } finally {
+        attachTailoredBtn.disabled = false;
+      }
+    });
   });
 
   // ---------------------------------------------------------------------

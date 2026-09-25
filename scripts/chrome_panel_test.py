@@ -116,9 +116,27 @@ cover_letter_calls = []  # every /cover-letter request body — item 2
 answers_learn_calls = []  # every /answers/learn request's `items` list — item 3
 log_calls = []  # every /log request body — item 4
 log_status_calls = []  # every (entry_id, status) POSTed to /log/{id}/status — item 4
+resume_tailor_calls = []  # every /resume/tailor request body — "Tailor my résumé"
+
+# The tailored PDF's own bytes/filename this stub hands back from GET /resume/tailored/{id} —
+# deliberately NOT the same filename (or even the same underlying bytes) a base résumé attach
+# would ever produce (which 404s in this stub, see StubHandler.do_GET below) so a test can tell
+# the two apart just by reading back whatever landed in a file input.
+TAILORED_PDF_BYTES = b"%PDF-1.4 tailored resume bytes for testing"
+TAILORED_PDF_FILENAME = "Ada Test - Resume.pdf"
 
 
 def value_for_field(f):
+    # "location_rt" (the reviewer round 3, item 2 fixture — see RESUME_TAILOR_PAGE_BYTES) needs
+    # to be filled with "United States" SPECIFICALLY to trigger the EEO section it reveals, never
+    # its own first real option (which is genuinely just the next one alphabetically/positionally
+    # and would trigger nothing) — special-cased by name rather than by options[0], since
+    # options[0] here is a blank placeholder on purpose (a real default selection, EMPTY rather
+    # than a coincidentally-already-correct answer, is what keeps content.js's own "never
+    # overwrite the user" check from mistaking the page's own default for an operator-provided
+    # value and refusing to touch it at all).
+    if f.get("name") == "location_rt":
+        return "United States"
     options = f.get("options") or []
     if options:
         return options[0]
@@ -303,6 +321,56 @@ MULTI_STEP_PAGE_BYTES = b"""<!DOCTYPE html>
 </body></html>
 """
 
+# A fixture for "Tailor my résumé": a plain (non-Workday) résumé file input the base résumé is
+# always 404 for in this stub (see StubHandler.do_GET's /resume(/info) branch below) — so ANY
+# successful attach on this page can only be the TAILORED PDF, never accidentally the base one,
+# which is exactly the disambiguation build spec item 4 needs. Also carries the reviewer round 3,
+# item 2 fixture in the SAME page (to keep the browser count down, the same way TAB 6 already
+# combines several behaviours): "location" reveals a 16-radio-shaped EEO section only once it is
+# set to United States — standing in for the real Lever survey the reviewer's note describes —
+# and the EEO section starts with NO placeholder option so build_fills()'s own
+# value_for_field()/options[0] picks "United States" the first time it fills this field, without
+# this file needing any special-cased stub logic for it.
+RESUME_TAILOR_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Great Company Careers</title></head>
+<body>
+<h1>Great Company Careers</h1>
+<p>We are looking for a fantastic engineer to join our team and build great things every day.</p>
+<form id="rt-form">
+  <label for="full_name_rt">Full Name</label>
+  <input type="text" id="full_name_rt" name="full_name_rt">
+
+  <label for="location_rt">What is your location?</label>
+  <select id="location_rt" name="location_rt">
+    <option value="" selected>Select...</option>
+    <option value="us">United States</option>
+    <option value="other">Other</option>
+  </select>
+
+  <div id="eeo_section_rt" style="display:none">
+    <fieldset>
+      <legend>Gender (EEO, voluntary)</legend>
+      <label><input type="radio" name="eeo_gender_rt" value="Male"> Male</label>
+      <label><input type="radio" name="eeo_gender_rt" value="Female"> Female</label>
+    </fieldset>
+  </div>
+
+  <label for="resume_upload_rt">Resume/CV</label>
+  <input type="file" id="resume_upload_rt" name="resume_rt">
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('rt-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+  document.getElementById('location_rt').addEventListener('change', function () {
+    if (this.value === 'us') document.getElementById('eeo_section_rt').style.display = '';
+  });
+</script>
+</body></html>
+"""
+
 
 class StubHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -361,6 +429,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/resume-tailor-page.html"):
+            body = RESUME_TAILOR_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/health":
             self._json(200, {"tiers_available": ["test-stub"]})
         elif self.path == "/profile/counts":
@@ -368,6 +443,17 @@ class StubHandler(BaseHTTPRequestHandler):
             self._json(200, {"work_history": 0, "education": 0})
         elif self.path in ("/resume/info", "/resume"):
             self._json(404, {"detail": "no resume stored (test stub)"})
+        elif self.path.startswith("/resume/tailored/"):
+            # GET /resume/tailored/{id} -> the PDF bytes, Content-Disposition names the file.
+            # Any id is honored here — the stub doesn't need to validate it against a real
+            # /resume/tailor call to prove the extension's own plumbing (background.js's
+            # callResumeTailoredBytes()/the panel's Download PDF button).
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f'attachment; filename="{TAILORED_PDF_FILENAME}"')
+            self.send_header("Content-Length", str(len(TAILORED_PDF_BYTES)))
+            self.end_headers()
+            self.wfile.write(TAILORED_PDF_BYTES)
         else:
             self._json(404, {"detail": "not found"})
 
@@ -378,7 +464,44 @@ class StubHandler(BaseHTTPRequestHandler):
             fields = body.get("fields") or []
             resolve_calls.append((body.get("url"), [f.get("name") for f in fields]))
             fills, skipped = build_fills(fields)
+            url = body.get("url") or ""
+            if "eeoleak" in url:
+                # Reviewer round 3, item 1: seed a reason that quotes an EEO/disability-shaped
+                # value in single quotes, and a second, entirely UNQUOTED one — exactly what an
+                # older reason-redaction that only stripped double-quoted text would have missed
+                # — so the export test below can prove the NEW allow-list (built from a closed
+                # `category`, never free text) keeps it out regardless of how the service happens
+                # to phrase a reason.
+                if fills:
+                    fills[0]["reason"] = "Matches disability status 'Yes, I have a disability' from your profile"
+                if skipped:
+                    skipped[0]["reason"] = "Kept race/ethnicity as Hispanic or Latino, no safe automatic answer"
             self._json(200, {"fills": fills, "skipped": skipped})
+        elif self.path == "/resume/tailor":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            resume_tailor_calls.append(body)
+            first_url = (body.get("urls") or [""])[0]
+            if "rt403" in first_url:
+                self._json(403, {"detail": "no language model on this computer, and no cloud model allowed yet"})
+            elif "rt422" in first_url:
+                self._json(422, {"detail": "couldn't find this job's description to tailor a résumé against"})
+            elif "rt503" in first_url:
+                self._json(503, {"detail": "no model available at all"})
+            else:
+                tailor_id = f"tailor-{len(resume_tailor_calls)}"
+                self._json(200, {
+                    "id": tailor_id,
+                    "url": first_url,
+                    "title": "Test Engineer",
+                    "company": "Great Company",
+                    "status": "approved_with_judge_warning",
+                    "judge": {"verdict": "warning", "issues": ["mentions a certification not on the base résumé"]},
+                    "warnings": ["double-check the projects section"],
+                    "created": "2026-09-24T00:00:00Z",
+                    "pdf": f"/resume/tailored/{tailor_id}",
+                    "text": "Tailored resume text for Ada Test, Software Engineer.",
+                })
         elif self.path == "/cover-letter":
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -443,6 +566,7 @@ stub_thread.start()
 SERVICE_URL = f"http://127.0.0.1:{stub_port}"
 PAGE_BASE = f"{SERVICE_URL}/test-page.html"
 WRAPPER_URL = f"{SERVICE_URL}/embed-wrapper.html"
+RESUME_TAILOR_URL = f"{SERVICE_URL}/resume-tailor-page.html"
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +610,44 @@ def wait_for_done(helper_page, tab_id, timeout_s=20, sample_progress=None):
             return state
         time.sleep(0.05)
     return None
+
+
+def wait_for_running(helper_page, tab_id, timeout_s=5):
+    """Waits until this tab's stored state shows status == 'running'. Needed specifically before
+    calling wait_for_done() after a real PANEL CLICK (as opposed to a direct
+    chrome.runtime.sendMessage a Python call already awaits end-to-end) on a tab that already has
+    a TERMINAL (done/idle) state sitting in storage from an earlier, unrelated standalone action
+    (e.g. "Use for this application"'s own immediate résumé attach, reported via
+    patchReportedState() — see content.js) — Playwright's .click() returns as soon as the click
+    event is dispatched, well before the click handler's own async work (permission check,
+    injection, the RUN_FILL round trip) has run, so wait_for_done()'s very first poll could
+    otherwise see that stale terminal state and return immediately, mistaking it for the new
+    fill's own result."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        state = get_state(helper_page, tab_id)
+        if state and state.get("status") == "running":
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def wait_for_log_entry(helper_page, tab_id, timeout_s=5):
+    """Waits for this tab's automatic /log POST (item 4 — background.js's logFillCompletion()
+    fires it right after a fill reaches 'done', as a SEPARATE, LATER storage write) to land,
+    returning the settled state once it has (or the last state seen, if it never does). A state
+    captured immediately on wait_for_done()'s first 'done' sighting can race this trailing,
+    fill-unrelated write; anything that later re-reads and compares that same tab's state (e.g.
+    proving a DIFFERENT tab's fill left it untouched) should wait for this first so the write it's
+    comparing against isn't itself still in flight."""
+    deadline = time.time() + timeout_s
+    state = None
+    while time.time() < deadline:
+        state = get_state(helper_page, tab_id)
+        if state and state.get("logEntry"):
+            return state
+        time.sleep(0.05)
+    return state
 
 
 def inject_extension_files(helper_page, tab_id):
@@ -608,6 +770,56 @@ def patch_revert_after_fill(helper_page, tab_id, field_name, delay_ms):
             args: [args.fieldName, args.delayMs],
         })""",
         {"tabId": tab_id, "fieldName": field_name, "delayMs": delay_ms},
+    )
+
+
+def patch_reject_restore(helper_page, tab_id, field_name):
+    """Reviewer round 3, item 3: makes a real FILL of `fieldName` succeed normally, but makes
+    UNDO's own restore call for that SAME field (which always passes back the field's ORIGINAL,
+    pre-fill value — empty on a fresh test-page.html field) silently no-op instead of actually
+    writing anything, while still reporting success to the caller — simulating a widget that
+    accepts a real answer but rejects being cleared back out. This is what gives UNDO_TAB's own
+    `notRestored` count something genuine to report; every other field's real undo behaviour is
+    untouched."""
+    helper_page.evaluate(
+        """(args) => chrome.scripting.executeScript({
+            target: { tabId: args.tabId },
+            func: (fieldName) => {
+                var orig = window.ApplyPilotScanner.applyFill;
+                window.ApplyPilotScanner.applyFill = function (entry, value) {
+                    var el = entry.el;
+                    var name = el && (el.name || el.id);
+                    if (name === fieldName && (value === '' || value == null)) {
+                        return Promise.resolve(true); // claims success, writes nothing
+                    }
+                    return orig(entry, value);
+                };
+            },
+            args: [args.fieldName],
+        })""",
+        {"tabId": tab_id, "fieldName": field_name},
+    )
+
+
+def attach_fake_file(helper_page, tab_id, selector, filename):
+    """Programmatically assigns a fake File to a plain (non-Workday) `<input type=file>` — the
+    same DataTransfer technique the extension's own attachResumeFile() uses — standing in for
+    'the operator already chose a file by hand' or 'an earlier fill already attached the base
+    résumé', so the tailored-résumé 'already attached — do not replace it' refusal has something
+    real to refuse to touch."""
+    helper_page.evaluate(
+        """(args) => chrome.scripting.executeScript({
+            target: { tabId: args.tabId },
+            func: (selector, filename) => {
+                var el = document.querySelector(selector);
+                var dt = new DataTransfer();
+                dt.items.add(new File(['already attached bytes'], filename, { type: 'application/pdf' }));
+                el.files = dt.files;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            },
+            args: [args.selector, args.filename],
+        })""",
+        {"tabId": tab_id, "selector": selector, "filename": filename},
     )
 
 
@@ -766,6 +978,12 @@ with sync_playwright() as p:
 
         panel1.click("#scanBtn")
         state1 = wait_for_done(helper, tab1_id, timeout_s=60)
+        # Let tab 1's own trailing, fill-unrelated write (the automatic /log POST — item 4 —
+        # which lands via a SEPARATE, later storage write than the one that set status='done')
+        # settle before this becomes the baseline the "tab 1 untouched by tab 2" check below
+        # compares against — otherwise that check can flake purely from tab 1's OWN /log call
+        # completing between the two reads, with tab 2 never having touched anything.
+        state1 = wait_for_log_entry(helper, tab1_id) or state1
 
         check("tab 1's fill reached the local (stub) service", len(resolve_calls) >= 1)
         check("tab 1's fill finished and wrote a per-tab state", state1 is not None, str(state1)[:200])
@@ -1508,6 +1726,317 @@ with sync_playwright() as p:
               step3_val in ("", None), repr(step3_val))
 
         # =====================================================================
+        # TAB 16 — TAILOR MY RÉSUMÉ, success path through the REAL panel button: the review box
+        #          (status/judge issues/warnings/preview), "Use for this application" attaching
+        #          the TAILORED pdf immediately (the page's résumé input is empty at this point —
+        #          base résumé is a 404 in this stub, so ANY successful attach here can only be
+        #          the tailored one), the résumé line naming it, a subsequent Fill correctly
+        #          refusing to re-attach over it (never a duplicate upload), AND — reviewer round
+        #          3, item 2 — a Lever-style EEO section this same Fill only reveals once
+        #          "location" is answered gets scanned, resolved and filled by a RESCAN round
+        #          content.js runs after its own verify step, never guessed at or left behind.
+        # =====================================================================
+        resume_tailor_calls_before = len(resume_tailor_calls)
+        tab16 = ctx.new_page()
+        tab16.goto(RESUME_TAILOR_URL + "#t=16")
+        tab16_id = find_tab_id(helper, "#t=16")
+        check("found tab 16's chrome tab id", tab16_id is not None)
+
+        panel16 = ctx.new_page()
+        panel16.goto(f"{panel_url}?tabId={tab16_id}")
+        panel16.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+
+        panel16.click("#tailorResumeBtn")
+        panel16.wait_for_function("() => !document.getElementById('tailorResumeBox').hidden", timeout=10000)
+
+        job_line16 = panel16.eval_on_selector("#tailorResumeJob", "el => el.textContent")
+        check("the tailor box names the job/company the service identified",
+              "Test Engineer" in (job_line16 or "") and "Great Company" in (job_line16 or ""), repr(job_line16))
+        verdict16 = panel16.eval_on_selector("#tailorResumeVerdict", "el => el.textContent")
+        check("a warning verdict is shown when the service returns approved_with_judge_warning",
+              "safety check" in (verdict16 or "").lower(), repr(verdict16))
+        check("the judge's own issues are shown (not hidden) when the status carries a warning",
+              panel16.eval_on_selector("#tailorResumeIssues", "el => el.hidden") is False)
+        issues_text16 = panel16.eval_on_selector("#tailorResumeIssues", "el => el.textContent")
+        check("the judge issues text names the specific issue the service returned",
+              "certification" in (issues_text16 or ""), repr(issues_text16))
+        check("the validator warnings are shown (not hidden)",
+              panel16.eval_on_selector("#tailorResumeWarnings", "el => el.hidden") is False)
+        preview_text16 = panel16.eval_on_selector("#tailorResumeText", "el => el.value")
+        check("the collapsible preview shows the service's own tailored text",
+              "Tailored resume text" in (preview_text16 or ""), repr(preview_text16))
+
+        new_tailor_calls16 = resume_tailor_calls[resume_tailor_calls_before:]
+        check("exactly one /resume/tailor call was made, naming this tab's own URL",
+              len(new_tailor_calls16) == 1 and "resume-tailor-page.html" in (new_tailor_calls16[0].get("urls") or [""])[0],
+              json.dumps(new_tailor_calls16[-1]) if new_tailor_calls16 else "none")
+        sent_text16 = new_tailor_calls16[0].get("page_text", "") if new_tailor_calls16 else ""
+        check("the extracted page text sent to /resume/tailor includes the page's own visible copy",
+              "fantastic engineer" in sent_text16, sent_text16[:200])
+        check("the extracted page text excludes form-field names/ids",
+              "eeo_gender_rt" not in sent_text16 and "rt-form" not in sent_text16, sent_text16[:200])
+
+        # "Use for this application": the page's résumé input is empty right now, so this attaches
+        # the tailored PDF IMMEDIATELY — no Fill click needed yet.
+        panel16.click("#tailorResumeUseBtn")
+        panel16.wait_for_function(
+            "() => (document.getElementById('tailorResumeUseStatus').textContent || "
+            "'').toLowerCase().includes('attached')", timeout=10000)
+        use_status16 = panel16.eval_on_selector("#tailorResumeUseStatus", "el => el.textContent")
+        check("'Use for this application' reports attaching the tailored PDF immediately",
+              "attached the tailored" in (use_status16 or "").lower(), repr(use_status16))
+        attached_name16 = tab16.eval_on_selector("#resume_upload_rt", "el => el.files[0] && el.files[0].name")
+        check("the TAILORED pdf (never the base résumé, which 404s in this stub) reached the file input",
+              attached_name16 == TAILORED_PDF_FILENAME, repr(attached_name16))
+        resume_line16 = panel16.eval_on_selector("#resumeLine", "el => el.textContent")
+        check("the résumé line says the attached file is the tailored one",
+              "tailored" in (resume_line16 or "").lower(), repr(resume_line16))
+
+        # Now a normal Fill: full_name_rt gets filled, "location" reveals the EEO section, and
+        # the résumé step must NOT disturb what's already attached.
+        panel16.click("#scanBtn")
+        # This tab already has a TERMINAL state in storage from "Use for this application"'s own
+        # standalone attach above — wait for the NEW fill to actually reach 'running' first (see
+        # wait_for_running()'s own doc comment) so wait_for_done() below can't mistake that stale
+        # state for this fill's own result the instant it starts polling.
+        check("tab 16's new fill actually started (left the stale 'done' state behind)",
+              wait_for_running(helper, tab16_id, timeout_s=5))
+        state16 = wait_for_done(helper, tab16_id, timeout_s=60)
+        check("tab 16's fill reached a terminal status", state16 is not None and state16.get("status") == "done",
+              str(state16)[:200])
+
+        full_name_rt_val = tab16.eval_on_selector("#full_name_rt", "el => el.value")
+        check("the ordinary text field on the tailor-résumé page was filled", bool(full_name_rt_val), repr(full_name_rt_val))
+
+        attached_name16b = tab16.eval_on_selector("#resume_upload_rt", "el => el.files[0] && el.files[0].name")
+        check("a Fill run AFTER 'Use for this application' does not replace or duplicate the "
+              "tailored pdf already attached (never a second upload over an existing one)",
+              attached_name16b == TAILORED_PDF_FILENAME, repr(attached_name16b))
+        if state16:
+            resume16 = state16.get("resume") or {}
+            check("the Fill's own résumé step correctly reports 'already attached' (generalized "
+                  "duplicate-upload refusal, not Workday-only) rather than silently re-attaching",
+                  resume16.get("alreadyAttached") is True and resume16.get("kind") == "tailored",
+                  json.dumps(resume16))
+
+        eeo_checked16 = tab16.eval_on_selector("input[name='eeo_gender_rt'][value='Male']", "el => el.checked")
+        check("reviewer round 3 item 2: the EEO radio group — revealed only after 'location' was "
+              "answered, and absent from the page at the time of the FIRST scan — was still found "
+              "and filled, via a rescan round after the normal apply+verify pass",
+              eeo_checked16 is True, repr(eeo_checked16))
+        if state16:
+            filled_labels16 = [f.get("label", "") for f in (state16.get("filled") or [])]
+            check("the rescanned EEO field is reported in the fill's own state (never silently "
+                  "invisible to the summary)",
+                  any("gender" in lbl.lower() for lbl in filled_labels16), json.dumps(filled_labels16))
+
+        # =====================================================================
+        # TAB 17 — "the next Fill attaches the tailored PDF instead of the base résumé": the
+        #          preference is set directly (bypassing the panel button, so content.js is never
+        #          injected and the immediate-attach half is a guaranteed no-op — proving the
+        #          preference itself persists independent of any immediate attach), THEN an
+        #          ordinary Fill's own résumé-first step is what actually attaches it.
+        # =====================================================================
+        tab17 = ctx.new_page()
+        tab17.goto(RESUME_TAILOR_URL + "#t=17")
+        tab17_id = find_tab_id(helper, "#t=17")
+        check("found tab 17's chrome tab id", tab17_id is not None)
+
+        tailor_resp17 = helper.evaluate(
+            "(args) => chrome.runtime.sendMessage({ type: 'RESUME_TAILOR', tabId: args.tabId, "
+            "urls: [args.url], pageText: 'fantastic engineer' })",
+            {"tabId": tab17_id, "url": RESUME_TAILOR_URL + "#t=17"},
+        )
+        check("tab 17: /resume/tailor succeeded via a direct message (no panel click)",
+              bool(tailor_resp17 and tailor_resp17.get("ok")), json.dumps(tailor_resp17))
+        tailor_id17 = ((tailor_resp17 or {}).get("data") or {}).get("id")
+
+        use_resp17 = helper.evaluate(
+            "(args) => chrome.runtime.sendMessage({ type: 'USE_TAILORED_RESUME', tabId: args.tabId, id: args.id })",
+            {"tabId": tab17_id, "id": tailor_id17},
+        )
+        check("tab 17: USE_TAILORED_RESUME saves the preference even with content.js never injected",
+              bool(use_resp17 and use_resp17.get("ok")), json.dumps(use_resp17))
+        check("tab 17: with nothing injected yet, the immediate-attach half is correctly a no-op "
+              "(attempted: false) rather than an error",
+              ((use_resp17 or {}).get("attach") or {}).get("attempted") is False, json.dumps(use_resp17))
+
+        inject_extension_files(helper, tab17_id)
+        start_fill_via_message(helper, tab17_id)
+        state17 = wait_for_done(helper, tab17_id, timeout_s=60)
+        check("tab 17's fill reached a terminal status", state17 is not None and state17.get("status") == "done",
+              str(state17)[:200])
+        if state17:
+            resume17 = state17.get("resume") or {}
+            check("the NEXT Fill's own résumé-first step attached the TAILORED pdf (never the "
+                  "base résumé, which 404s in this stub)",
+                  resume17.get("attached") is True and resume17.get("kind") == "tailored", json.dumps(resume17))
+        attached_name17 = tab17.eval_on_selector("#resume_upload_rt", "el => el.files[0] && el.files[0].name")
+        check("tab 17: the tailored pdf's own filename reached the file input via the Fill path",
+              attached_name17 == TAILORED_PDF_FILENAME, repr(attached_name17))
+
+        # =====================================================================
+        # TAB 18 — "if a résumé is already attached on the page, do NOT remove or replace it
+        #          automatically": a file is already sitting in the input (standing in for an
+        #          earlier base-résumé Fill, or the operator's own manual choice) when "Use for
+        #          this application" runs; it must refuse, tell the operator to remove it by
+        #          hand, and offer "Attach tailored résumé" — which refuses again, same reason,
+        #          while the original file is never disturbed.
+        # =====================================================================
+        tab18 = ctx.new_page()
+        tab18.goto(RESUME_TAILOR_URL + "#t=18")
+        tab18_id = find_tab_id(helper, "#t=18")
+        check("found tab 18's chrome tab id", tab18_id is not None)
+        attach_fake_file(helper, tab18_id, "#resume_upload_rt", "already-attached.pdf")
+
+        panel18 = ctx.new_page()
+        panel18.goto(f"{panel_url}?tabId={tab18_id}")
+        panel18.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel18.click("#tailorResumeBtn")
+        panel18.wait_for_function("() => !document.getElementById('tailorResumeBox').hidden", timeout=10000)
+
+        panel18.click("#tailorResumeUseBtn")
+        panel18.wait_for_function(
+            "() => (document.getElementById('tailorResumeUseStatus').textContent || "
+            "'').toLowerCase().includes('already attached')", timeout=10000)
+        use_status18 = panel18.eval_on_selector("#tailorResumeUseStatus", "el => el.textContent")
+        check("'Use for this application' refuses when a résumé is already attached, with the "
+              "exact wording the build spec calls for",
+              "remove it on the page, then click attach tailored" in (use_status18 or "").lower(), repr(use_status18))
+        check("the 'Attach tailored résumé' retry button is offered once refused",
+              panel18.eval_on_selector("#attachTailoredRow", "el => el.hidden") is False)
+        unchanged_name18a = tab18.eval_on_selector("#resume_upload_rt", "el => el.files[0] && el.files[0].name")
+        check("the already-attached file was NOT removed or replaced",
+              unchanged_name18a == "already-attached.pdf", repr(unchanged_name18a))
+
+        panel18.click("#attachTailoredBtn")
+        panel18.wait_for_function(
+            "() => (document.getElementById('tailorResumeUseStatus').textContent || "
+            "'').toLowerCase().includes('already attached')", timeout=10000)
+        check("'Attach tailored résumé' refuses AGAIN while something is still attached",
+              "already attached" in (panel18.eval_on_selector("#tailorResumeUseStatus", "el => el.textContent") or "").lower())
+        unchanged_name18b = tab18.eval_on_selector("#resume_upload_rt", "el => el.files[0] && el.files[0].name")
+        check("the retry button's own attempt also never disturbed the already-attached file",
+              unchanged_name18b == "already-attached.pdf", repr(unchanged_name18b))
+
+        # =====================================================================
+        # TAB 19/20/21 — 403/422/503 from /resume/tailor are shown to the operator VERBATIM (the
+        #                service's own `.detail` text), never a generic failure, and no review
+        #                box is shown — mirrors the cover letter's own 403/422 check above.
+        # =====================================================================
+        for marker, code, detail in (
+            ("rt403", 403, "no language model on this computer, and no cloud model allowed yet"),
+            ("rt422", 422, "couldn't find this job's description to tailor a résumé against"),
+            ("rt503", 503, "no model available at all"),
+        ):
+            tab_rt_err = ctx.new_page()
+            tab_rt_err.goto(f"{RESUME_TAILOR_URL}#t={marker}")
+            tab_rt_err_id = find_tab_id(helper, f"#t={marker}")
+            check(f"found the {code} tailor-résumé test tab's chrome tab id", tab_rt_err_id is not None)
+            panel_rt_err = ctx.new_page()
+            panel_rt_err.goto(f"{panel_url}?tabId={tab_rt_err_id}")
+            panel_rt_err.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+            panel_rt_err.click("#tailorResumeBtn")
+            try:
+                panel_rt_err.wait_for_function(
+                    "(needle) => (document.getElementById('tailorResumeStatus').textContent || "
+                    "'').includes(needle)",
+                    arg=detail, timeout=10000)
+            except Exception:
+                pass
+            status_text_rt = panel_rt_err.eval_on_selector("#tailorResumeStatus", "el => el.textContent")
+            check(f"a {code} from /resume/tailor is shown to the operator VERBATIM (the service's own detail)",
+                  detail in (status_text_rt or ""), repr(status_text_rt))
+            check(f"no tailor-résumé review box is shown after a {code} error",
+                  panel_rt_err.eval_on_selector("#tailorResumeBox", "el => el.hidden") is True)
+            panel_rt_err.close()
+            tab_rt_err.close()
+
+        # =====================================================================
+        # TAB 21 — reviewer round 3, item 3: UNDO reports how many restores it could NOT confirm,
+        #          not just how many it did — a widget that accepts a real answer but silently
+        #          rejects being cleared back out must be surfaced, not just dropped from the count.
+        # =====================================================================
+        tab21 = ctx.new_page()
+        tab21.goto(PAGE_BASE + "#t=21")
+        tab21_id = find_tab_id(helper, "#t=21")
+        check("found tab 21's chrome tab id", tab21_id is not None)
+        inject_extension_files(helper, tab21_id)
+        patch_reject_restore(helper, tab21_id, "full_name")
+
+        panel21 = ctx.new_page()
+        panel21.goto(f"{panel_url}?tabId={tab21_id}")
+        panel21.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        # Deliberately NOT panel21.click("#scanBtn"): that re-injects scanner.js/content.js
+        # (ensureInjectedAllFrames()), which REDEFINES window.ApplyPilotScanner from scratch and
+        # would wipe out patch_reject_restore()'s monkeypatch before the fill ever ran — the same
+        # reason TAB 3/4/6's own applyFill patches all go through start_fill_via_message() rather
+        # than a real button click. The panel is still open to prove the UNDO button itself below.
+        start_fill_via_message(helper, tab21_id)
+        state21 = wait_for_done(helper, tab21_id, timeout_s=60)
+        check("tab 21's fill reached a terminal status", state21 is not None and state21.get("status") == "done",
+              str(state21)[:200])
+        filled_before_undo21 = tab21.eval_on_selector("#full_name", "el => el.value")
+        check("tab 21: the patched field filled normally", bool(filled_before_undo21), repr(filled_before_undo21))
+
+        panel21.click("#undoBtn")
+        panel21.wait_for_function(
+            "() => (document.getElementById('statusBox').textContent || "
+            "'').toLowerCase().includes('could not be confirmed restored')", timeout=10000)
+        undo_status21 = panel21.eval_on_selector("#statusBox", "el => el.textContent")
+        check("Undo reports a field it could NOT confirm restoring, not just how many it did",
+              "could not be confirmed restored" in (undo_status21 or "").lower(), repr(undo_status21))
+        after_undo21 = tab21.eval_on_selector("#full_name", "el => el.value")
+        check("the field UNDO could not confirm restoring genuinely was not reverted (the count is honest)",
+              after_undo21 == filled_before_undo21 and bool(after_undo21), repr(after_undo21))
+
+        # =====================================================================
+        # TAB 22 — reviewer round 3, item 1: the fill-report EXPORT (item 6) must never leak a
+        #          value out of a free-text `reason`, regardless of how it's quoted. An earlier
+        #          build only redacted double-quoted substrings; this seeds a reason with an
+        #          EEO/disability-shaped value in SINGLE quotes and one entirely UNQUOTED, which
+        #          that old approach would have missed, to prove the new allow-list (a closed
+        #          `category`, never free text) keeps both out no matter how the service phrases
+        #          a reason.
+        # =====================================================================
+        tab22 = ctx.new_page()
+        tab22.goto(PAGE_BASE + "#t=eeoleak")
+        tab22_id = find_tab_id(helper, "#t=eeoleak")
+        check("found tab 22's chrome tab id", tab22_id is not None)
+
+        panel22 = ctx.new_page()
+        panel22.goto(f"{panel_url}?tabId={tab22_id}")
+        panel22.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel22.click("#scanBtn")
+        state22 = wait_for_done(helper, tab22_id, timeout_s=60)
+        check("tab 22's fill reached a terminal status", state22 is not None and state22.get("status") == "done",
+              str(state22)[:200])
+
+        try:
+            with panel22.expect_download(timeout=5000) as export22_info:
+                panel22.click("#exportReportBtn")
+            export22 = export22_info.value
+            report22_text = pathlib.Path(export22.path()).read_text(encoding="utf-8")
+            report22 = json.loads(report22_text)
+        except Exception as e:
+            check("tab 22: clicking Export fill report triggers a real download", False, str(e))
+            report22_text, report22 = "", None
+
+        if report22 is not None:
+            check("SAFETY: the seeded single-quoted EEO/disability value never appears in the export",
+                  "Yes, I have a disability" not in report22_text and "disability" not in report22_text.lower(),
+                  report22_text[:400])
+            check("SAFETY: the seeded UNQUOTED race/ethnicity value never appears in the export either",
+                  "Hispanic or Latino" not in report22_text and "race/ethnicity" not in report22_text.lower(),
+                  report22_text[:400])
+            check("the free-text 'reason' field itself is gone from the export schema entirely "
+                  "(the export is built from a closed-vocabulary allow-list, not a redaction pass)",
+                  '"reason"' not in report22_text, report22_text[:400])
+            fields22 = report22.get("fields") or []
+            check("every exported row still carries a category from the fixed, closed vocabulary",
+                  bool(fields22) and all(f.get("category") for f in fields22), json.dumps(fields22[:3]))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -1518,7 +2047,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))
