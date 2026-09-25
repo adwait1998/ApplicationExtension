@@ -48,16 +48,55 @@
   var saveEl = document.getElementById('save');
   var testEl = document.getElementById('test');
   var statusEl = document.getElementById('status');
+  var connectionAutoEl = document.getElementById('connectionAuto');
+  var installHostHintEl = document.getElementById('installHostHint');
 
   function setStatus(kind, text) {
     statusEl.className = kind;
     statusEl.textContent = text;
   }
 
+  // chrome.storage.local.serviceConnection = { mode: "native"|"manual", ok, error, checkedAt }
+  // is written by the background worker once it can start/reach the service on its own —
+  // it may not exist at all (older background.js, or before the first check completes), so
+  // every read of it is defensive. "native" + ok means the operator never has to see or paste
+  // a token; "native" + !ok means it tried and failed (show its own error, not a generic one);
+  // anything else (absent, or mode "manual") leaves today's manual URL/token flow exactly as
+  // it was and additionally points at the easier path.
+  function setConnectionAuto(kind, text) {
+    connectionAutoEl.className = kind;
+    connectionAutoEl.textContent = text;
+  }
+
+  function applyServiceConnection(sc) {
+    if (sc && sc.mode === 'native') {
+      installHostHintEl.style.display = 'none';
+      if (sc.ok) {
+        setConnectionAuto('ok', 'Connected automatically — no token needed.');
+      } else {
+        setConnectionAuto('err', sc.error || 'Could not connect automatically.');
+      }
+      return;
+    }
+    setConnectionAuto('', '');
+    installHostHintEl.style.display = '';
+  }
+
+  // The background worker may finish its native-host probe after this page has
+  // already rendered, so react live rather than only reading storage once at load.
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area === 'local' && changes.serviceConnection) {
+        applyServiceConnection(changes.serviceConnection.newValue);
+      }
+    });
+  }
+
   function load() {
-    chrome.storage.local.get(['serviceUrl', 'token']).then(function (data) {
+    chrome.storage.local.get(['serviceUrl', 'token', 'serviceConnection']).then(function (data) {
       serviceUrlEl.value = data.serviceUrl || DEFAULT_SERVICE_URL;
       tokenEl.value = data.token || '';
+      applyServiceConnection(data.serviceConnection);
       if (tokenEl.value) {
         refreshProfileArea();
       } else {
