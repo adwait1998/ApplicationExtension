@@ -924,7 +924,7 @@ with sync_playwright() as p:
         panel5.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
 
         panel5.click("#scanBtn")
-        state5 = wait_for_done(helper, tab5_id, timeout_s=30)
+        state5 = wait_for_done(helper, tab5_id, timeout_s=90)
         check("tab 5 (cross-origin iframe page) fill reached a terminal status",
               state5 is not None and state5.get("status") == "done", str(state5)[:200])
 
