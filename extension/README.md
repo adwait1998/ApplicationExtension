@@ -37,13 +37,15 @@ Every one of the guards above ALSO carries a hard, unconditional refusal for any
 own `data-automation-id` contains `bottom-navigation`, `submit`, `next`, or `save` — Workday's
 real "Submit"/"Next"/"Save and Continue" controls — regardless of how legitimate its shape
 otherwise looks. None of this runs on page load: every interaction above happens ONLY as part
-of an explicit "Fill this page" click, and only while a single capturing, document-level
-`submit` listener (`installSubmitShield()`) is installed for the ENTIRE fill — repeating-section
-expansion, scanning, the `/resolve` round-trip, every field, and the résumé attach, in that
-order, with no gap between phases — to stop and report anything that slips through anyway —
-belt and braces on top of every guard above, not instead of them. A fill runs to completion in
-`content.js` regardless of whether the side panel is open, so this shield's lifetime is tied to
-the fill itself, never to the panel's UI.
+of an explicit "Fill this page" click, and only while a capturing, document-level `submit`
+listener (`installSubmitShield()`) is installed — one per **frame** being filled (see "Fill
+every frame" below), each covering that frame's ENTIRE participation in the fill — repeating-
+section expansion, attaching the résumé, waiting for the page to settle, scanning, the merged
+`/resolve` round-trip, and every field, in that order, with no gap between phases — to stop and
+report anything that slips through anyway — belt and braces on top of every guard above, not
+instead of them. A fill runs to completion in `content.js` regardless of whether the side panel
+is open, so each frame's shield's lifetime is tied to that frame's own participation in the
+fill, never to the panel's UI.
 
 ## Loading it unpacked
 
@@ -87,41 +89,129 @@ below.
    to decide what to show you; it does not run anything on a tab just because you switched to
    it.
 3. Click **Fill this page**. This is the only user action (besides **Report page**) that injects
-   the scanner into the tab, and the only one that writes to the DOM. It:
-   - asks the local service how many `work_history`/`education` entries your profile has,
+   the scanner into the tab, and the only one that writes to the DOM.
+   - **The first time on a new site**, Chrome asks you to allow ApplyPilot on that site (and any
+     cross-origin iframe embedded in it) — see "Permissions" below. Decline it and nothing runs;
+     allow it and you won't be asked again for that site.
+   - It asks the local service how many `work_history`/`education` entries your profile has,
      and — only if that succeeds — clicks each repeating section's "Add Another" button
      (guarded, see above) just enough times to make room for them before scanning, capped at
      10 clicks total per fill and stopping immediately the moment a click fails to add a new
      block (never retried blindly). If the service doesn't support this yet (404) or isn't
      reachable, this step is skipped entirely and the page is scanned exactly as before.
-   - scans the page for fields — including a Workday-style date rendered as separate month
-     and year inputs/selects behind one visual "From"/"To" label, which is scanned as a
-     single merged field and split back into both underlying controls on fill,
-   - sends only the field metadata (labels, names, autocomplete, options — never page
-     content, never your profile) to the local service,
-   - fills every field the service marked `auto_fill: true` **one at a time**, with a green
+   - It attaches your résumé (if it can find where to put one) **before** scanning anything
+     else, then waits briefly for the page to settle — see "Résumé first" below for why.
+   - It scans the page — and every frame you allowed, including a cross-origin iframe embedding
+     a Greenhouse/Lever-style form on a company's own careers page (see "Fill every frame"
+     below) — for fields, including a Workday-style date rendered as separate month and year
+     inputs/selects behind one visual "From"/"To" label, which is scanned as a single merged
+     field and split back into both underlying controls on fill.
+   - It sends only the field metadata (labels, names, autocomplete, options — never page
+     content, never your profile) to the local service, in **one** request for the whole page
+     regardless of how many frames it came from.
+   - It fills every field the service marked `auto_fill: true` **one at a time**, with a green
      outline and a tooltip explaining what was filled and why, showing live progress in the
-     panel ("Filling 12/40 — Skills (adding 3/15)") as it goes,
-   - leaves every other detected field alone, with an amber dashed outline and a tooltip
+     panel ("Filling 12/40 — Skills (adding 3/15)") as it goes — never a field that already
+     holds a value you (or the page) put there before this fill started, see "Never overwrite
+     the user" below.
+   - It leaves every other detected field alone, with an amber dashed outline and a tooltip
      explaining why it was skipped (e.g. a canary question like sponsorship or salary that
-     has no safe automatic answer).
+     has no safe automatic answer, or a value it deliberately kept — see below).
 4. **This keeps running even if you close the panel, switch tabs, or the panel's window loses
-   focus.** The fill lives in the page's own content script, not in the panel — closing the
-   panel only stops you from watching it. Switch back (or reopen the panel) any time to see
-   where it's at, or the finished result.
+   focus.** Every frame's fill lives in that frame's own content script, not in the panel —
+   closing the panel only stops you from watching it. Switch back (or reopen the panel) any time
+   to see where it's at, or the finished result.
 5. **Cancel** stops the fill between fields (and between items within a multi-value field like
-   Skills) — whatever was already filled stays filled and is reported; everything after that
-   point is reported as "not attempted — cancelled" so you know exactly what still needs doing.
+   Skills), in every frame at once — whatever was already filled stays filled and is reported;
+   everything after that point is reported as "not attempted — cancelled" so you know exactly
+   what still needs doing.
 6. No single field can hang the fill: each one gets a ~12s timeout (reported as "timed out" and
    skipped, not retried) and the whole fill gives up on any remaining fields after a ~120s
    budget ("not attempted — time budget") rather than spinning forever on one stuck widget.
 7. Read the panel's Filled / Drafted / Need you / Could not fill lists. **Review the page itself
    before submitting** — the panel is a summary, not a substitute for looking at the actual
-   form. Switching tabs and back shows that tab's own last result; if the tab has since
+   form, and it does not overstate what actually happened: a field is only ever counted as
+   Filled after a brief re-check confirms the value actually stuck (some React-style forms
+   silently revert a field a moment after it's written — that's reported as "didn't stick", not
+   Filled), and the summary line says plainly how many visible fields — plus any frame that
+   couldn't be read at all — the scanner never got to (e.g. "Filled 18 · 3 need you · 2 couldn't
+   read"). Switching tabs and back shows that tab's own last result; if the tab has since
    navigated to a different page, the panel says so ("from a previous page") rather than
    presenting old results as current.
-8. If something's wrong, click **Undo** to restore every field's prior value. **Report page**
-   (unchanged) saves the form's structure — never values — for diagnosing a bad fill.
+8. If something's wrong, click **Undo** to restore every field's prior value in every frame, and
+   the panel tells you how many were actually confirmed restored (read back after undoing), not
+   just how many restores were attempted. **Report page** (unchanged, top frame only) saves the
+   form's structure — never values — for diagnosing a bad fill.
+
+## Fill every frame
+
+About a quarter of real job postings are a company's own careers page embedding the actual
+application form (Greenhouse, Lever, ...) in a **cross-origin** `<iframe>` — e.g. `sofi.com`
+embedding `job-boards.greenhouse.io/embed/job_app`. A normal content script cannot read into a
+cross-origin frame at all, so until this build, only the top frame was ever scanned — the entire
+embedded form was invisible.
+
+Filling now works across every frame you've granted:
+
+- When the panel renders a tab, it asks `chrome.webNavigation.getAllFrames` for every frame the
+  tab currently has and checks which of their origins are already permitted.
+- Clicking **Fill this page**, once permission is confirmed (see below), injects
+  `scanner.js`/`capture.js`/`content.js` into **every** one of those frames
+  (`chrome.scripting.executeScript` with `allFrames: true` — Chrome silently skips any frame this
+  extension isn't allowed into, it never errors the whole call).
+- `background.js` — the only context that can message a *specific* frame of a tab — then asks
+  every frame to expand/attach-résumé/scan **itself**, merges every frame's fields into **one**
+  list (each field's id tagged with which frame it came from) and sends that single merged list
+  to the local service in **one** `/resolve` call. It splits the answer back into each frame's
+  own slice and hands each frame only its own fields to apply.
+- From there each frame fills its own fields completely independently — its own progress, its
+  own response to Cancel, its own per-field timeout, and its own copy of the submit shield
+  covering it for as long as it's being filled — and reports back the same way a single-frame
+  fill always has. `background.js` merges every frame's report into the one result the panel
+  shows, so a two-frame page still looks like one fill: one progress bar, one set of lists, one
+  Undo.
+- A frame that is *same-origin* with its own parent is left to `scanner.js`'s existing one-level
+  same-origin recursion (see "Field scanning notes" below) rather than also being scanned
+  independently — the two mechanisms are made to partition the frame tree between them, not
+  overlap, so a same-origin child is never scanned or filled twice.
+- Any frame this run could not get into at all (no permission, or it disappeared between being
+  found and being asked to scan) is never guessed at — it's counted honestly in the summary's
+  "couldn't read" figure and the "N embedded frame(s) could not be scanned" note (see "Report
+  honestly" below), and everything else on the page still fills normally.
+
+## Résumé first
+
+Attaching a résumé happens **before** anything else is scanned or filled, not after. Several
+ATSs (Workday, Lever, Ashby) parse an uploaded résumé and use it to prefill or overwrite fields
+like name, email, phone or work history — sometimes with the wrong value. Scanning and filling
+first, the way earlier builds did, meant those parsers would silently clobber the values this
+extension had just filled in. Now: attach the résumé (or confirm one is already attached) →
+wait for the page to settle (a Workday-style upload has its own confirmation marker this extension
+waits for directly; everything else gets a short, generic "nothing has moved in ~1.2s" wait,
+capped at 3s) → **then** scan → resolve → apply.
+
+## Never overwrite the user
+
+Before writing a plain text/select/textarea field or a radio group, if it already holds a
+non-empty value that differs from what's about to be written, and that value was genuinely there
+before this fill touched anything, the fill leaves it alone and reports "kept your value" instead
+of clobbering it — a Workday page can prefill several fields from your account, and you may have
+typed into the form yourself before clicking Fill.
+
+Because résumé attachment now happens *before* scanning (see above), "already had a value" is
+deliberately **not** enough on its own — that would just as happily protect an ATS's own
+résumé-parse guess as it would your own input, presenting the ATS's guess as if it were yours.
+Two independent signals decide whether a value actually predates this fill: a snapshot of every
+field's value taken before expansion/résumé/scanning even started, and a real (browser-trusted)
+input/change event on that field at any point during the run — this extension's own programmatic
+writes are never "trusted" this way, so it can never mistake its own fill for yours. A value that
+only appears *because of* this run's own résumé attach is treated as the résumé parser's guess,
+not yours, and the real profile value still overwrites it.
+
+This check is scoped to plain fields and radio groups, deliberately excluding the Workday popup
+widgets (an un-opened dropdown often shows non-empty placeholder text like "Select One" that
+isn't a real answer, and the Skills/Field-of-Study prompt is additive — typing a new term never
+erases an existing one, so "already has something" is never a reason to stop adding more).
 
 ## Permissions, and why they're this narrow
 
@@ -132,18 +222,36 @@ below.
 - `sidePanel`: lets `background.js` open the side panel when you click the toolbar icon
   (`chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`) instead of the old
   popup.
-- `host_permissions` — `http://127.0.0.1/*` and `http://127.0.0.1:*/*` (the only hosts the
-  background worker is allowed to `fetch()` — it refuses to save a service URL that isn't
-  `127.0.0.1`, see `options.js`), plus **`https://*/*` and `http://*/*`**. That second pair
-  looks broad, so it's worth explaining: because the panel is one persistent surface per
-  *window* rather than a popup you reopen per *tab*, it has to be able to draw the right UI
-  (and, once you click Fill, inject) for **whichever tab you switch to after opening it** — the
-  `activeTab` permission only ever covers the tab that was active at the moment of a click, and
-  cannot reach a tab you switch to afterwards. Declaring these two patterns is what makes that
-  possible. It does **not** widen when anything actually runs: injection is still 100%
-  on-demand, gated on a Fill/Report click, exactly as before — a broader `host_permissions` only
-  ever changes what the extension is *allowed* to be asked to do, never what it does
-  unprompted. `<all_urls>` itself is never requested.
+- `webNavigation`: read-only — lets the panel ask `chrome.webNavigation.getAllFrames` what
+  frames a tab currently has, so it knows which origins a fill will need (see below) and so
+  `background.js` can find and message each one by its own frame id (see "Fill every frame").
+  It never lets this extension see browsing history beyond the current tab's own frame tree.
+- `host_permissions` is **only** `http://127.0.0.1/*` and `http://127.0.0.1:*/*` — the local
+  service, and nothing else. That is the *only* host this extension can ever act on without
+  asking you first. There is no static grant for `https://*/*`, `http://*/*`, or `<all_urls>` —
+  an earlier build in this repo's history did request those broadly (a permission "granted at
+  install and never revisited") and that has been deliberately narrowed to the least-privilege
+  model below, matching how a well-behaved MV3 extension is supposed to ask for site access.
+- `optional_host_permissions` declares `https://*/*` and `http://*/*` as permissions this
+  extension *may ask for*, but does not hold, until you say yes:
+  - When the panel renders a tab, it works out every origin a fill would touch — the tab's own,
+    plus every frame's (via `webNavigation.getAllFrames`) — and checks which are already granted
+    (`chrome.permissions.contains`).
+  - Clicking **Fill this page** (or **Report page**) calls `chrome.permissions.request()` for
+    whatever's missing, **synchronously, as the very first thing the click handler does** — Chrome
+    only honors a permission prompt as part of the click that triggered it if nothing has
+    `await`ed anything first, so the origin list and which parts of it are missing are worked out
+    ahead of time (at render, not at click) specifically so the click handler never has to.
+  - You're asked **once per site** (Chrome remembers the grant — see `chrome://extensions` → this
+    extension → "Site access" — and it's revocable there any time); if you decline, the panel
+    shows one line — "ApplyPilot needs permission to fill forms on \<hosts\> — nothing runs until
+    you allow it." — and **nothing is injected, nothing runs**.
+  - A 127.0.0.1 test/dev page never triggers this prompt at all — it's already covered by the
+    static `host_permissions` above.
+  - None of this widens what the extension does *unprompted*: injection is still 100% gated on a
+    Fill/Report click, exactly as before. A granted origin only ever changes what the extension is
+    *allowed* to be asked to do next time you click Fill on that site — never what it does on its
+    own.
 - `storage`: holds the service URL and token in `chrome.storage.local` (never synced), and is
   also what backs `chrome.storage.session` — the per-tab fill-result store described below.
 
@@ -153,10 +261,10 @@ below.
 |---|---|
 | `manifest.json` | MV3 manifest — permissions, icons, side panel, options page, service worker. |
 | `scanner.js` | Pure-DOM field scanning + filling logic. No `chrome.*` calls. Shared verbatim between the real content script and the offline Node self-test (see below). Exposes `ApplyPilotScanner` on the global object. |
-| `content.js` | The real content script. Loaded after `scanner.js` in the same isolated world. Listens for `START_FILL` / `CANCEL_FILL` / `DETECT` / `UNDO` / `CAPTURE` messages. Runs the ENTIRE fill pipeline itself (expand → scan → resolve → apply, one field at a time with a per-field timeout and an overall time budget → résumé attach) so it survives the side panel closing; reports live progress and the final result to `background.js` via `chrome.runtime.sendMessage`, never by returning a value the panel has to stay open to receive. Owns the live element registry and the "prior value" snapshots used by Undo, and does all DOM highlighting. |
+| `content.js` | The real content script — injected once per **frame** (see "Fill every frame"), loaded after `scanner.js` in the same isolated world. Listens for `PREPARE_AND_SCAN` / `APPLY_FILLS` / `ABORT_FILL` / `CANCEL_FILL` / `DETECT` / `UNDO` / `CAPTURE` messages, all of them sent by `background.js` (never directly by the panel). Runs this frame's own share of the fill pipeline (expand → attach résumé → wait for the page to settle → scan, then later, once `background.js` hands back this frame's own fills, apply → verify they stuck) so it survives the side panel closing; reports live progress and the final result to `background.js` via `chrome.runtime.sendMessage`, never by returning a value the panel has to stay open to receive. Owns this frame's own live element registry and the "prior value" snapshots used by Undo, and does all of this frame's own DOM highlighting. |
 | `capture.js` | "Report page" structure capture — page furniture (tags, roles, labels, option lists) only, never field values. See "Field scanning notes" / privacy note in its own header. |
-| `background.js` | MV3 service worker. The only file that holds the token and calls `fetch()` (talks to the local service's `/resolve`, `/health`, `/profile/counts`, `/resume`), and the only file that writes `chrome.storage.session`. Sets `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` so the toolbar icon opens the panel. Persists every `FILL_STATE_UPDATE` from `content.js` into `chrome.storage.session` keyed `fillState_<tabId>` (per-tab writes are queued so two updates from the same tab can never race each other), and cleans that entry up on `chrome.tabs.onRemoved`. |
-| `sidepanel.html` / `sidepanel.js` / `sidepanel.css` | The review UI (replaces the old popup — see "Using it on a job application page"). A pure renderer: reads `chrome.storage.session` (plus `chrome.storage.onChanged` for live updates) for whichever tab is active in its window, and only ever tells `content.js` what to do (`START_FILL`/`CANCEL_FILL`/`UNDO`/`CAPTURE`) — it never writes fill-result state itself. Supports an optional `?tabId=` query parameter that pins it to a specific tab instead of following the active tab; this exists **only** for `scripts/chrome_panel_test.py` and must never change behavior when absent. |
+| `background.js` | MV3 service worker. The only file that holds the token and calls `fetch()` (talks to the local service's `/resolve`, `/health`, `/profile/counts`, `/resume`), and the only file that writes `chrome.storage.session`. Sets `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` so the toolbar icon opens the panel. Also the cross-frame **coordinator**: `RUN_FILL` asks every frame of a tab (via `chrome.webNavigation.getAllFrames`) to `PREPARE_AND_SCAN` itself, merges every frame's fields into one list for a single `/resolve` call, and hands each frame back its own slice via `APPLY_FILLS` (see "Fill every frame"); `CANCEL_FILL_TAB` / `UNDO_TAB` fan the same two actions out to every frame of a tab and (for Undo) sum how many fields were actually restored. Merges every frame's own `FILL_STATE_UPDATE` into ONE combined result per tab, persisted into `chrome.storage.session` keyed `fillState_<tabId>` (per-tab writes are queued so two updates for the same tab can never race each other), and cleans that entry up on `chrome.tabs.onRemoved`. |
+| `sidepanel.html` / `sidepanel.js` / `sidepanel.css` | The review UI (replaces the old popup — see "Using it on a job application page"). A pure renderer: reads `chrome.storage.session` (plus `chrome.storage.onChanged` for live updates) for whichever tab is active in its window, and only ever tells `background.js` what to do (`RUN_FILL`/`CANCEL_FILL_TAB`/`UNDO_TAB`) or talks to the top frame directly for `CAPTURE` — it never writes fill-result state itself. Also owns the optional-permission flow (see "Permissions"): precomputes each tab's needed origins and which are already granted, and calls `chrome.permissions.request()` synchronously from the Fill/Report click handlers. Supports an optional `?tabId=` query parameter that pins it to a specific tab instead of following the active tab; this exists **only** for `scripts/chrome_panel_test.py` and must never change behavior when absent. |
 | `options.html` / `options.js` | Where you paste the service URL and token. |
 | `icons/` | `icon16.png` / `icon48.png` / `icon128.png` — generated with a tiny Node script using only the core `zlib` module (flat-color square + circle badge). No external assets. |
 | `test-page.html` | An offline mock application form exercising every label-resolution pattern, a select, a radio group with `<fieldset>/<legend>`, a textarea, deliberately-excluded fields (hidden, `aria-hidden`, `display:none`), an auto-generated-looking id, a simulated React-controlled input, and — in its own `#wd-form` — real-Workday-shaped fixtures for every widget in "Workday widget notes" below, plus a decoy `bottom-navigation-submit-button`. |
@@ -183,15 +291,24 @@ below.
   each radio's resolved label text, matching the `/resolve` contract. The group's own label
   comes from an ancestor `<fieldset><legend>`, then `[role=radiogroup]`/`[role=group]`
   `aria-label(ledby)`, then the same "preceding text" fallback used for everything else.
-- Same-origin iframes are scanned too (`scanAll()` walks `document.querySelectorAll('iframe')`
-  and recurses into any `contentDocument` it can reach without throwing). **Cross-origin
-  iframes are skipped** — a normal content script cannot read into them, and rather than
-  guess, the extension reports how many frames it skipped (in the fill summary line, from
-  `state.skippedFrames`, once a fill runs — see `content.js#detect`/`scanAll`) so you know to
-  fill those fields by hand. This matters in
-  practice: some ATS integrations (e.g. a Greenhouse or Lever form embedded via `<iframe>` on
-  a company's own careers page, hosted from `boards.greenhouse.io`/`jobs.lever.co`) are
-  cross-origin from the parent page and will be skipped for this reason.
+- Same-origin iframes are scanned too, from INSIDE `scanAll()` itself (it walks
+  `document.querySelectorAll('iframe')` and recurses one level into any `contentDocument` it can
+  reach without throwing) — `scanAll()` on its own still cannot see into a **cross-origin**
+  iframe at all; that's a normal content script limitation, not something this file can work
+  around from inside one frame's own JS realm.
+  - `content.js`/`background.js` close that gap from the OUTSIDE instead (see "Fill every
+    frame" above): every frame of the tab — same-origin or cross-origin, at any nesting depth —
+    that `chrome.webNavigation` can see and this extension has host permission for gets its own
+    independent content-script injection and its own scan, so a Greenhouse/Lever-style form
+    embedded cross-origin on a company's own careers page (e.g. `sofi.com` embedding
+    `job-boards.greenhouse.io/embed/job_app`) is filled like any other frame. The two mechanisms
+    are kept from double-handling the same frame (see `excludeFramesCoveredByParentRecursion()`
+    in `background.js`): a same-origin child already covered by its parent's one-level recursion
+    above is not ALSO scanned independently.
+  - A frame this extension genuinely could not get into at all (no host permission for its
+    origin, or it disappeared between being found and being asked to scan) is never guessed at —
+    it's counted honestly, both in the fill summary's "couldn't read" figure and in the
+    "N embedded frame(s) could not be scanned" note (see "Report honestly" below).
 
 ## Workday widget notes
 
@@ -265,18 +382,48 @@ filled with a real `.click()` (the most faithful simulation of an actual user cl
 handles mutual exclusivity and fires `click`/`input`/`change` the way the browser does
 natively), matched against each radio's resolved label text.
 
+## Report honestly
+
+The fill summary is written to never overstate what actually happened:
+
+- After the whole apply loop for a frame finishes, it waits briefly (~500ms) and then reads
+  every field it just filled back with `getCurrentValue()`, comparing it to what it set. A field
+  that no longer matches — some controlled-input re-render reasserting old state, or a combobox
+  clearing its own search text on blur — is moved out of "Filled" and reported as **"didn't
+  stick"** instead. The summary's Filled count only ever includes verified fills.
+- The summary line includes how many visible, interactive-control-shaped elements on the page
+  (`input`/`select`/`textarea`/`role=combobox`/`role=radiogroup`, minus the ones the scanner
+  itself excludes on purpose) never made it into the scanner's own registry at all, **plus** any
+  frame this run could not get into to find out — e.g. "Filled 18 · 3 need you · 2 couldn't
+  read". Neither of these is guessed at or rounded away.
+- A separate note spells out how many embedded frames could not be scanned at all (see "Fill
+  every frame" above) so it's clear that gap is about a whole frame, not a single field.
+
 ## Undo
 
 Before writing any field, `content.js` snapshots its current value (`getCurrentValue()`) —
-text, select value, checkbox boolean, or checked radio's value/none — keyed by field id.
-**Undo** replays those snapshots through the same `applyFill()` path used to fill them
-(so it survives React's controlled-input re-renders the same way filling does) and removes
-every highlight it added.
+text, select value, checkbox boolean, or checked radio's value/none — keyed by field id, in
+every frame that fill touched. **Undo** fans out to every frame and replays each one's own
+snapshots through the same `applyFill()` path used to fill them (so it survives React's
+controlled-input re-renders the same way filling does), removing every highlight it added. It
+then reads each restored field back and reports how many were actually **confirmed** restored
+— not how many restores were merely attempted, which can silently overstate what Undo did if a
+widget rejects a programmatic write the same way a fill sometimes can.
 
 ## Known limitations / where a real ATS form could defeat the scanner
 
-- **Cross-origin iframes** are skipped entirely (see above) — this is the most likely
-  real-world gap, since several ATS platforms are commonly embedded this way.
+- **A frame's origin the operator declines (or is never asked about) is skipped entirely** —
+  cross-origin iframes are no longer a blanket gap (see "Fill every frame" above), but a
+  specific frame is still skipped if its origin wasn't granted: the operator said no to the
+  permission prompt, or a frame appeared after the panel's own `webNavigation.getAllFrames`
+  snapshot was taken (e.g. one inserted by the page's own JS a moment after load) and so was
+  never in the list offered for permission or injection in the first place. Both cases are
+  counted honestly (see "Report honestly"), never guessed at.
+- **Same-origin vs. cross-origin frame classification is best-effort.** A same-origin child is
+  left to its parent's one-level recursive scan rather than also being scanned independently
+  (see `excludeFramesCoveredByParentRecursion()` in `background.js`) — this is correct for the
+  common shapes (a form with no iframes, or one cross-origin ATS iframe) but has not been proven
+  against a real multi-level nested-iframe page outside the test suite's own fixtures.
 - **Multi-step / dynamically-inserted forms**: if a form renders new fields after you click
   "Next" without a full page navigation (common in Workday and some Greenhouse flows), you
   need to click "Fill this page" again (the panel is already open — no need to reopen it) for the
@@ -350,22 +497,38 @@ can prove and what a plain offline check already covers:
   functions are), and no real network — is called out inline in that file's comments and
   confirmed separately via `scripts/chrome_load_test.py` instead.
 - **`scripts/chrome_panel_test.py`** (same real-Chromium-via-Playwright approach as
-  `chrome_load_test.py`, `--load-extension` and all) exercises everything this README's
-  "Using it on a job application page" section above describes that `chrome_load_test.py`
-  cannot: it asserts the manifest has no `default_popup` and does declare `side_panel`; that the
-  panel page itself loads; that clicking **Fill this page** in a real panel drives a real fill
-  against a tiny stub of the local service (no live `applypilot serve-extension` needed — the
-  stub binds an OS-assigned free port so it can never collide with a real one) and that the
-  result lands in `chrome.storage.session` keyed per tab; that a second tab gets independent
-  state (and that filling it never disturbs the first tab's stored result); that
-  `chrome.storage.onChanged` actually fires multiple times with advancing progress while a fill
-  is running; that **Cancel** stops a fill partway through (some fields filled and kept, the
-  rest reported as "not attempted — cancelled"), well before the fill would have finished on its
-  own; that a field patched (via `chrome.scripting.executeScript`, from outside the extension —
-  no source file is modified) to never resolve is reported as "timed out" without stalling the
-  other 30+ fields on the same page; that closing a tab clears its `chrome.storage.session`
-  entry; and that none of the above ever submits the mock form. Run it the same way as
-  `chrome_load_test.py` (below).
+  `chrome_load_test.py`, `--load-extension` and all), as of this writing 88 checks across 7 tabs
+  plus the manifest/panel-load checks, exercises everything this README's "Using it on a job
+  application page" section above describes that `chrome_load_test.py` cannot:
+  - the manifest has no `default_popup`, does declare `side_panel`, holds no static broad
+    `https://*/*`/`http://*/*`/`<all_urls>` host permission, and declares both as
+    `optional_host_permissions` instead (see "Permissions");
+  - clicking **Fill this page** in a real panel drives a real fill against a tiny stub of the
+    local service (no live `applypilot serve-extension` needed — the stub binds an OS-assigned
+    free port so it can never collide with a real one) and the result lands in
+    `chrome.storage.session` keyed per tab; a second tab gets independent state and filling it
+    never disturbs the first tab's stored result; `chrome.storage.onChanged` fires multiple
+    times with advancing progress while a fill is running;
+  - **Cancel** stops a fill partway through (some fields filled and kept, the rest reported as
+    "not attempted — cancelled"), well before the fill would have finished on its own, via the
+    same `CANCEL_FILL_TAB` fan-out the real button now uses;
+  - a field patched (via `chrome.scripting.executeScript`, from outside the extension — no
+    source file is modified) to never resolve is reported as "timed out" without stalling the
+    other 30+ fields on the same page;
+  - **fill every frame**: a page on one 127.0.0.1 port embedding a form page served from a
+    DIFFERENT 127.0.0.1 port (a genuinely different origin) has both the outer page's own field
+    and the cross-origin iframe's fields scanned, filled and reported through exactly **one**
+    `/resolve` call, with zero submissions in either frame, and `UNDO_TAB` restoring fields in
+    both; a frame deliberately left uninjected (standing in for "no permission"/"injection
+    raced a navigation") is counted honestly in `couldNotRead`/`skippedFrames` while the frame
+    that WAS injected still fills normally;
+  - **never overwrite the user, but do correct the résumé's own guess**: a value already on the
+    page before the fill started is kept and reported "kept your value", while a value a
+    (simulated) résumé attach introduces is still overwritten by the real profile value;
+  - **didn't stick**: a field made to silently revert shortly after being filled is caught by
+    the post-fill verify step and reported "didn't stick", never counted as Filled;
+  - closing a tab clears its `chrome.storage.session` entry; and none of the above ever submits
+    any mock form, in any frame. Run it the same way as `chrome_load_test.py` (below).
 - A separate ad hoc script (not committed — it lived in the scratch directory) exercised the
   **filling** path against the same jsdom page: confirmed `applyFill()` on the simulated
   React-controlled input survives the page's own revert-on-re-render loop (while a raw
@@ -385,11 +548,29 @@ submissions). What's left is genuinely manual — things automation on a mock pa
 1. Load the extension unpacked (see above), open a real job application page, click the toolbar
    icon, and confirm the side panel opens docked to the window (not a popup) and stays open when
    you click into DevTools or switch tabs and back.
-2. Without a running local service, click **Fill this page** and confirm the panel shows a clear
+2. **The real permission prompt** — this is the one thing about this build that genuinely cannot
+   be exercised by automation: Playwright's `chrome.permissions.request()` on a real, ungranted
+   site would need to interact with a native Chrome permission bar/dialog no test in this repo
+   drives, so every 127.0.0.1 page these tests use is covered by the static `host_permissions`
+   and never actually shows the prompt (see `chrome_panel_test.py`'s own comments). On a real,
+   never-visited https site: click **Fill this page**, confirm Chrome's own permission prompt
+   appears naming that site, decline it once and confirm the panel shows the plain "ApplyPilot
+   needs permission to fill forms on \<host\> — nothing runs until you allow it" line with
+   nothing injected (check the page's own DevTools console/Elements panel for the absence of any
+   `data-applypilot-*` attribute), then click Fill again, allow it, and confirm the fill runs; a
+   third click on the SAME site should not prompt again. If Chrome's actual behavior here ever
+   turns out to differ from `chrome.permissions.request()`'s documented contract (e.g. a partial
+   grant when multiple origins are requested at once), `gatePermissions()` in `sidepanel.js`
+   treats anything short of a fully-`true` resolution as a full decline — nothing is injected —
+   rather than guessing which origins actually came through.
+3. Without a running local service, click **Fill this page** and confirm the panel shows a clear
    "service unreachable" message rather than failing silently or throwing.
-3. Start the real `applypilot serve-extension`, click **Fill this page** on a real page, and
+4. Start the real `applypilot serve-extension`, click **Fill this page** on a real page, and
    visually confirm: green outlines on filled fields with correct tooltips, amber on skipped
    fields, live progress text while it runs, and **Undo** restores everything.
-4. Try it against a real Greenhouse/Lever/Ashby/Workday application page to see how the label
+5. Try it against a real Greenhouse/Lever/Ashby/Workday application page to see how the label
    heuristics and selector generation hold up outside the mock page — this is exactly the
    class of thing the mock page can't fully substitute for.
+6. Try it against a real company careers page that embeds its ATS form in a cross-origin
+   `<iframe>` (the scenario "Fill every frame" above exists for) and confirm the embedded form's
+   fields get scanned, filled and highlighted exactly like a top-level form would.
