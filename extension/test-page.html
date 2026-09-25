@@ -1564,20 +1564,39 @@
     options: ['Software Engineer', 'Site Engineer'], multi: false, async: false });
 
   // ---- generic ARIA combobox (no react-select classes) -----------------------------------
+  // Spec-compliant ARIA 1.2 combobox behavior, deliberately distinguishing HIGHLIGHT from
+  // COMMIT (see scanner.js's getGenericComboboxValue): ArrowDown alone only moves
+  // aria-activedescendant to highlight a row (real focus-follows-highlight navigation,
+  // matching the "highlight-only, never committed" negative control below) -- only a real
+  // click/Enter also marks that option aria-selected="true" and closes the listbox.
   (function () {
     var input = document.getElementById('generic_combo_input');
     var listbox = document.getElementById('generic_combo_listbox');
+    var options = Array.prototype.slice.call(listbox.querySelectorAll('[role="option"]'));
+    var highlighted = -1;
     function openMenu() { listbox.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
     function closeMenu() { listbox.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
-    input.addEventListener('keyup', function (e) { if (e.key === 'ArrowDown') openMenu(); });
-    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
-    Array.prototype.forEach.call(listbox.querySelectorAll('[role="option"]'), function (opt) {
+    function highlight(idx) {
+      highlighted = idx;
+      input.setAttribute('aria-activedescendant', options[idx].id); // highlight only -- NOT a commit
+    }
+    function commit(idx) {
+      options.forEach(function (o) { o.setAttribute('aria-selected', 'false'); });
+      options[idx].setAttribute('aria-selected', 'true');
+      highlight(idx);
+      input.value = '';
+      closeMenu();
+    }
+    input.addEventListener('keyup', function (e) {
+      if (e.key === 'ArrowDown') { openMenu(); highlight(Math.min(highlighted + 1, options.length - 1)); }
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeMenu();
+      if (e.key === 'Enter' && highlighted !== -1) commit(highlighted);
+    });
+    options.forEach(function (opt, idx) {
       opt.addEventListener('mousedown', function (e) { e.preventDefault(); });
-      opt.addEventListener('click', function () {
-        input.setAttribute('aria-activedescendant', opt.id);
-        input.value = '';
-        closeMenu();
-      });
+      opt.addEventListener('click', function () { commit(idx); });
     });
     input.addEventListener('blur', function () { setTimeout(closeMenu, 0); });
   })();
@@ -1690,5 +1709,60 @@
     <label><input type="radio" name="eeo_negative_control_fixture" value="no"> No</label>
   </div>
 </div>
+
+<!-- ===================================================================
+     Shadow DOM (2026-09-24): scanAll/scanFields and capture.js must also traverse OPEN shadow
+     roots (recursively). Covers: a self-contained <form> entirely inside an open shadow root
+     (with its OWN submit button -- must never be clicked by any scan/fill path, but a DIRECT
+     click bypassing every guard must still genuinely submit, same "real trap, not vacuous"
+     discipline as every other decoy submit button on this page); a nested open shadow root one
+     level deeper (proves the traversal recurses); an aria-hidden LIGHT-DOM ancestor wrapping a
+     shadow host (proves isVisible() actually crosses the shadow boundary via .host, not just
+     that a plain shadow form scans at all -- jsdom's getBoundingClientRect() is patched to
+     always report a non-zero box, so that check alone could never catch this); and a CLOSED
+     shadow root, which must stay completely unreachable -- there is no way in from outside.
+     =================================================================== -->
+<div id="shadow_dom_host"></div>
+<div id="shadow_dom_hidden_wrapper" aria-hidden="true">
+  <div id="shadow_dom_hidden_host"></div>
+</div>
+<div id="shadow_dom_closed_host"></div>
+<script>
+(function () {
+  var host = document.getElementById('shadow_dom_host');
+  var shadow = host.attachShadow({ mode: 'open' });
+  shadow.innerHTML =
+    '<form id="shadow_form">' +
+      '<label for="shadow_name_input">Full Name (shadow DOM)</label>' +
+      '<input type="text" id="shadow_name_input" name="shadow_name">' +
+      '<button type="submit" id="shadow_submit_btn">Submit</button>' +
+      '<div id="shadow_nested_host"></div>' +
+    '</form>';
+  shadow.getElementById('shadow_form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__SHADOW_FORM_SUBMIT_COUNT__ = (window.__SHADOW_FORM_SUBMIT_COUNT__ || 0) + 1;
+  });
+
+  // Nested OPEN shadow root, one level deeper -- proves findOpenShadowRoots() recurses.
+  var nestedHost = shadow.getElementById('shadow_nested_host');
+  var nestedShadow = nestedHost.attachShadow({ mode: 'open' });
+  nestedShadow.innerHTML =
+    '<label for="shadow_nested_input">Nested Shadow Field</label>' +
+    '<input type="text" id="shadow_nested_input" name="shadow_nested">';
+
+  // A field inside an open shadow root, but the HOST sits under a LIGHT-DOM aria-hidden
+  // wrapper -- must scan as invisible/unfillable.
+  var hiddenHost = document.getElementById('shadow_dom_hidden_host');
+  var hiddenShadow = hiddenHost.attachShadow({ mode: 'open' });
+  hiddenShadow.innerHTML = '<input type="text" id="shadow_hidden_input" name="shadow_hidden">';
+
+  // CLOSED shadow root -- must stay completely unreachable; nothing this file does can see
+  // inside one (that is the entire point of "closed"). Structural negative control: scanAll()
+  // must not error out or hang on it, and must report zero fields for it.
+  var closedHost = document.getElementById('shadow_dom_closed_host');
+  closedHost.attachShadow({ mode: 'closed' }).innerHTML =
+    '<input type="text" id="shadow_closed_input" name="shadow_closed_unreachable">';
+})();
+</script>
 </body>
 </html>

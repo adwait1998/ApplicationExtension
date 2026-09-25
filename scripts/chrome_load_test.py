@@ -111,13 +111,42 @@ with sync_playwright() as p:
         #    descriptor covering several elements that share a name, so it is
         #    expected to match >1; everything else must be unique or the fill
         #    step could write into the wrong input.
+        #    A field found inside an open shadow root (see scanAll's shadow-DOM traversal) is
+        #    checked SEPARATELY below: its own selector was only ever built to be unique WITHIN
+        #    that shadow root's own tree, and a plain document.querySelectorAll() can never
+        #    resolve it at all (that is the whole point of a shadow boundary) -- that is not a
+        #    uniqueness bug, just a different, correct scope to check it in.
+        top_fields = [f for f in fields if not f.get("shadow")]
         uniq = page.evaluate(
             """(sels) => sels.map(s => { try { return document.querySelectorAll(s).length; }
                                           catch (e) { return -1; } })""",
-            [f["selector"] for f in fields])
-        bad = [(f["selector"], n) for f, n in zip(fields, uniq)
+            [f["selector"] for f in top_fields])
+        bad = [(f["selector"], n) for f, n in zip(top_fields, uniq)
                if (n < 1) or (n != 1 and f["type"] != "radio")]
-        check("every non-radio selector resolves to exactly one element", not bad, str(bad[:3]))
+        check("every non-radio, non-shadow selector resolves to exactly one element", not bad, str(bad[:3]))
+
+        # A shadow field's selector was only ever built to be unique WITHIN its OWN shadow
+        # root's tree (see buildSelector's nth-child fallback) -- checked per-root, not summed
+        # across every open shadow root: two DIFFERENT shadow roots can each independently
+        # contain, say, a lone top-level <input> with no other differentiating context, which
+        # would legitimately both fall back to the exact same bare "input" selector -- unique
+        # within either one, just not a globally-unique string across unrelated trees (and
+        # nothing ever needs it to be: the registry holds the real element reference directly,
+        # never re-resolving a shadow field's selector against the wrong root).
+        shadow_fields = [f for f in fields if f.get("shadow")]
+        check("scanAll found at least one field inside an open shadow root", len(shadow_fields) >= 1,
+              str(len(shadow_fields)))
+        shadow_uniq = page.evaluate(
+            """(sels) => sels.map(s => {
+                const roots = (window.ApplyPilotScanner && ApplyPilotScanner.findOpenShadowRoots)
+                    ? ApplyPilotScanner.findOpenShadowRoots(document) : [];
+                return roots.map(r => { try { return r.querySelectorAll(s).length; } catch (e) { return -1; } });
+            })""",
+            [f["selector"] for f in shadow_fields])
+        bad_shadow = [(f["selector"], counts) for f, counts in zip(shadow_fields, shadow_uniq)
+                      if not any(c == 1 for c in counts) and f["type"] != "radio"]
+        check("every shadow-DOM field's selector resolves to exactly one element WITHIN some (its own) open shadow root",
+              not bad_shadow, str(bad_shadow[:3]))
         radios = [(f, n) for f, n in zip(fields, uniq) if f["type"] == "radio"]
         check("radio-group selector covers the whole group",
               all(n >= 2 for _f, n in radios) if radios else False,
@@ -541,7 +570,72 @@ with sync_playwright() as p:
         check("attachment introduced no submit click (page still on the form)",
               page.url.startswith("file:"), page.url)
 
-        # 6. nothing navigated
+        # 6. Shadow DOM (real Chrome, real layout engine): scanAll/scanFields and capture.js
+        #    must traverse OPEN shadow roots (recursively), with fills/guards working on
+        #    elements inside them; a CLOSED shadow root must stay completely unreachable; and a
+        #    submit button living inside the SAME open shadow root as the field being filled
+        #    must never be clicked by any scan/fill path -- though a DIRECT click bypassing
+        #    every guard must still genuinely submit (a real trap, not a vacuous one). See
+        #    test-page.html's own "Shadow DOM" fixture block for the exact markup.
+        page.add_script_tag(path=str(EXT / "capture.js"))
+        shadow = page.evaluate("""async () => {
+            const before = ApplyPilotScanner.scanAll(document);
+            const shadowField = before.fields.find(f => f.name === 'shadow_name');
+            const nestedField = before.fields.find(f => f.name === 'shadow_nested');
+            const hasClosed = before.fields.some(f => f.name === 'shadow_closed_unreachable');
+            const hasHidden = before.fields.some(f => f.name === 'shadow_hidden');
+
+            let fillOk = false, readback = '';
+            if (shadowField) {
+                const entry = before.registry[shadowField.id];
+                fillOk = await ApplyPilotScanner.applyFill(entry, 'Ada Lovelace');
+                const input = document.getElementById('shadow_dom_host').shadowRoot.getElementById('shadow_name_input');
+                readback = input.value;
+            }
+            const submitCountAfterFill = window.__SHADOW_FORM_SUBMIT_COUNT__ || 0;
+
+            // Genuine trap, not vacuous: bypassing every guard with a direct click DOES submit.
+            document.getElementById('shadow_dom_host').shadowRoot.getElementById('shadow_submit_btn').click();
+            const submitCountAfterDirectClick = window.__SHADOW_FORM_SUBMIT_COUNT__ || 0;
+
+            const hiddenInput = document.getElementById('shadow_dom_hidden_host').shadowRoot.getElementById('shadow_hidden_input');
+            const hiddenVisible = ApplyPilotScanner.isVisible(hiddenInput);
+
+            const structure = ApplyPilotCapture.captureStructure(document);
+            const shadowNodeIds = structure.nodes.filter(n => n.shadow).map(n => n.id);
+
+            return {
+                shadowFieldFound: !!shadowField, shadowFieldTagged: shadowField && shadowField.shadow === true,
+                nestedFieldFound: !!nestedField, hasClosed, hasHidden, hiddenVisible,
+                fillOk, readback, submitCountAfterFill, submitCountAfterDirectClick,
+                shadowNodeIds,
+            };
+        }""")
+        check("scanAll() finds the field inside the open shadow root, tagged shadow:true",
+              shadow["shadowFieldFound"] and shadow["shadowFieldTagged"], json.dumps(shadow))
+        check("scanAll() also finds the field inside the NESTED open shadow root (recursion)",
+              shadow["nestedFieldFound"], json.dumps(shadow))
+        check("scanAll() reports zero fields for the CLOSED shadow root (unreachable, by design)",
+              not shadow["hasClosed"], json.dumps(shadow))
+        check("isVisible() crosses the shadow boundary via .host: aria-hidden LIGHT-DOM ancestor hides a field inside an open shadow root (real layout engine)",
+              shadow["hiddenVisible"] is False, json.dumps(shadow))
+        check("...and that hidden shadow field never turns up in scanAll() at all",
+              not shadow["hasHidden"], json.dumps(shadow))
+        check("applyFill() fills a text input living inside an open shadow root, and it reads back (real Chrome)",
+              shadow["fillOk"] is True and shadow["readback"] == "Ada Lovelace", json.dumps(shadow))
+        check("none of the scanning/filling above ever clicked the submit button living inside the SAME shadow root",
+              shadow["submitCountAfterFill"] == 0, json.dumps(shadow))
+        check("bypassing every guard and clicking the shadow-DOM submit button directly DOES fire its form's submit handler (real trap, not vacuous)",
+              shadow["submitCountAfterDirectClick"] == 1, json.dumps(shadow))
+        check("captureStructure() (real Chrome) includes nodes from inside open shadow roots, tagged shadow:true",
+              "shadow_name_input" in shadow["shadowNodeIds"] and "shadow_submit_btn" in shadow["shadowNodeIds"],
+              json.dumps(shadow["shadowNodeIds"]))
+        check("captureStructure() also reaches the NESTED open shadow root",
+              "shadow_nested_input" in shadow["shadowNodeIds"], json.dumps(shadow["shadowNodeIds"]))
+        check("captureStructure() never captures anything from the CLOSED shadow root (unreachable)",
+              "shadow_closed_input" not in shadow["shadowNodeIds"], json.dumps(shadow["shadowNodeIds"]))
+
+        # 7. nothing navigated
         check("page never navigated away", page.url.startswith("file:"), page.url)
     finally:
         ctx.close()

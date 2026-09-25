@@ -104,6 +104,35 @@
     return path;
   }
 
+  // Builds one node's descriptor, shared by the light-DOM pass and the open-shadow-root pass
+  // below -- the only difference between the two is which `el`s they see and whether `shadow`
+  // gets stamped on the result.
+  function describeNode(el, scanner, shadow) {
+    var d = describe(el);
+    if (shadow) d.shadow = true;
+    var text = furnitureText(el);
+    if (text) d.text = text;
+    if (isEditable(el) && scanner && scanner.getLabel) {
+      try { d.label = scrub(scanner.getLabel(el)); } catch (e) { /* best-effort */ }
+    }
+    if (el.tagName === 'SELECT') {
+      // The option LIST is the form's own; the SELECTED option is the user's.
+      d.options = Array.prototype.slice.call(el.options, 0, 60).map(function (o) {
+        return scrub(o.text);
+      });
+    }
+    try {
+      d.visible = scanner && scanner.isVisible ? scanner.isVisible(el) : undefined;
+    } catch (e) { /* best-effort */ }
+    // ancestorPath() walks .parentElement, which -- like this file's own querySelectorAll
+    // below -- does not cross INTO a shadow root from outside; for a node found via the
+    // open-shadow-root pass it still walks correctly up to the top of that shadow tree (a
+    // best-effort partial path, not a crash), same limit noted on scanner.js's own
+    // scanRootAndShadows().
+    d.path = ancestorPath(el);
+    return d;
+  }
+
   function captureStructure(doc) {
     doc = doc || document;
     var scanner = root.ApplyPilotScanner;
@@ -111,25 +140,24 @@
     var els = doc.querySelectorAll(SELECTOR);
     var truncated = els.length > MAX_NODES;
     for (var i = 0; i < els.length && i < MAX_NODES; i++) {
-      var el = els[i];
-      var d = describe(el);
-      var text = furnitureText(el);
-      if (text) d.text = text;
-      if (isEditable(el) && scanner && scanner.getLabel) {
-        try { d.label = scrub(scanner.getLabel(el)); } catch (e) { /* best-effort */ }
-      }
-      if (el.tagName === 'SELECT') {
-        // The option LIST is the form's own; the SELECTED option is the user's.
-        d.options = Array.prototype.slice.call(el.options, 0, 60).map(function (o) {
-          return scrub(o.text);
-        });
-      }
-      try {
-        d.visible = scanner && scanner.isVisible ? scanner.isVisible(el) : undefined;
-      } catch (e) { /* best-effort */ }
-      d.path = ancestorPath(el);
-      nodes.push(d);
+      nodes.push(describeNode(els[i], scanner, false));
     }
+
+    // Open shadow roots (recursively) get the same, best-effort structural capture, tagged
+    // `shadow: true` so the operator can see the page uses shadow DOM at all when a fill
+    // report comes back thin. A CLOSED shadow root can never appear here (see scanner.js's
+    // findOpenShadowRoots) -- there is no way to reach in from outside.
+    try {
+      var shadowRoots = scanner && scanner.findOpenShadowRoots ? scanner.findOpenShadowRoots(doc) : [];
+      for (var s = 0; s < shadowRoots.length && nodes.length < MAX_NODES; s++) {
+        var sEls = shadowRoots[s].querySelectorAll(SELECTOR);
+        for (var j = 0; j < sEls.length && nodes.length < MAX_NODES; j++) {
+          nodes.push(describeNode(sEls[j], scanner, true));
+        }
+        if (nodes.length >= MAX_NODES) truncated = true;
+      }
+    } catch (e) { /* best-effort -- a capture must never throw on the page */ }
+
     return {
       kind: 'applypilot-page-structure',
       version: 1,
