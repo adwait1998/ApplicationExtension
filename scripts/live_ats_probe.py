@@ -107,8 +107,8 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
 _BOT_TEXT_RE = re.compile(
     r"access (is )?(temporarily )?(restricted|denied)|are you a robot|verify (that )?you are (a )?human|"
     r"checking your browser|unusual traffic|request (was )?blocked|press (&|and) hold|"
-    r"complete the security check|captcha", re.I)
-_BOT_FRAME_RE = re.compile(r"recaptcha|hcaptcha|challenges\.cloudflare\.com|captcha-delivery\.com|arkoselabs",
+    r"complete the security check", re.I)
+_BOT_FRAME_RE = re.compile(r"hcaptcha\.com/captcha|challenges\.cloudflare\.com|captcha-delivery\.com|arkoselabs",
                            re.I)
 
 
@@ -412,19 +412,12 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
         return rec
     rec["load_s"] = round(time.time() - t0, 1)
     rec["final_url"] = page.url
+    body_text = ""
     try:
-        body = page.inner_text("body", timeout=3000)[:4000].lower()
-        if re.search(r"no longer (open|available|accepting)|job (is )?not found|position has been filled", body):
+        body_text = page.inner_text("body", timeout=3000)[:4000].lower()
+        if re.search(r"no longer (open|available|accepting)|job (is )?not found|position has been filled",
+                     body_text):
             rec["error"] = "posting closed (page says so)"
-            return rec
-        # A bot check is not an empty form: report it as what it is, so a
-        # blocked page never reads as "no fields found" (reviewer round 4:
-        # SmartRecruiters served "Access is temporarily restricted").
-        blocked = _BOT_TEXT_RE.search(body)
-        challenge = [f.url for f in page.frames if _BOT_FRAME_RE.search(f.url or "")]
-        if blocked or challenge:
-            rec["error"] = ("blocked by a bot check (" +
-                            (blocked.group(0) if blocked else challenge[0][:60]) + ")")
             return rec
     except Exception:
         pass
@@ -532,6 +525,14 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
             pass
         rec["frames"].append(frec)
 
+    # A bot check is not an empty form (reviewer round 4: SmartRecruiters
+    # served "Access is temporarily restricted"). Judged only when NO frame
+    # yielded a single field, so a real form is never reported as blocked.
+    if not any(fr.get("fields") for fr in rec["frames"]):
+        bot_text = _BOT_TEXT_RE.search(body_text or "")
+        challenge = [f.url for f in page.frames if _BOT_FRAME_RE.search(f.url or "")]
+        if bot_text or challenge:
+            rec["error"] = "blocked by a bot check (" + (bot_text.group(0) if bot_text else challenge[0][:60]) + ")"
     rec["blocked_requests"] = blocked[:20]
     rec["total_s"] = round(time.time() - t0, 1)
     try:
