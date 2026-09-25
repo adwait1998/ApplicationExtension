@@ -36,7 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
-from applypilot.extension import llm_util, resolve, resume_import, schema
+from applypilot.extension import answer_memory, llm_util, resolve, resume_import, schema
 from applypilot.extension import settings as ext_settings
 
 TOKEN_FILENAME = "extension_token.txt"
@@ -100,6 +100,21 @@ class ResolveRequest(BaseModel):
 
 class ProfileCreateIn(BaseModel):
     id: str
+
+
+class LearnItem(BaseModel):
+    question: str = ""
+    answer: str = ""
+
+
+class LearnIn(BaseModel):
+    """POST /answers/learn body: answers the applicant typed themselves into
+    questions a fill left for them, sent on an explicit click."""
+    items: list[LearnItem] = []
+
+
+class ForgetIn(BaseModel):
+    question: str = ""
 
 
 class SettingsIn(BaseModel):
@@ -451,6 +466,27 @@ def create_app(
         except ext_settings.InvalidSettings as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _settings_response()
+
+    # -----------------------------------------------------------------
+    # Answer memory: the applicant's own answers to questions a fill left
+    # for them, saved on an explicit click and reused by the answer-bank
+    # tier next time. Always the ACTIVE profile's own bank file.
+    # -----------------------------------------------------------------
+
+    def _bank_path() -> Path:
+        return _current_profile_path(root).parent / "answer_bank.json"
+
+    @app.get("/answers")
+    def list_saved_answers(_: None = Depends(_require_token)) -> dict:
+        return {"answers": answer_memory.list_answers(_bank_path())}
+
+    @app.post("/answers/learn")
+    def learn_answers(body: LearnIn, _: None = Depends(_require_token)) -> dict:
+        return answer_memory.learn(_bank_path(), [i.model_dump() for i in body.items])
+
+    @app.post("/answers/forget")
+    def forget_answer(body: ForgetIn, _: None = Depends(_require_token)) -> dict:
+        return {"forgotten": answer_memory.forget(_bank_path(), body.question)}
 
     @app.get("/profile")
     def profile_keys(_: None = Depends(_require_token)) -> dict:
