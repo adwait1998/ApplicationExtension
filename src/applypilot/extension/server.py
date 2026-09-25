@@ -36,7 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
-from applypilot.extension import answer_memory, llm_util, resolve, resume_import, schema
+from applypilot.extension import answer_memory, cover_letter, job_context, llm_util, resolve, resume_import, schema
 from applypilot.extension import settings as ext_settings
 
 TOKEN_FILENAME = "extension_token.txt"
@@ -115,6 +115,14 @@ class LearnIn(BaseModel):
 
 class ForgetIn(BaseModel):
     question: str = ""
+
+
+class CoverLetterIn(BaseModel):
+    """POST /cover-letter body: the page's URL plus any frame URLs (an
+    embedded Greenhouse form's iframe names the posting), and optionally the
+    page's visible text as a last-resort job description."""
+    urls: list[str] = []
+    page_text: str = ""
 
 
 class SettingsIn(BaseModel):
@@ -487,6 +495,38 @@ def create_app(
     @app.post("/answers/forget")
     def forget_answer(body: ForgetIn, _: None = Depends(_require_token)) -> dict:
         return {"forgotten": answer_memory.forget(_bank_path(), body.question)}
+
+    # -----------------------------------------------------------------
+    # Cover letter: an explicit, user-clicked draft for the page being
+    # filled. Job context from the operator's jobs DB, else the ATS's
+    # public posting API, else the page text. Never auto-attached.
+    # -----------------------------------------------------------------
+
+    @app.post("/cover-letter")
+    def cover_letter_endpoint(body: CoverLetterIn, _: None = Depends(_require_token)) -> dict:
+        ok, provider = llm_util.llm_available()
+        if not ok:
+            raise HTTPException(status_code=503, detail="no language model available for drafting")
+        profile = _load_profile()
+        job = job_context.job_context([u for u in body.urls if u][:6], page_text=body.page_text[:20000],
+                                      db_path=app_dir / "applypilot.db")
+        try:
+            resume_txt = (_current_profile_path(root).parent / "resume.txt").read_text(encoding="utf-8")
+        except Exception:
+            resume_txt = ""
+
+        def chat(messages: list[dict]) -> str:
+            return llm_util.get_llm_client().chat(messages, max_tokens=1024, temperature=0.7)
+
+        try:
+            out = cover_letter.draft_cover_letter(profile, job or {}, resume_txt, chat)
+        except cover_letter.CoverLetterError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 — never a stack trace to the extension
+            raise HTTPException(status_code=502, detail=f"drafting failed: {str(exc)[:200]}") from exc
+        return {"text": out["text"], "warnings": out["warnings"], "draft": True, "provider": provider,
+                "job": {"title": job.get("title", ""), "company": job.get("company", ""),
+                        "source": job.get("source", "")}}
 
     @app.get("/profile")
     def profile_keys(_: None = Depends(_require_token)) -> dict:
