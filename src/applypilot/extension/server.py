@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import os
 import secrets
 import shutil
@@ -37,7 +38,7 @@ from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
 from applypilot.extension import (answer_memory, app_log, cover_letter, job_context, llm_util, resolve,
-                                  resume_import, schema)
+                                  resume_import, schema, tailor)
 from applypilot.extension import settings as ext_settings
 
 TOKEN_FILENAME = "extension_token.txt"
@@ -804,5 +805,47 @@ def create_app(
             media_type=resume_import.content_type_for(stored),
             headers={"Content-Disposition": f'attachment; filename="{stored.name}"'},
         )
+
+    # -----------------------------------------------------------------
+    # Tailored résumé for the page: the pipeline's tailoring (validator +
+    # fabrication judge), offered only when it passed, stored beside the
+    # active profile, attached only when the applicant chooses it.
+    # -----------------------------------------------------------------
+
+    def _tailored_dir() -> Path:
+        return _current_profile_path(root).parent / tailor.TAILORED_DIRNAME
+
+    @app.post("/resume/tailor")
+    def tailor_endpoint(body: CoverLetterIn, _: None = Depends(_require_token)) -> dict:
+        ok, _provider = llm_util.llm_available()
+        if not ok:
+            raise HTTPException(status_code=503, detail="no language model available for tailoring")
+        blocked = llm_util.cloud_block_reason(app_dir)
+        if blocked:
+            raise HTTPException(status_code=403, detail=blocked)
+        urls = [u for u in body.urls if u][:6]
+        job = job_context.job_context(urls, page_text=body.page_text[:20000], db_path=app_dir / "applypilot.db")
+        try:
+            resume_txt = (_current_profile_path(root).parent / "resume.txt").read_text(encoding="utf-8")
+        except Exception:
+            resume_txt = ""
+        try:
+            return tailor.tailor_for_page(_load_profile(), job, resume_txt, urls[0] if urls else "",
+                                          _tailored_dir(), client=llm_util.get_llm_client())
+        except tailor.TailorError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 — never a stack trace to the extension
+            raise HTTPException(status_code=502, detail=f"tailoring failed: {str(exc)[:200]}") from exc
+
+    @app.get("/resume/tailored/{tid}")
+    def get_tailored(tid: str, _: None = Depends(_require_token)) -> Response:
+        found = tailor.find_tailored(_tailored_dir(), tid)
+        if not found:
+            raise HTTPException(status_code=404, detail="no such tailored résumé")
+        meta, pdf = found
+        name = (_load_profile().get("personal") or {}).get("full_name") or "Resume"
+        safe = re.sub(r'[^\w .-]', "", name).strip() or "Resume"
+        return Response(content=pdf.read_bytes(), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{safe} - Resume.pdf"'})
 
     return app
