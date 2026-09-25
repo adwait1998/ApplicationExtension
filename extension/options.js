@@ -439,13 +439,19 @@
 
   function renderProfileSwitcher(data) {
     if (data.legacy) {
-      profileSwitcherEl.style.display = 'none';
+      // Nothing to switch between yet, but keep "New profile…" reachable: clicking
+      // it and trying will get the exact 409 + migrate command back from the
+      // service (see createProfileBtn below), which is the operator's actual next
+      // step — hiding the whole row here would hide that path entirely.
+      profileSwitcherEl.style.display = 'flex';
+      profileSelectEl.style.display = 'none';
       newProfileRowEl.style.display = 'none';
       legacyNoticeEl.style.display = 'block';
       return;
     }
     legacyNoticeEl.style.display = 'none';
     profileSwitcherEl.style.display = 'flex';
+    profileSelectEl.style.display = '';
     profileSelectEl.innerHTML = '';
     (data.profiles || []).forEach(function (p) {
       var opt = document.createElement('option');
@@ -849,6 +855,14 @@
     }).then(function () {
       setProfileStatus('ok', 'Created and switched to profile "' + pid + '".');
     }).catch(function (err) {
+      if (err && err.status === 409) {
+        // The service's own detail is already a complete, actionable sentence
+        // (e.g. "legacy single-profile install — run `applypilot profile
+        // migrate` first", or "profile already exists: <id>") — show it
+        // verbatim rather than folding it into a generic wrapper.
+        setProfileStatus('err', err.message);
+        return;
+      }
       setProfileStatus('err', 'Could not create profile: ' + err.message);
     });
   });
