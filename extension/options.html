@@ -126,11 +126,11 @@
     margin-bottom: 18px;
   }
 
-  #status, #profileStatus, #importStatus, #smartFillStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
-  #status.ok, #profileStatus.ok, #importStatus.ok, #smartFillStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
-  #status.err, #profileStatus.err, #importStatus.err, #smartFillStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
-  #status.info, #profileStatus.info, #importStatus.info, #smartFillStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
-  #status.warn, #profileStatus.warn, #importStatus.warn, #smartFillStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+  #status, #profileStatus, #importStatus, #smartFillStatus, #answersStatus { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; line-height: 1.45; }
+  #status.ok, #profileStatus.ok, #importStatus.ok, #smartFillStatus.ok, #answersStatus.ok { display: block; background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+  #status.err, #profileStatus.err, #importStatus.err, #smartFillStatus.err, #answersStatus.err { display: block; background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
+  #status.info, #profileStatus.info, #importStatus.info, #smartFillStatus.info, #answersStatus.info { display: block; background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
+  #status.warn, #profileStatus.warn, #importStatus.warn, #smartFillStatus.warn, #answersStatus.warn { display: block; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
 
   .hint { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
   .hint.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 8px 10px; border-radius: 6px; }
@@ -341,6 +341,22 @@
     font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 999px;
   }
   .skill-chip-remove:hover { color: var(--err); filter: none; }
+
+  /* -- data tables (saved answers / application log) --------------------- */
+  .table-scroll { overflow-x: auto; }
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data-table th, table.data-table td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  table.data-table th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+  table.data-table tbody tr:last-child td { border-bottom: none; }
+  table.data-table td.col-actions { text-align: right; white-space: nowrap; }
+  table.data-table select { width: auto; padding: 4px 6px; }
+  .answer-text { white-space: pre-wrap; word-break: break-word; }
+  .who-badge {
+    font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: var(--card-2); border: 1px solid var(--border-soft); color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .who-badge.you { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-border); }
 </style>
 </head>
 <body>
@@ -702,6 +718,17 @@
   </div>
 
   <div id="profileStatus"></div>
+
+  <hr class="section-divider">
+
+  <h1>Saved answers</h1>
+  <p class="sub">Reused when a form asks a question you've answered before. Your own answers are saved from the side panel's "Remember my answers"; others were reused from an earlier run.</p>
+
+  <div class="card" id="answersCard">
+    <div class="table-scroll" id="answersTableWrap"></div>
+    <div class="hint" id="answersEmpty" style="display:none;">No saved answers yet.</div>
+    <div id="answersStatus"></div>
+  </div>
 
   <template id="workHistoryRowTemplate">
     <div class="repeat-row" data-kind="work">

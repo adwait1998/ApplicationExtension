@@ -65,6 +65,7 @@
       }
       loadSmartFillSettings();
       loadLlmAvailability();
+      loadAnswers();
     });
   }
 
@@ -84,6 +85,7 @@
     chrome.storage.local.set({ serviceUrl: serviceUrl, token: token }).then(function () {
       setStatus('ok', 'Saved.');
       refreshProfileArea();
+      loadAnswers();
     });
   });
 
@@ -1277,6 +1279,132 @@
       var input = document.getElementById(essential.el);
       if (input) input.focus({ preventScroll: true });
     }
+  }
+
+  // ===============================================================================
+  // -- Saved answers ---------------------------------------------------------------
+  // ===============================================================================
+  //
+  // GET /answers -> {answers:[{question, answer, source ("you" | "earlier run"),
+  // ts, used}]}. "you" is an answer the applicant typed on a page and explicitly
+  // chose to remember (the side panel's "Remember my answers"); anything else was
+  // reused from an earlier fill. Forgetting re-fetches the list rather than just
+  // removing the row locally, so this always reflects what the bank file actually
+  // holds even if something else changed it concurrently (e.g. the CLI).
+
+  var answersTableWrapEl = document.getElementById('answersTableWrap');
+  var answersEmptyEl = document.getElementById('answersEmpty');
+  var answersStatusEl = document.getElementById('answersStatus');
+
+  var ANSWER_TRUNCATE_LEN = 180;
+
+  function setAnswersStatus(kind, text) {
+    answersStatusEl.className = kind;
+    answersStatusEl.textContent = text;
+  }
+
+  function loadAnswers() {
+    if (!tokenEl.value) {
+      answersTableWrapEl.innerHTML = '';
+      answersEmptyEl.style.display = 'none';
+      setAnswersStatus('info', 'Set a service token above to load saved answers.');
+      return;
+    }
+    setAnswersStatus('', '');
+    apiGet('/answers').then(function (data) {
+      renderAnswersTable((data && data.answers) || []);
+    }, function (err) {
+      answersTableWrapEl.innerHTML = '';
+      answersEmptyEl.style.display = 'none';
+      setAnswersStatus('err', 'Could not load saved answers: ' + err.message);
+    });
+  }
+
+  function renderAnswersTable(list) {
+    answersTableWrapEl.innerHTML = '';
+    if (!list.length) {
+      answersEmptyEl.style.display = 'block';
+      return;
+    }
+    answersEmptyEl.style.display = 'none';
+
+    var table = document.createElement('table');
+    table.className = 'data-table';
+
+    var thead = document.createElement('thead');
+    var headRow = document.createElement('tr');
+    ['Question', 'Answer', 'Who', ''].forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    list.forEach(function (a) { tbody.appendChild(buildAnswerRow(a)); });
+    table.appendChild(tbody);
+
+    answersTableWrapEl.appendChild(table);
+  }
+
+  function buildAnswerRow(a) {
+    var tr = document.createElement('tr');
+
+    var qTd = document.createElement('td');
+    qTd.textContent = a.question || '';
+    tr.appendChild(qTd);
+
+    var aTd = document.createElement('td');
+    var answerText = a.answer == null ? '' : String(a.answer);
+    var isLong = answerText.length > ANSWER_TRUNCATE_LEN;
+    var textEl = document.createElement('span');
+    textEl.className = 'answer-text';
+    textEl.textContent = isLong ? answerText.slice(0, ANSWER_TRUNCATE_LEN) + '…' : answerText;
+    aTd.appendChild(textEl);
+    if (isLong) {
+      var expanded = false;
+      var expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.className = 'secondary small';
+      expandBtn.style.marginLeft = '6px';
+      expandBtn.textContent = 'Expand';
+      expandBtn.addEventListener('click', function () {
+        expanded = !expanded;
+        textEl.textContent = expanded ? answerText : answerText.slice(0, ANSWER_TRUNCATE_LEN) + '…';
+        expandBtn.textContent = expanded ? 'Collapse' : 'Expand';
+      });
+      aTd.appendChild(expandBtn);
+    }
+    tr.appendChild(aTd);
+
+    var whoTd = document.createElement('td');
+    var whoBadge = document.createElement('span');
+    var isYou = a.source === 'you';
+    whoBadge.className = 'who-badge' + (isYou ? ' you' : '');
+    whoBadge.textContent = a.source || 'earlier run';
+    whoTd.appendChild(whoBadge);
+    tr.appendChild(whoTd);
+
+    var actionTd = document.createElement('td');
+    actionTd.className = 'col-actions';
+    var forgetBtn = document.createElement('button');
+    forgetBtn.type = 'button';
+    forgetBtn.className = 'danger small';
+    forgetBtn.textContent = 'Forget';
+    forgetBtn.addEventListener('click', function () {
+      forgetBtn.disabled = true;
+      apiPost('/answers/forget', { question: a.question }).then(function () {
+        loadAnswers();
+      }, function (err) {
+        forgetBtn.disabled = false;
+        setAnswersStatus('err', 'Could not forget that answer: ' + err.message);
+      });
+    });
+    actionTd.appendChild(forgetBtn);
+    tr.appendChild(actionTd);
+
+    return tr;
   }
 
   load();
