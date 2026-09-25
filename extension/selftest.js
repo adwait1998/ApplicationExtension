@@ -2116,14 +2116,16 @@ pending.push((async () => {
       okBad === false && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
     expect('Country combobox failure reason never quotes the attempted value ("Atlantis")',
       !String(entry._lastReason || '').includes('Atlantis'));
-    // "Atlantis" filters the rendered catalog down to ZERO rows (a DIFFERENT failure -- "no
-    // options rendered while filtering", no options to show), so it never populates
-    // entry._lastOptions. "Can" filters down to a NON-empty-but-not-matching set (just
-    // "Canada") -- the "no confident match among the filtered options" path this build adds
-    // optionsSeen to. This build: that failure also carries the option texts it saw as
-    // STRUCTURED DATA on entry._lastOptions (not only baked into the reason string) --
-    // content.js's second-chance /resolve round trip reads this to give the service the real
-    // options it never saw at first.
+    // "Atlantis" filters the rendered catalog down to ZERO rows ("no options rendered while
+    // filtering") -- a DIFFERENT failure than "Can" below (which filters to a single
+    // non-matching option, "no confident match AMONG the filtered options"). This build's
+    // clear-and-recheck-the-unfiltered-list recovery (see fillComboboxOne) means the "zero
+    // rows" case no longer gives up empty-handed either: it re-reads the real (small, static)
+    // catalog after clearing the search text and carries THAT as optionsSeen, same contract as
+    // every other failed-match tier -- content.js's second-chance /resolve round trip reads this
+    // to give the service the real options it never saw at first.
+    expect('Country combobox: even the "zero rows while filtering" failure now carries the recovered unfiltered catalog as optionsSeen (this build)',
+      JSON.stringify(entry._lastOptions) === JSON.stringify(['Canada', 'United States of America', 'Mexico']));
     const okBad2 = await Scanner.applyFill(entry, 'Can');
     expect('Country combobox: a second no-confident-match value (filters to a single non-matching option) also fails, commit still untouched',
       okBad2 === false && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
