@@ -622,6 +622,55 @@ function rememberAnswersForTab(tabId) {
 }
 
 // ---------------------------------------------------------------------
+// REPLACE KEPT VALUES WITH MY PROFILE (item 2, reviewer round 4) — the panel's own button next to
+// a fill's "kept your value" rows (content.js's applyFills() — see "never overwrite the user").
+// Never automatic — only ever called from the panel's own click, exactly like REMEMBER_ANSWERS
+// above, which this mirrors: group the ticked (qualified) ids by the frame they actually live in,
+// then ask each frame to replace exactly its own slice.
+// ---------------------------------------------------------------------
+
+/**
+ * `ids` are qualified ids of `kept_value` rows the operator ticked in the panel. The exact value
+ * to write for each one is read back off THIS TAB'S OWN STORED state — state.needsYou[].
+ * profileValue/profileValues, set by content.js at the moment it decided to keep that field (see
+ * applyFills()) — never anything the panel itself might send, so a stale or tampered client
+ * message can never cause a different value to be written than the one the operator actually saw
+ * and ticked. Routes each frame's own slice to content.js's APPLY_REPLACE_KEPT_VALUES (see
+ * replaceKeptValues() there — same guarded apply+verify+highlight+undo path any other fill uses,
+ * with "never overwrite the user" deliberately stepped aside for just these ids).
+ */
+function replaceKeptValuesForTab(tabId, ids) {
+  return chrome.storage.session.get(tabStateKey(tabId)).then(function (stored) {
+    var state = stored[tabStateKey(tabId)];
+    var needsYou = (state && state.needsYou) || [];
+    var wanted = {}; (ids || []).forEach(function (id) { wanted[id] = true; });
+    var byFrame = {}; // frameId -> [{id (local), value, values}]
+    needsYou.forEach(function (n) {
+      if (n.status !== 'kept_value' || !wanted[n.id]) return;
+      var parts = splitQualifiedId(n.id);
+      if (!parts) return;
+      byFrame[parts.frameId] = byFrame[parts.frameId] || [];
+      byFrame[parts.frameId].push({ id: parts.localId, value: n.profileValue || '', values: n.profileValues || null });
+    });
+    var frameIds = Object.keys(byFrame);
+    if (!frameIds.length) return { ok: false, error: 'None of the selected rows could be matched back to a field on the page.' };
+    return Promise.all(frameIds.map(function (frameIdStr) {
+      var frameId = parseInt(frameIdStr, 10);
+      return chrome.tabs.sendMessage(tabId, { type: 'APPLY_REPLACE_KEPT_VALUES', items: byFrame[frameIdStr] }, { frameId: frameId })
+        .catch(function (e) { return { ok: false, error: String(e && e.message ? e.message : e) }; });
+    })).then(function (results) {
+      var applied = 0, failed = 0, anyOk = false;
+      var errors = [];
+      results.forEach(function (r) {
+        if (r && r.ok) { anyOk = true; applied += r.applied || 0; failed += r.failed || 0; }
+        else if (r) errors.push(r.error || 'a frame could not be reached');
+      });
+      return { ok: anyOk, applied: applied, failed: failed, error: errors.length ? errors.join(' | ') : null };
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
 // APPLICATION LOG (item 4) — POST /log {url, title, company, counts} -> the log entry
 // ({id, status, ...}); POST /log/{id}/status {status} -> {ok:true}. Logging itself is automatic
 // (right after a fill completes, see the FILL_STATE_UPDATE handler below) — nothing here is
@@ -1340,6 +1389,14 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   if (msg.type === 'REMEMBER_ANSWERS') {
     rememberAnswersForTab(msg.tabId).then(sendResponse, function (e) {
+      sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+    });
+    return true;
+  }
+  if (msg.type === 'REPLACE_KEPT_VALUES') {
+    // The panel's "Replace kept values with my profile" button — see replaceKeptValuesForTab()
+    // above and content.js's replaceKeptValues().
+    replaceKeptValuesForTab(msg.tabId, msg.ids || []).then(sendResponse, function (e) {
       sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
     });
     return true;

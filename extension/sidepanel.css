@@ -447,6 +447,35 @@ button.secondary.cancel:hover { background: var(--err-bg); }
 
 .section-title.draft-title { color: var(--draft); }
 
+/* -- "Replace kept values with my profile" (item 2, reviewer round 4) -- */
+.kept-compare {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.kept-replace-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 4px;
+}
+.kept-replace-check input { margin: 0; }
+.kept-value-line { color: var(--text-dim); margin-top: 2px; }
+.kept-value-tag { color: var(--text-faint); font-weight: 600; }
+.kept-replace-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 10px;
+}
+.kept-replace-count { font-size: 12px; color: var(--text-dim); }
+.kept-replace-bar button.secondary { flex: none; padding: 6px 10px; font-size: 12px; }
+
 .draft-badge {
   display: inline-block;
   font-size: 10px;

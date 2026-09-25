@@ -531,6 +531,156 @@ SPONSOR_RESOLVE_PAGE_BYTES = b"""<!DOCTYPE html>
 </body></html>
 """
 
+# A fixture for reviewer round 4: "never overwrite the user" now covers EVERY widget kind (item
+# 1), including two widget shapes the pre-round-4 code deliberately excluded: a react-select/ARIA
+# combobox and an Ashby-style Yes/No button group. Self-contained (not reusing
+# extension/test-page.html's own combobox/button-group mocks, which all start UNSELECTED — this
+# fixture needs each widget to start ALREADY committed, to reproduce the reviewer's own reports
+# verbatim: "a react-select 'How did you hear?' already set to 'Referral' was changed to
+# 'LinkedIn'" and "an Ashby Yes/No button group already set to 'No' was changed to 'Yes'"), but
+# built from the exact same markup shapes scanner.js's own detectors look for — the combobox is
+# SPONSOR_RESOLVE_PAGE_BYTES's own makeSimpleSelect() react-select mock verbatim (just given an
+# `initial` committed value), and the button group mirrors extension/test-page.html's own Ashby
+# fixture shape (a 2-button group sharing an immediate parent classed "...field-entry...", each
+# button classed "ashby-application-form-input-*option", preceded by a label — see
+# findButtonGroups()/isChoiceButtonSelected() in scanner.js), using aria-pressed="true" (one of
+# isChoiceButtonSelected()'s own recognized signals) to mark "No" as already chosen.
+KEPT_VALUES_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Kept values fixture (reviewer round 4)</title></head>
+<body>
+<h1>Kept values fixture</h1>
+<form id="kv-form">
+  <div class="select" id="how_heard_field">
+    <label id="how_heard_label">How did you hear about us?</label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="how_heard_value">
+          <input type="text" role="combobox" id="how_heard_input" class="select__input" name="how_heard_combobox"
+                 aria-labelledby="how_heard_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="how_heard_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="how_heard_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="select" id="how_heard_rt_field">
+    <label id="how_heard_rt_label">Referral source (resume-parsed test)</label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="how_heard_rt_value">
+          <input type="text" role="combobox" id="how_heard_rt_input" class="select__input" name="how_heard_combobox_rt"
+                 aria-labelledby="how_heard_rt_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="how_heard_rt_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="how_heard_rt_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="ashby-application-form-field-entry" id="kv_relocate_entry">
+    <label class="ashby-application-form-question-title">Are you willing to relocate?</label>
+    <button type="button" class="ashby-application-form-input-yesno-option" id="kv_relocate_yes">Yes</button>
+    <button type="button" class="ashby-application-form-input-yesno-option" id="kv_relocate_no" aria-pressed="true">No</button>
+  </div>
+
+  <label for="kv_resume_upload">Resume/CV</label>
+  <input type="file" id="kv_resume_upload" name="kv_resume">
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('kv-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+
+  // Same react-select-shaped mock as SPONSOR_RESOLVE_PAGE_BYTES's own makeSimpleSelect(), plus
+  // an `initial` committed value and an exposed setCommitted() (used by
+  // patch_resume_with_combobox_prefill() to simulate an ATS's own resume parse landing here
+  // AFTER page load, never at page load -- see that function's own doc comment).
+  function makeSimpleSelect(inputId, toggleId, menuId, valueId, options, initial) {
+    var input = document.getElementById(inputId);
+    var toggle = document.getElementById(toggleId);
+    var menu = document.getElementById(menuId);
+    var valueContainer = document.getElementById(valueId);
+    var committed = initial || null;
+    var mousedownArmed = null;
+
+    function renderValue() {
+      Array.prototype.slice.call(valueContainer.querySelectorAll('.select__single-value')).forEach(function (n) { n.remove(); });
+      if (!committed) return;
+      var sv = document.createElement('div');
+      sv.className = 'select__single-value';
+      sv.textContent = committed;
+      valueContainer.insertBefore(sv, input);
+    }
+    function openMenu() { menu.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
+    function closeMenu() { menu.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
+    function renderOptions() {
+      menu.innerHTML = '';
+      options.forEach(function (text) {
+        var opt = document.createElement('div');
+        opt.className = 'select__option';
+        opt.setAttribute('role', 'option');
+        opt.textContent = text;
+        opt.addEventListener('mousedown', function (e) { e.preventDefault(); mousedownArmed = text; });
+        opt.addEventListener('click', function () {
+          if (mousedownArmed !== text) return;
+          mousedownArmed = null;
+          committed = text;
+          renderValue();
+          input.value = '';
+          closeMenu();
+        });
+        menu.appendChild(opt);
+      });
+    }
+    menu.style.display = 'none';
+    if (committed) renderValue();
+    toggle.addEventListener('mouseup', function () {
+      if (menu.style.display === 'block') { closeMenu(); return; }
+      renderOptions();
+      openMenu();
+    });
+    toggle.addEventListener('click', function (e) { e.preventDefault(); });
+    input.addEventListener('keyup', function (e) {
+      if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(); openMenu(); }
+    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    input.addEventListener('input', function () {
+      renderOptions();
+      openMenu();
+    });
+    input.addEventListener('blur', function () {
+      setTimeout(function () { input.value = ''; closeMenu(); }, 0);
+    });
+    return {
+      committedValue: function () { return committed; },
+      setCommitted: function (v) { committed = v; renderValue(); }
+    };
+  }
+
+  window.__howHeard = makeSimpleSelect('how_heard_input', 'how_heard_toggle', 'how_heard_menu', 'how_heard_value',
+    ['Referral', 'LinkedIn', 'Indeed'], 'Referral');
+  window.__howHeardRt = makeSimpleSelect('how_heard_rt_input', 'how_heard_rt_toggle', 'how_heard_rt_menu', 'how_heard_rt_value',
+    ['Indeed', 'LinkedIn', 'Referral'], null);
+
+  // A minimal, real toggle so the group would visibly (and wrongly) flip if protection ever
+  // failed to hold, rather than the test passing by accident because nothing was wired up.
+  ['kv_relocate_yes', 'kv_relocate_no'].forEach(function (id) {
+    document.getElementById(id).addEventListener('click', function () {
+      document.getElementById('kv_relocate_yes').setAttribute('aria-pressed', id === 'kv_relocate_yes' ? 'true' : 'false');
+      document.getElementById('kv_relocate_no').setAttribute('aria-pressed', id === 'kv_relocate_no' ? 'true' : 'false');
+    });
+  });
+</script>
+</body></html>
+"""
+
 
 class StubHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -598,6 +748,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path.startswith("/sponsor-resolve-page.html"):
             body = SPONSOR_RESOLVE_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/kept-values-page.html"):
+            body = KEPT_VALUES_PAGE_BYTES
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -684,6 +841,32 @@ class StubHandler(BaseHTTPRequestHandler):
                     # else (sponsor_combobox_silent, options non-empty): deliberately answer
                     # NOTHING for it — neither a fill NOR a skip — the negative control for "the
                     # second resolve returns nothing" (item 4's own control case).
+            if "kept-values-page" in url:
+                # Reviewer round 4: build_fills() always leaves "combobox"-widget fields for the
+                # human (see its own comment — real options are unknown at scan time), which would
+                # otherwise mean nothing here ever tries to OVERWRITE either how_heard combobox at
+                # all. Both of this fixture's comboboxes get a deliberate, real-option answer
+                # instead, exactly like the "sponsor-resolve-page" branch above does for its own
+                # named fields — the button group needs no such override (its own options ARE
+                # known at scan time, so build_fills()'s generic options[0] already answers "Yes").
+                for f in fields:
+                    name = f.get("name") or ""
+                    if name == "how_heard_combobox":
+                        fills = [x for x in fills if x["id"] != f["id"]]
+                        skipped = [x for x in skipped if x["id"] != f["id"]]
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "LinkedIn",
+                            "reason": "test stub: profile says LinkedIn",
+                            "profile_key": "test.how_heard", "source": "profile", "draft": False,
+                        })
+                    elif name == "how_heard_combobox_rt":
+                        fills = [x for x in fills if x["id"] != f["id"]]
+                        skipped = [x for x in skipped if x["id"] != f["id"]]
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "Indeed",
+                            "reason": "test stub: profile says Indeed",
+                            "profile_key": "test.how_heard_rt", "source": "profile", "draft": False,
+                        })
             self._json(200, {"fills": fills, "skipped": skipped})
         elif self.path == "/resume/tailor":
             length = int(self.headers.get("Content-Length") or 0)
@@ -776,6 +959,7 @@ PAGE_BASE = f"{SERVICE_URL}/test-page.html"
 WRAPPER_URL = f"{SERVICE_URL}/embed-wrapper.html"
 RESUME_TAILOR_URL = f"{SERVICE_URL}/resume-tailor-page.html"
 SPONSOR_RESOLVE_URL = f"{SERVICE_URL}/sponsor-resolve-page.html"
+KEPT_VALUES_URL = f"{SERVICE_URL}/kept-values-page.html"
 
 
 # ---------------------------------------------------------------------------
@@ -854,6 +1038,24 @@ def wait_for_log_entry(helper_page, tab_id, timeout_s=5):
     while time.time() < deadline:
         state = get_state(helper_page, tab_id)
         if state and state.get("logEntry"):
+            return state
+        time.sleep(0.05)
+    return state
+
+
+def wait_for_condition(helper_page, tab_id, predicate, timeout_s=10):
+    """Generalizes wait_for_log_entry()'s own "poll storage for a specific condition" shape (this
+    build's "Replace kept values with my profile" — item 2, reviewer round 4): its own state
+    update is a PATCH from an already-'done' state back to 'done' (patchReportedState() —
+    content.js), so wait_for_done()'s "status left running" check would return on the FIRST poll,
+    seeing the stale pre-replace state rather than waiting for the replace to actually land.
+    `predicate(state)` decides when to stop; returns the last state seen either way (never None
+    unless storage itself never had an entry for this tab at all)."""
+    deadline = time.time() + timeout_s
+    state = None
+    while time.time() < deadline:
+        state = get_state(helper_page, tab_id)
+        if state and predicate(state):
             return state
         time.sleep(0.05)
     return state
@@ -949,6 +1151,44 @@ def patch_resume_with_ats_prefill(helper_page, tab_id, field_name, prefill_value
             args: [args.fieldName, args.prefillValue],
         })""",
         {"tabId": tab_id, "fieldName": field_name, "prefillValue": prefill_value},
+    )
+
+
+def patch_resume_with_combobox_prefill(helper_page, tab_id, select_handle, prefill_value):
+    """Like patch_resume_with_ats_prefill() above, but for a react-select-style combobox instead
+    of a plain input: a react-select's committed value is a rendered chip (`.select__single-value`
+    div), never a plain element.value, so simulating an ATS's own résumé-parse landing on one needs
+    the fixture's own exposed handle (KEPT_VALUES_PAGE_BYTES's `window.__howHeardRt`, with its own
+    `setCommitted()`) rather than a property-descriptor value setter. Same GET_RESUME patch as
+    patch_resume_with_ats_prefill() (attachResumeFile is never even called without a résumé to
+    attach); `select_handle` is called with NO events dispatched (setCommitted() itself doesn't
+    dispatch input/change/click, matching what a real react-select re-render does), so this can
+    never be mistaken for a genuine (isTrusted) user interaction by content.js's own tracker — the
+    same "predates our own résumé attach, or doesn't" distinction the plain-field version proves
+    in TAB 6 above."""
+    helper_page.evaluate(
+        """(args) => chrome.scripting.executeScript({
+            target: { tabId: args.tabId },
+            func: (selectHandle, prefillValue) => {
+                var origSend = chrome.runtime.sendMessage.bind(chrome.runtime);
+                chrome.runtime.sendMessage = function (msg) {
+                    if (msg && msg.type === 'GET_RESUME') {
+                        return Promise.resolve({ ok: true, data: {
+                            filename: 'resume.pdf', contentType: 'application/pdf', size: 4,
+                            base64: btoa('PDF!')
+                        } });
+                    }
+                    return origSend.apply(null, arguments);
+                };
+                window.ApplyPilotScanner.attachResumeFile = function () {
+                    var sel = window[selectHandle];
+                    if (sel && sel.setCommitted) sel.setCommitted(prefillValue);
+                    return Promise.resolve({ attempted: true, attached: true, filename: 'resume.pdf' });
+                };
+            },
+            args: [args.selectHandle, args.prefillValue],
+        })""",
+        {"tabId": tab_id, "selectHandle": select_handle, "prefillValue": prefill_value},
     )
 
 
@@ -1777,11 +2017,15 @@ with sync_playwright() as p:
             check("the report has one row per field across every list (filled+drafts+needsYou+failed)",
                   len(fields) == sum((state12.get("counts") or {}).get(k, 0) for k in ("filled", "drafts", "needsYou", "failed")),
                   f"report has {len(fields)} rows, state counts: {json.dumps(state12.get('counts'))}")
-            check("every row has a label, a status, and a frame (frameId + url)",
-                  all(f.get("label") and f.get("status") and f.get("frame", {}).get("url") for f in fields),
+            # Reviewer round 4, item 3: `frame` carries host/path only now (no `url`, and
+            # definitely no query string) — see TAB 24's own dedicated check for the
+            # query-string-stripping behavior itself; this just keeps this pre-existing check in
+            # sync with the new shape.
+            check("every row has a label, a status, and a frame (frameId + host/path)",
+                  all(f.get("label") and f.get("status") and f.get("frame", {}).get("host") for f in fields),
                   json.dumps(fields[:3]))
-            check("at least one row's frame url matches this tab's own page",
-                  any("test-page.html" in (f.get("frame") or {}).get("url", "") for f in fields), json.dumps(fields[:3]))
+            check("at least one row's frame path matches this tab's own page",
+                  any("test-page.html" in (f.get("frame") or {}).get("path", "") for f in fields), json.dumps(fields[:3]))
             raw_report_text = json.dumps(report)
             check("NO field value anywhere in the exported report (the whole point of this export)",
                   '"value"' not in raw_report_text and '"values"' not in raw_report_text, raw_report_text[:300])
@@ -2304,6 +2548,143 @@ with sync_playwright() as p:
               counters23["form"] is False, json.dumps(counters23))
 
         # =====================================================================
+        # TAB 24 — reviewer round 4: "never overwrite the user" now covers EVERY widget kind
+        #          (item 1), "Replace kept values with my profile" (item 2), and the fill-report
+        #          export's `frame` field carries no query string (item 3). One page, one fill,
+        #          the same "combine several behaviours to keep the browser count down" economy
+        #          TAB 6 already uses:
+        #            (a) a react-select combobox already committed to "Referral" before the fill
+        #                starts stays "Referral", reported "kept your value" — the reviewer's own
+        #                repro, verbatim ("How did you hear?" already "Referral" silently changed
+        #                to "LinkedIn");
+        #            (b) an Ashby-style Yes/No button group already showing "No" (aria-pressed)
+        #                stays "No" — the reviewer's OTHER repro, verbatim;
+        #            (c) a SECOND combobox, empty until a (simulated) résumé attach populates it,
+        #                is still correctly overwritten by the real profile value — same
+        #                "predates our own résumé attach, or doesn't" distinction TAB 6 already
+        #                proves for a plain field;
+        #            (d) "Replace kept values with my profile", ticking ONLY the combobox's row,
+        #                changes exactly that field (now verified) and leaves the button group's
+        #                kept row completely untouched;
+        #            (e) the page is loaded with a query string (mirroring Greenhouse's own
+        #                validityToken=…) so the exported report's per-row `frame` field can be
+        #                checked for it.
+        # =====================================================================
+        tab24 = ctx.new_page()
+        tab24.goto(KEPT_VALUES_URL + "?validityToken=super-secret-token-abc123#t=24")
+        tab24_id = find_tab_id(helper, "#t=24")
+        check("found tab 24's chrome tab id", tab24_id is not None)
+        # A direct RUN_FILL (like TAB 6), never a real panel click here — clicking the real
+        # "Fill this page" button re-injects scanner.js (sidepanel.js's ensureInjectedAllFrames(),
+        # unconditional on every click), which would silently wipe the attachResumeFile()
+        # monkeypatch below before the fill ever ran. The panel is opened further down, AFTER
+        # this fill has already finished, purely to drive the real "Replace kept values" button.
+        inject_extension_files(helper, tab24_id)
+        patch_resume_with_combobox_prefill(helper, tab24_id, "__howHeardRt", "ATS Guessed Referral Source")
+
+        start_fill_via_message(helper, tab24_id)
+        state24 = wait_for_done(helper, tab24_id, timeout_s=60)
+        check("tab 24's fill reached a terminal status", state24 is not None and state24.get("status") == "done",
+              str(state24)[:200])
+
+        # (a) pre-set combobox: kept, unchanged.
+        committed_howheard24 = tab24.eval_on_selector(
+            "#how_heard_value", "el => { const n = el.querySelector('.select__single-value'); return n ? n.textContent : null; }")
+        check("tab 24a: a react-select combobox already committed to 'Referral' before the fill is UNCHANGED",
+              committed_howheard24 == "Referral", repr(committed_howheard24))
+        needs_you24 = (state24 or {}).get("needsYou") or []
+        kept_howheard24 = next((n for n in needs_you24 if n.get("label") == "How did you hear about us?"), None)
+        check("tab 24a: it is reported 'kept your value' (not silently dropped, not falsely filled)",
+              kept_howheard24 is not None and kept_howheard24.get("status") == "kept_value", str(kept_howheard24))
+
+        # (b) pre-set Ashby-style button group: kept, unchanged.
+        pressed_no24 = tab24.eval_on_selector("#kv_relocate_no", "el => el.getAttribute('aria-pressed')")
+        pressed_yes24 = tab24.eval_on_selector("#kv_relocate_yes", "el => el.getAttribute('aria-pressed')")
+        check("tab 24b: an Ashby-style Yes/No button group already set to 'No' is UNCHANGED "
+              "('No' still pressed, 'Yes' never pressed)",
+              pressed_no24 == "true" and pressed_yes24 != "true", f"no={pressed_no24!r} yes={pressed_yes24!r}")
+        kept_relocate24 = next((n for n in needs_you24 if n.get("label") == "Are you willing to relocate?"), None)
+        check("tab 24b: it is reported 'kept your value' too",
+              kept_relocate24 is not None and kept_relocate24.get("status") == "kept_value", str(kept_relocate24))
+
+        # (c) a combobox value that only appeared from the (simulated) résumé parse IS replaced.
+        committed_rt24 = tab24.eval_on_selector(
+            "#how_heard_rt_value", "el => { const n = el.querySelector('.select__single-value'); return n ? n.textContent : null; }")
+        check("tab 24c: a combobox value that only appeared from the (simulated) resume parse "
+              "IS replaced by the real profile value",
+              committed_rt24 == "Indeed", repr(committed_rt24))
+        filled24 = (state24 or {}).get("filled") or []
+        rt_filled24 = next((f for f in filled24 if f.get("value") == "Indeed"), None)
+        check("tab 24c: that replacement is reported VERIFIED (same verify sweep as any other fill)",
+              rt_filled24 is not None and rt_filled24.get("status") == "verified", str(rt_filled24))
+
+        # (d) "Replace kept values with my profile" — tick ONLY the combobox's row.
+        panel24 = ctx.new_page()
+        panel24.goto(f"{panel_url}?tabId={tab24_id}")
+        panel24.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+
+        check("tab 24d: the panel shows the 'Replace kept values with my profile' button",
+              panel24.locator('[data-action="replace-kept"]').count() > 0)
+        howheard_row24 = panel24.locator('.field-row:has-text("How did you hear about us?")')
+        howheard_row24.locator('.kept-replace-checkbox').check()
+        replace_btn24 = panel24.locator('[data-action="replace-kept"]')
+        check("tab 24d: ticking one row's checkbox enables the Replace button", replace_btn24.is_enabled())
+        replace_btn24.click()
+
+        state24b = wait_for_condition(
+            helper, tab24_id,
+            lambda s: any(f.get("value") == "LinkedIn" for f in (s.get("filled") or [])) or
+                      not any(n.get("id") == (kept_howheard24 or {}).get("id") for n in (s.get("needsYou") or [])),
+            timeout_s=15)
+
+        committed_howheard24b = tab24.eval_on_selector(
+            "#how_heard_value", "el => { const n = el.querySelector('.select__single-value'); return n ? n.textContent : null; }")
+        check("tab 24d: the ticked combobox is now replaced with the profile's value on the real page",
+              committed_howheard24b == "LinkedIn", repr(committed_howheard24b))
+        filled24b = (state24b or {}).get("filled") or []
+        howheard_filled24b = next((f for f in filled24b if f.get("value") == "LinkedIn"), None)
+        check("tab 24d: the replaced field is reported VERIFIED",
+              howheard_filled24b is not None and howheard_filled24b.get("status") == "verified", str(howheard_filled24b))
+
+        pressed_no24b = tab24.eval_on_selector("#kv_relocate_no", "el => el.getAttribute('aria-pressed')")
+        check("tab 24d: the row that was NOT ticked is completely untouched — still 'No' on the real page",
+              pressed_no24b == "true", repr(pressed_no24b))
+        needs_you24b = (state24b or {}).get("needsYou") or []
+        still_kept_relocate24b = next((n for n in needs_you24b if n.get("label") == "Are you willing to relocate?"), None)
+        check("tab 24d: the untouched row is still reported 'kept your value', not silently dropped",
+              still_kept_relocate24b is not None and still_kept_relocate24b.get("status") == "kept_value",
+              str(still_kept_relocate24b))
+        howheard_still_needs_you24b = next((n for n in needs_you24b if n.get("label") == "How did you hear about us?"), None)
+        check("tab 24d: the replaced field is no longer in the 'kept your value' pile",
+              howheard_still_needs_you24b is None, str(howheard_still_needs_you24b))
+
+        # (e) the export's `frame` field carries no query string.
+        try:
+            with panel24.expect_download(timeout=5000) as export24_info:
+                panel24.click("#exportReportBtn")
+            export24 = export24_info.value
+            report24_text = pathlib.Path(export24.path()).read_text(encoding="utf-8")
+            report24 = json.loads(report24_text)
+        except Exception as e:
+            check("tab 24e: clicking Export fill report triggers a real download", False, str(e))
+            report24_text, report24 = "", None
+
+        if report24 is not None:
+            check("SAFETY: the page's query string never appears anywhere in the export",
+                  "validityToken" not in report24_text and "super-secret-token" not in report24_text,
+                  report24_text[:400])
+            fields24 = report24.get("fields") or []
+            frames24 = [f.get("frame") for f in fields24 if f.get("frame")]
+            check("tab 24e: every exported row's frame field is present and query-string-free",
+                  bool(frames24) and all("?" not in (fr.get("host", "") + fr.get("path", "")) for fr in frames24),
+                  json.dumps(frames24[:5]))
+            check("tab 24e: the frame field's path is the bare page path, not the full url with query string",
+                  any(fr.get("path") == "/kept-values-page.html" for fr in frames24), json.dumps(frames24[:5]))
+
+        counters24 = submission_counters(tab24)
+        check("tab 24: no native form submission at any point", counters24["form"] is False, json.dumps(counters24))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -2314,7 +2695,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22), ("tab23", tab23)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22), ("tab23", tab23), ("tab24", tab24)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))
