@@ -1121,11 +1121,26 @@
   // pick on one of these questions is a false statement on a real EEO question, so "no confident
   // match" must always win over a fuzzy guess.
 
-  function findFirstMatch(optionTexts, re) {
+  /**
+   * Like a "find the matching option" lookup, but AMBIGUITY-SAFE throughout: returns the
+   * option's index only when EXACTLY ONE option matches `re`, and -1 both when none match and
+   * when two or more do — a family match must never guess the first of several candidates any
+   * more than matchChoiceOption's plain containment tier does (e.g. value "Yes" against options
+   * "Yes, I am a U.S. citizen or permanent resident" / "Yes, I am authorized but will require
+   * sponsorship" is a materially different legal statement depending on which "Yes" is meant,
+   * so it must resolve to neither). Every existing caller below was already written as "if -1,
+   * try the next fallback (or give up)", so this keeps working with zero call-site changes.
+   */
+  function findUniqueMatch(optionTexts, re) {
+    var idx = -1;
+    var count = 0;
     for (var i = 0; i < optionTexts.length; i++) {
-      if (re.test(cleanText(optionTexts[i]))) return i;
+      if (re.test(cleanText(optionTexts[i]))) {
+        count++;
+        if (count === 1) idx = i; else return -1;
+      }
     }
-    return -1;
+    return count === 1 ? idx : -1;
   }
 
   var NEGATION_RE = /\bnot\b|n't/i;
@@ -1136,6 +1151,28 @@
   // this" is recognised by the same set of phrasings the value itself uses. No `$` anchor, so a
   // Workday-style trailing suffix ("... (United States of America)") never breaks the match.
   var DECLINE_RE = /decline|prefer not|rather not|not declared|do(n'?t| not) (wish|want)|choose not|not to (say|answer|disclose)|self[-\s]?identify/i;
+
+  // A decline-shaped OPTION can still contain decline-ish phrasing (bare "self-identify" is
+  // part of DECLINE_RE above) while actually ASSERTING a specific yes/no answer or identity
+  // claim — "I am a protected veteran, but I choose not to self-identify the classifications to
+  // which I belong" and "Yes, I self-identify as LGBTQ+" both matched DECLINE_RE, but neither is
+  // truly a decline-to-answer option: one is a veteran assertion, the other an identity
+  // disclosure. A genuine decline option never ALSO asserts one of these.
+  var DECLINE_ASSERTION_RE = /^\s*(yes|no)\b|\bI\s*am\s+an?\b|\bI\s*identify\s+as\b|\bI\s*self[-\s]?identify\s+as\b|\bI\s*have\s+an?\b/i;
+
+  /** Decline-to-answer match: reject any DECLINE_RE-matching option that also asserts a
+   * yes/no/identity claim, then require EXACTLY ONE plain decline option to remain. */
+  function findDeclineMatch(optionTexts) {
+    var idx = -1;
+    var count = 0;
+    for (var i = 0; i < optionTexts.length; i++) {
+      var ot = cleanText(optionTexts[i]);
+      if (!DECLINE_RE.test(ot) || DECLINE_ASSERTION_RE.test(ot)) continue;
+      count++;
+      if (count === 1) idx = i; else return -1;
+    }
+    return count === 1 ? idx : -1;
+  }
 
   var RACE_VALUES = [
     'american indian or alaska native', 'asian', 'black or african american',
@@ -1151,69 +1188,81 @@
    */
   function matchAnswerFamily(v, optionTexts) {
     // -- decline to answer -----------------------------------------------------------------
-    if (DECLINE_RE.test(v)) return findFirstMatch(optionTexts, DECLINE_RE);
+    if (DECLINE_RE.test(v)) return findDeclineMatch(optionTexts);
 
     // -- plain yes/no -----------------------------------------------------------------------
     if (v === 'yes' || v === 'no') {
-      return findFirstMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
+      return findUniqueMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
     }
 
     // -- gender -------------------------------------------------------------------------------
-    if (v === 'male') return findFirstMatch(optionTexts, /^(male|man)\b/i);
-    if (v === 'female') return findFirstMatch(optionTexts, /^(female|woman)\b/i);
-    if (/^non[-\s]?binary$/.test(v)) return findFirstMatch(optionTexts, /non[-\s]?binary/i);
+    if (v === 'male') return findUniqueMatch(optionTexts, /^(male|man)\b/i);
+    if (v === 'female') return findUniqueMatch(optionTexts, /^(female|woman)\b/i);
+    if (/^non[-\s]?binary$/.test(v)) return findUniqueMatch(optionTexts, /non[-\s]?binary/i);
 
     // -- veteran status -----------------------------------------------------------------------
     // Four distinct known phrasings, each with its OWN fallback chain -- deliberately NOT a
     // single shared regex, because "not a veteran" and "not a protected veteran" mean different
     // things and conflating them is exactly the kind of guess this project refuses to make.
     if (v === 'i am not a veteran') {
-      var vr = findFirstMatch(optionTexts, /\bnot a veteran\b/i);
-      if (vr === -1) vr = findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
-      if (vr === -1) vr = findFirstMatch(optionTexts, /^\s*no\b/i);
+      var vr = findUniqueMatch(optionTexts, /\bnot a veteran\b/i);
+      if (vr === -1) vr = findUniqueMatch(optionTexts, /\bnot a protected veteran\b/i);
+      if (vr === -1) vr = findUniqueMatch(optionTexts, /^\s*no\b/i);
       return vr;
     }
     if (v === 'i am a veteran, but not a protected veteran') {
-      var vr2 = findFirstMatch(optionTexts, /\bveteran\b.*\bnot a protected\b/i);
-      if (vr2 === -1) vr2 = findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
+      var vr2 = findUniqueMatch(optionTexts, /\bveteran\b.*\bnot a protected\b/i);
+      if (vr2 === -1) vr2 = findUniqueMatch(optionTexts, /\bnot a protected veteran\b/i);
       return vr2;
     }
     if (v === 'i am a protected veteran' ||
         v === 'i identify as one or more of the classifications of protected veteran') {
+      var vIdx = -1, vCount = 0;
       for (var i = 0; i < optionTexts.length; i++) {
         var ot = cleanText(optionTexts[i]);
-        if (/(protected veteran|identify as one or more)/i.test(ot) && !NEGATION_RE.test(ot)) return i;
+        if (/(protected veteran|identify as one or more)/i.test(ot) && !NEGATION_RE.test(ot)) {
+          vCount++;
+          if (vCount === 1) vIdx = i; else return -1;
+        }
       }
-      return -1;
+      return vCount === 1 ? vIdx : -1;
     }
     if (v === 'i am not a protected veteran') {
       // Legacy value, deliberately ambiguous between "not a veteran at all" and "veteran but
       // not protected" -- never guess between them.
-      return findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
+      return findUniqueMatch(optionTexts, /\bnot a protected veteran\b/i);
     }
 
     // -- disability status ----------------------------------------------------------------------
     if (/disability/.test(v) && /^no\b/.test(v)) {
+      var noIdx = -1, noCount = 0;
       for (var j = 0; j < optionTexts.length; j++) {
         var otD = cleanText(optionTexts[j]);
         var fitsNo = /^\s*no\b/i.test(otD) || /do(n'?t| not) have a disability/i.test(otD);
-        if (fitsNo && !/wish|want|answer/i.test(otD)) return j;
+        if (fitsNo && !/wish|want|answer/i.test(otD)) {
+          noCount++;
+          if (noCount === 1) noIdx = j; else return -1;
+        }
       }
-      return -1;
+      return noCount === 1 ? noIdx : -1;
     }
     if (/disability/.test(v) && /^yes\b/.test(v)) {
+      var yesIdx = -1, yesCount = 0;
       for (var k = 0; k < optionTexts.length; k++) {
         var otY = cleanText(optionTexts[k]);
         var fitsYes = /^\s*yes\b/i.test(otY) || /\bi have a disability\b/i.test(otY) || /have had one/i.test(otY);
-        if (fitsYes && !NEGATION_RE.test(otY)) return k;
+        if (fitsYes && !NEGATION_RE.test(otY)) {
+          yesCount++;
+          if (yesCount === 1) yesIdx = k; else return -1;
+        }
       }
-      return -1;
+      return yesCount === 1 ? yesIdx : -1;
     }
 
     // -- race / ethnicity -----------------------------------------------------------------------
     if (RACE_VALUES.indexOf(v) !== -1) {
       var raceRe = new RegExp('^' + escapeRegExp(v) + '\\b', 'i');
-      return findFirstMatch(optionTexts, raceRe);
+      return findUniqueMatch(optionTexts, raceRe);
     }
 
     return null; // not a recognised family -- caller falls through to generic containment
@@ -1733,6 +1782,25 @@
     var commaIdx = t.indexOf(',');
     if (commaIdx > 0) t = t.slice(0, commaIdx).trim();
     return t.slice(0, 60);
+  }
+
+  /**
+   * Ground truth (§6.6 step 3): "type... then poll for up to 4s, ignoring 'No options' for the
+   * first ~800ms" — an async fetch (Greenhouse's own debounce is ~300ms) may still be in
+   * flight, so an empty/no-options render in that first window is not yet a real answer. Two
+   * stages against the SAME 4s total budget rather than one flat wait, so a genuinely static
+   * list's zero-match render (which settles synchronously) is not mistaken for "still loading".
+   */
+  function waitForComboboxFilterResults(entry, doc) {
+    function poll() {
+      var menu = resolveComboboxMenu(entry);
+      var els = comboboxOptionEls(menu);
+      return els.length ? { menu: menu, els: els } : null;
+    }
+    return waitFor(poll, 800, doc).then(function (found) {
+      if (found) return found;
+      return waitFor(poll, 3200, doc);
+    });
   }
 
   /** Selects `els[idx]` inside `menu` through the new guard, then verifies a genuine commit. */
@@ -3056,14 +3124,19 @@
     if (!match) return false;
     // A native click is the most faithful simulation of a real user selecting a radio
     // button: it flips `checked`, unchecks its siblings, and fires click/input/change —
-    // exactly what React's onChange handlers listen for.
-    return safeClick(match);
+    // exactly what React's onChange handlers listen for. Read back afterwards rather than
+    // trust the click blindly — a disabled control, or a page's own handler reverting the
+    // selection, must be reported honestly instead of as a fake success.
+    if (!safeClick(match)) return false;
+    return match.checked === true;
   }
 
   function setCheckboxValue(el, boolLike) {
     var want = boolLike === true || /^(true|yes|1|on)$/i.test(String(boolLike));
     if (el.checked === want) return true;
-    return safeClick(el);
+    if (!safeClick(el)) return false;
+    // Read back rather than trust the click blindly -- see setRadioValue's identical reasoning.
+    return el.checked === want;
   }
 
   /** Reads the field's current value, in the same shape applyFill expects to receive it back. */
@@ -3101,7 +3174,9 @@
    */
   function applyFill(entry, value) {
     if (entry.kind === 'radio-group') {
-      return setRadioValue(entry.elements, value);
+      var rgOk = setRadioValue(entry.elements, value);
+      if (!rgOk) entry._lastReason = 'no confident match for "' + value + '" among the radio options, or the selection did not stick';
+      return rgOk;
     }
     if (entry.kind === 'date-parts') return setDatePartsValue(entry, value);
     if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y') return setWorkdayDateValue(entry, value);
@@ -3140,8 +3215,29 @@
     }
     var el = entry.el;
     if (el.tagName === 'SELECT') return setSelectValue(el, value);
-    if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return setCheckboxValue(el, value);
+    if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') {
+      var cbOk = setCheckboxValue(el, value);
+      if (!cbOk) entry._lastReason = 'checkbox did not reach the intended checked state';
+      return cbOk;
+    }
     setNativeValue(el, value);
+    // Read back rather than trust the write blind (a controlled/validated input, or a
+    // type=number input given a non-numeric string, can silently discard it — see the
+    // project brief: "120000 USD" into input[type=number] must NOT report success just
+    // because setNativeValue() was called).
+    var target = String(value == null ? '' : value);
+    var stuck;
+    if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'number') {
+      var actualNum = parseFloat(el.value);
+      var targetNum = parseFloat(target);
+      stuck = !isNaN(actualNum) && !isNaN(targetNum) && actualNum === targetNum;
+    } else {
+      stuck = cleanText(el.value).toLowerCase() === cleanText(target).toLowerCase();
+    }
+    if (!stuck) {
+      entry._lastReason = 'value did not stick after being set (read back ' + JSON.stringify(String(el.value)) + ')';
+      return false;
+    }
     return true;
   }
 

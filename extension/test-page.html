@@ -678,6 +678,400 @@
 </script>
 
 <!-- ===================================================================
+     Choice widgets (2026-09-24 live probe) -- react-select / generic ARIA
+     comboboxes, Ashby Yes/No button groups, checkbox groups, Lever's location
+     type-ahead. Built ONLY from real captured markup (see
+     docs/research/live-captures-2026-09-24/*.json and
+     docs/research/2026-09-24-ats-widget-ground-truth.md §6), never guessed.
+     Kept in its own <form>, separate from #application-form and #wd-form,
+     with its own decoy submit buttons.
+     =================================================================== -->
+<form id="ats-widgets-form">
+
+  <!-- Greenhouse react-select, STATIC option list (e.g. Country). -->
+  <div class="select" id="gh_country_field">
+    <label id="gh_country_label">Country<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_country_value">
+          <input type="text" role="combobox" id="gh_country_input" class="select__input"
+                 aria-labelledby="gh_country_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_country_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_country_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Greenhouse react-select, ASYNC/FILTERED catalog (e.g. School) -- "No options" shown
+       until the query is typed, matching the ground truth's "School search is async" note. -->
+  <div class="select" id="gh_school_field">
+    <label id="gh_school_label">School<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_school_value">
+          <input type="text" role="combobox" id="gh_school_input" class="select__input"
+                 aria-labelledby="gh_school_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_school_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_school_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Greenhouse react-select, MULTI-select. -->
+  <div class="select" id="gh_lang_multi_field">
+    <label id="gh_lang_multi_label">Languages spoken<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_lang_multi_value">
+          <input type="text" role="combobox" id="gh_lang_multi_input" class="select__input"
+                 aria-labelledby="gh_lang_multi_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_lang_multi_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_lang_multi_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- NEGATIVE CONTROL: two rendered options both contain the value ("Engineer") -- must stay
+       unfilled, never guess between "Software Engineer" and "Site Engineer". -->
+  <div class="select" id="gh_ambiguous_field">
+    <label id="gh_ambiguous_label">Role<span aria-hidden="true">*</span></label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="gh_ambiguous_value">
+          <input type="text" role="combobox" id="gh_ambiguous_input" class="select__input"
+                 aria-labelledby="gh_ambiguous_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="gh_ambiguous_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="gh_ambiguous_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Generic ARIA combobox, no react-select classes at all -- aria-controls wires the input
+       directly to its role=listbox popup. -->
+  <div id="generic_combo_field">
+    <label id="generic_combo_label">Preferred office</label>
+    <input type="text" role="combobox" id="generic_combo_input" aria-labelledby="generic_combo_label"
+           aria-controls="generic_combo_listbox" aria-expanded="false" aria-autocomplete="list" autocomplete="off">
+  </div>
+  <ul role="listbox" id="generic_combo_listbox" style="display:none;">
+    <li role="option" id="generic_combo_opt_0">Seattle</li>
+    <li role="option" id="generic_combo_opt_1">Austin</li>
+    <li role="option" id="generic_combo_opt_2">Remote</li>
+  </ul>
+
+  <!-- Ashby: two Yes/No question button pairs in their own containers -- proves the choice is
+       scoped to ITS OWN question, never the other one (see tests/test_prefill_ashby_buttons.py). -->
+  <div class="ashby-application-form-field-entry" id="ashby_workauth_entry">
+    <label class="ashby-application-form-question-title">Are you permanently authorized to work in the United States without visa sponsorship?</label>
+    <button type="button" class="_option_1svni_32 ashby-application-form-input-yesno-option" id="ashby_workauth_yes">Yes</button>
+    <button type="button" class="_option_1svni_32 ashby-application-form-input-yesno-option" id="ashby_workauth_no">No</button>
+    <input type="checkbox" name="ashby-workauth-mirror" class="_input_1svni_78" style="display:none;">
+  </div>
+  <div class="ashby-application-form-field-entry" id="ashby_sponsor_entry">
+    <label class="ashby-application-form-question-title">Will you now or in the future require sponsorship to work in the US?</label>
+    <button type="button" class="_option_1svni_32 ashby-application-form-input-yesno-option" id="ashby_sponsor_yes">Yes</button>
+    <button type="button" class="_option_1svni_32 ashby-application-form-input-yesno-option" id="ashby_sponsor_no">No</button>
+    <input type="checkbox" name="ashby-sponsor-mirror" class="_input_1svni_78" style="display:none;">
+  </div>
+
+  <!-- NEGATIVE CONTROL: a Yes/No pair with a DECOY submit button (no type="" -> defaults to
+       type=submit, same HTML trap as isAddAnotherButtonSafe's fixtures) right beside it -- the
+       decoy must never be clicked, whatever value is asked for. -->
+  <div class="ashby-application-form-field-entry" id="ashby_decoy_entry">
+    <label class="ashby-application-form-question-title">Are you comfortable relocating?</label>
+    <button type="button" class="_option_1svni_32 ashby-application-form-input-yesno-option" id="ashby_decoy_yes">Yes</button>
+    <button type="button" class="_option_1svni_32 ashby-application-form-input-yesno-option" id="ashby_decoy_no">No</button>
+    <button id="ashby_decoy_submit">Submit Application</button>
+  </div>
+
+  <!-- Greenhouse-style checkbox group: fieldset + legend + shared name[] -- "check all that
+       apply". A decoy STANDALONE checkbox sharing the word "fluent" sits right after it and
+       must stay its OWN separate field, never absorbed into the group. -->
+  <fieldset id="gh_checkbox_group_fieldset" class="checkbox">
+    <legend class="label checkbox__description">What language(s) are you fluent in? *</legend>
+    <label><input type="checkbox" name="question_lang[]" value="english" id="gh_lang_en"> English</label>
+    <label><input type="checkbox" name="question_lang[]" value="spanish" id="gh_lang_es"> Spanish</label>
+    <label><input type="checkbox" name="question_lang[]" value="french" id="gh_lang_fr"> French</label>
+  </fieldset>
+  <label><input type="checkbox" id="fluent_decoy_checkbox" name="fluent_decoy"> I am not fluent in sign language but would like to learn</label>
+
+  <!-- Ashby-style checkbox group: fieldset, NO shared name (each option's name is its own
+       label text), question title as a preceding <label> inside the same fieldset. -->
+  <fieldset class="_container_1258i_28 _fieldEntry_1e3gg_28 ashby-application-form-input-checkbox-group" id="ashby_location_fieldset">
+    <label class="_heading_f7cvd_52 _required_f7cvd_91 ashby-application-form-question-title">Please select your preferred working location. *</label>
+    <span><div><input type="checkbox" name="Mountain View, CA" id="ashby_loc_mv"></div></span>
+    <label class="ashby-application-form-input-checkbox-group-option-label" for="ashby_loc_mv">Mountain View, CA</label>
+    <span><div><input type="checkbox" name="San Francisco, CA" id="ashby_loc_sf"></div></span>
+    <label class="ashby-application-form-input-checkbox-group-option-label" for="ashby_loc_sf">San Francisco, CA</label>
+    <span><div><input type="checkbox" name="Los Angeles, CA" id="ashby_loc_la"></div></span>
+    <label class="ashby-application-form-input-checkbox-group-option-label" for="ashby_loc_la">Los Angeles, CA</label>
+  </fieldset>
+
+  <!-- Lever: "Current location" type-ahead. Wrapped in ONE <label> that ALSO holds the
+       dropdown-results container and a "No location found..." status line -- exactly what
+       polluted the label in the real capture; getLeverLocationLabel() must stop before them. -->
+  <label id="lever_location_wrap">Current location<span aria-hidden="true">&#10033;</span>
+    <input type="text" id="lever_location_input" name="location" class="location-input" autocomplete="off">
+    <input type="hidden" id="lever_selected_location" name="selectedLocation">
+    <div class="location-suggestions-list" id="lever_location_results" style="display:none;"></div>
+    <div id="lever_location_status">No location found. Try entering a different location</div>
+  </label>
+
+  <!-- Lever: a "cards[<uuid>][field0]" checkbox group -- the real question text lives in
+       .application-question .application-label .text (with a "✱" required marker), never in
+       the group's own opaque name. -->
+  <div class="application-question" id="lever_card_checkbox_question">
+    <div class="application-label"><span class="text">Have you previously worked at this company as an intern?<span>&#10033;</span></span></div>
+    <ul>
+      <li><label class="application-answer-alternative"><input type="checkbox" name="cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]" value="no" id="lever_cb_no"> No</label></li>
+      <li><label class="application-answer-alternative"><input type="checkbox" name="cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]" value="intern" id="lever_cb_intern"> Yes - Intern</label></li>
+      <li><label class="application-answer-alternative"><input type="checkbox" name="cards[92a51f92-d683-4f7b-be57-e25376f60abe][field0]" value="fulltime" id="lever_cb_fulltime"> Yes - Full Time Employment</label></li>
+    </ul>
+  </div>
+
+  <button id="ats_widgets_submit_btn">Submit</button>
+</form>
+
+<!-- Hidden fixtures for DIRECT function calls only (never through scanFields()'s whole-page
+     scan -- same convention as #eeo_matcher_fixtures below), so adding them here never
+     perturbs the sitewide "radio group captured as ONE field" count. Covers the Lever
+     card-label fix for a RADIO group specifically (the checkbox-group half is covered above,
+     through the real end-to-end scan). -->
+<div id="lever_label_fixtures" style="display:none">
+  <div class="application-question" id="lever_card_radio_question">
+    <div class="application-label"><span class="text">Role requires candidate to be based in London or Stockholm<span>&#10033;</span></span></div>
+    <ul>
+      <li><label class="application-answer-alternative"><input type="radio" name="cards[d090becd-07b8-4536-ac84-dbf3bc07e03d][field0]" value="yes" id="lever_radio_yes"> Yes</label></li>
+      <li><label class="application-answer-alternative"><input type="radio" name="cards[d090becd-07b8-4536-ac84-dbf3bc07e03d][field0]" value="no" id="lever_radio_no"> No</label></li>
+    </ul>
+  </div>
+</div>
+
+<script>
+(function () {
+  document.getElementById('ats-widgets-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+    window.__ATS_WIDGETS_SUBMIT_COUNT__ = (window.__ATS_WIDGETS_SUBMIT_COUNT__ || 0) + 1;
+  });
+
+  // ---- react-select mock -----------------------------------------------------------------
+  // Faithful to the ground truth: the flyout toggles on `mouseup` of the "Toggle flyout"
+  // button (a bare click is preventDefault()'d) or ArrowDown keyup on the input; an option
+  // commits on `mousedown` (a click alone, with no prior mousedown on the SAME option, is
+  // dropped -- the react-select "desync" the ground truth documents); typed-but-not-committed
+  // text is cleared on blur, exactly like real react-select -- so the negative control below
+  // is a REAL trap, not a vacuous pass.
+  function makeReactSelect(cfg) {
+    var input = document.getElementById(cfg.inputId);
+    var toggle = document.getElementById(cfg.toggleId);
+    var menu = document.getElementById(cfg.menuId);
+    var valueContainer = document.getElementById(cfg.valueId);
+    var committed = [];
+    var mousedownArmed = null;
+
+    function renderValue() {
+      Array.prototype.slice.call(valueContainer.querySelectorAll('.select__single-value,.select__multi-value')).forEach(function (n) { n.remove(); });
+      if (!committed.length) return;
+      if (cfg.multi) {
+        committed.forEach(function (v) {
+          var chip = document.createElement('div');
+          chip.className = 'select__multi-value';
+          var label = document.createElement('span');
+          label.className = 'select__multi-value__label';
+          label.textContent = v;
+          chip.appendChild(label);
+          valueContainer.insertBefore(chip, input);
+        });
+      } else {
+        var sv = document.createElement('div');
+        sv.className = 'select__single-value';
+        sv.textContent = committed[0];
+        valueContainer.insertBefore(sv, input);
+      }
+    }
+    function openMenu() { menu.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
+    function closeMenu() { menu.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
+    function renderOptions(list) {
+      menu.innerHTML = '';
+      if (!list.length) {
+        var notice = document.createElement('div');
+        notice.className = 'select__menu-notice--no-options';
+        notice.textContent = 'No options';
+        menu.appendChild(notice);
+        return;
+      }
+      list.forEach(function (text) {
+        var opt = document.createElement('div');
+        opt.className = 'select__option';
+        opt.setAttribute('role', 'option');
+        opt.textContent = text;
+        opt.addEventListener('mousedown', function (e) { e.preventDefault(); mousedownArmed = text; });
+        opt.addEventListener('click', function () {
+          if (mousedownArmed !== text) return; // click with no prior mousedown on THIS option: dropped
+          mousedownArmed = null;
+          if (cfg.multi) { if (committed.indexOf(text) === -1) committed.push(text); }
+          else committed = [text];
+          renderValue();
+          input.value = '';
+          closeMenu();
+        });
+        menu.appendChild(opt);
+      });
+    }
+    renderOptions([]);
+    menu.style.display = 'none';
+
+    toggle.addEventListener('mouseup', function () {
+      if (menu.style.display === 'block') { closeMenu(); return; }
+      renderOptions(cfg.async ? [] : cfg.options);
+      openMenu();
+    });
+    toggle.addEventListener('click', function (e) { e.preventDefault(); }); // real react-select: a bare click alone does nothing
+    input.addEventListener('keyup', function (e) {
+      if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(cfg.async ? [] : cfg.options); openMenu(); }
+    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+
+    var debounce = null;
+    input.addEventListener('input', function () {
+      var q = input.value.trim().toLowerCase();
+      if (cfg.async) {
+        clearTimeout(debounce);
+        renderOptions([]); // "No options" while the async request is in flight
+        openMenu();
+        if (!q) return;
+        debounce = setTimeout(function () {
+          renderOptions(cfg.options.filter(function (o) { return o.toLowerCase().indexOf(q) !== -1; }));
+        }, cfg.filterDelayMs || 250);
+      } else {
+        renderOptions(q ? cfg.options.filter(function (o) { return o.toLowerCase().indexOf(q) !== -1; }) : cfg.options);
+        openMenu();
+      }
+    });
+
+    input.addEventListener('blur', function () {
+      setTimeout(function () { input.value = ''; closeMenu(); }, 0);
+    });
+
+    return { committedValues: function () { return committed.slice(); } };
+  }
+
+  makeReactSelect({ inputId: 'gh_country_input', toggleId: 'gh_country_toggle', menuId: 'gh_country_menu', valueId: 'gh_country_value',
+    options: ['Canada', 'United States of America', 'Mexico'], multi: false, async: false });
+  makeReactSelect({ inputId: 'gh_school_input', toggleId: 'gh_school_toggle', menuId: 'gh_school_menu', valueId: 'gh_school_value',
+    options: ['University of Washington', 'University of Wisconsin', 'Western Washington University'], multi: false, async: true, filterDelayMs: 200 });
+  makeReactSelect({ inputId: 'gh_lang_multi_input', toggleId: 'gh_lang_multi_toggle', menuId: 'gh_lang_multi_menu', valueId: 'gh_lang_multi_value',
+    options: ['English', 'Spanish', 'French', 'Mandarin Chinese'], multi: true, async: false });
+  makeReactSelect({ inputId: 'gh_ambiguous_input', toggleId: 'gh_ambiguous_toggle', menuId: 'gh_ambiguous_menu', valueId: 'gh_ambiguous_value',
+    options: ['Software Engineer', 'Site Engineer'], multi: false, async: false });
+
+  // ---- generic ARIA combobox (no react-select classes) -----------------------------------
+  (function () {
+    var input = document.getElementById('generic_combo_input');
+    var listbox = document.getElementById('generic_combo_listbox');
+    function openMenu() { listbox.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
+    function closeMenu() { listbox.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
+    input.addEventListener('keyup', function (e) { if (e.key === 'ArrowDown') openMenu(); });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    Array.prototype.forEach.call(listbox.querySelectorAll('[role="option"]'), function (opt) {
+      opt.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      opt.addEventListener('click', function () {
+        input.setAttribute('aria-activedescendant', opt.id);
+        input.value = '';
+        closeMenu();
+      });
+    });
+    input.addEventListener('blur', function () { setTimeout(closeMenu, 0); });
+  })();
+
+  // ---- Ashby Yes/No button groups ---------------------------------------------------------
+  function makeYesNoGroup(entryId, mirrorName) {
+    var entry = document.getElementById(entryId);
+    var buttons = Array.prototype.slice.call(entry.querySelectorAll('.ashby-application-form-input-yesno-option'));
+    var mirror = mirrorName ? entry.querySelector('input[name="' + mirrorName + '"]') : null;
+    buttons.forEach(function (b) {
+      b.addEventListener('click', function () {
+        buttons.forEach(function (o) { o.classList.remove('active'); o.setAttribute('aria-pressed', 'false'); });
+        b.classList.add('active');
+        b.setAttribute('aria-pressed', 'true');
+        if (mirror) mirror.checked = (b.textContent.trim() === 'Yes');
+      });
+    });
+  }
+  makeYesNoGroup('ashby_workauth_entry', 'ashby-workauth-mirror');
+  makeYesNoGroup('ashby_sponsor_entry', 'ashby-sponsor-mirror');
+  makeYesNoGroup('ashby_decoy_entry', null);
+
+  // ---- Lever location type-ahead ---------------------------------------------------------
+  (function () {
+    var input = document.getElementById('lever_location_input');
+    var hidden = document.getElementById('lever_selected_location');
+    var results = document.getElementById('lever_location_results');
+    var CATALOG = ['Seattle, Washington', 'Seattle, Oregon', 'Portland, Oregon', 'Austin, Texas'];
+    function render(list) {
+      results.innerHTML = '';
+      list.forEach(function (text) {
+        var row = document.createElement('div');
+        row.className = 'dropdown-location';
+        row.textContent = text;
+        row.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          hidden.value = text;
+          input.value = text;
+          results.style.display = 'none';
+        });
+        results.appendChild(row);
+      });
+      results.style.display = list.length ? 'block' : 'none';
+    }
+    var debounceTimer = null;
+    input.addEventListener('keydown', function () {
+      hidden.value = ''; // Lever clears the committed value as soon as the query is edited again
+      clearTimeout(debounceTimer); // a fresh keystroke cancels any still-pending search, same as a real debounce
+      var q = input.value.trim().toLowerCase();
+      debounceTimer = setTimeout(function () {
+        render(q ? CATALOG.filter(function (c) { return c.toLowerCase().indexOf(q) !== -1; }) : []);
+      }, 60); // Lever's own ~500ms debounce, shortened here so the test suite stays fast
+    });
+    input.addEventListener('blur', function () {
+      setTimeout(function () { if (!hidden.value) { input.value = ''; results.style.display = 'none'; } }, 0);
+    });
+  })();
+})();
+</script>
+
+<!-- Negative control (applyFill read-back verification): a page that reverts the value
+     SYNCHRONOUSLY within its own 'input' listener -- a live validator or controlled component
+     rejecting the typed text. applyFill() must read the value back after setNativeValue() and
+     report FAILURE, never a blind "true" just because the native setter was called. -->
+<label for="revert_on_input_field">Reverting field (negative control)</label>
+<input type="text" id="revert_on_input_field" name="revert_on_input_field">
+<label for="revert_on_input_number">Number field (negative control)</label>
+<input type="number" id="revert_on_input_number" name="revert_on_input_number">
+<label><input type="checkbox" id="revert_on_click_checkbox" name="revert_on_click_checkbox"> Reverting checkbox (negative control)</label>
+<script>
+  document.getElementById('revert_on_input_field').addEventListener('input', function (e) {
+    e.target.value = ''; // rejects/reverts whatever was typed
+  });
+  document.getElementById('revert_on_click_checkbox').addEventListener('click', function (e) {
+    e.target.checked = false; // rejects/reverts the check synchronously
+  });
+</script>
+
+<!-- ===================================================================
      EEO answer-family matcher fixtures (matchChoiceOption) -- a plain native
      <select> and two plain radio groups, exercised DIRECTLY by id via
      Scanner.setSelectValue()/setRadioValue() in selftest.js, never through
