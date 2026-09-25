@@ -2839,11 +2839,29 @@
     return out;
   }
 
-  function splitCityState(value) {
+  /** A live probe (2026-09-24, jobs.lever.co) showed the service can send a location as a
+   * JSON object string (a resolved-suggestion shape: {"name": "Seattle, WA, USA", "id": "..."})
+   * rather than a plain "City, State" string. Extracts the human-readable name when present;
+   * returns the input unchanged for an ordinary plain-text value. */
+  function extractLocationName(value) {
     var str = String(value == null ? '' : value).trim();
-    var commaIdx = str.indexOf(',');
-    if (commaIdx === -1) return { city: str, state: '' };
-    return { city: str.slice(0, commaIdx).trim(), state: str.slice(commaIdx + 1).trim() };
+    if (str.charAt(0) === '{') {
+      try {
+        var parsed = JSON.parse(str);
+        if (parsed && typeof parsed.name === 'string' && parsed.name) return parsed.name;
+      } catch (e) { /* not JSON, or no usable .name -- fall through to the raw string */ }
+    }
+    return str;
+  }
+
+  /** Splits "City, State" OR "City, State, Country" (the JSON-suggestion shape above commonly
+   * resolves to the latter) into its city and state parts, ignoring any third (country) part. */
+  function splitCityState(value) {
+    var str = extractLocationName(value);
+    var segments = str.split(',');
+    var city = (segments[0] || '').trim();
+    var state = (segments[1] || '').trim();
+    return { city: city, state: state };
   }
 
   function leverStateVariants(state) {
@@ -2879,6 +2897,7 @@
     if (!isVisible(entry.input) || entry.input.disabled) {
       return Promise.resolve({ ok: false, reason: 'safety guard refused the location input' });
     }
+    var displayValue = extractLocationName(value);
     var parts = splitCityState(value);
     if (!parts.city) return Promise.resolve({ ok: false, reason: 'empty value' });
 
@@ -2910,8 +2929,8 @@
         return {
           ok: false,
           reason: matches.length === 0
-            ? ('no suggestion matched city and state for "' + value + '"')
-            : ('ambiguous: ' + matches.length + ' suggestions matched "' + value + '", never guessing')
+            ? ('no suggestion matched city and state for "' + displayValue + '"')
+            : ('ambiguous: ' + matches.length + ' suggestions matched "' + displayValue + '", never guessing')
         };
       }
 
@@ -4369,6 +4388,8 @@
     applyCheckboxGroupValue: applyCheckboxGroupValue,
     findLeverLocationFields: findLeverLocationFields,
     getLeverLocationLabel: getLeverLocationLabel,
+    extractLocationName: extractLocationName,
+    splitCityState: splitCityState,
     fillLeverLocation: fillLeverLocation
   };
 });

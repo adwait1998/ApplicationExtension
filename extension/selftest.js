@@ -1826,6 +1826,25 @@ pending.push((async () => {
     Scanner.getGroupLabel(radios) === 'Role requires candidate to be based in London or Stockholm');
 })();
 
+// --- Lever location: extractLocationName / splitCityState (pure functions) -----------------
+(() => {
+  expect('extractLocationName: a plain "City, State" string passes through unchanged',
+    Scanner.extractLocationName('Seattle, Washington') === 'Seattle, Washington');
+  expect('extractLocationName: a resolved-suggestion JSON object unwraps to its "name"',
+    Scanner.extractLocationName('{"name":"Seattle, WA, USA","id":"f93b25a3"}') === 'Seattle, WA, USA');
+  expect('extractLocationName: malformed JSON-looking text falls back to the raw string, never throws',
+    Scanner.extractLocationName('{not valid json') === '{not valid json');
+
+  expect('splitCityState: plain "City, State" splits in two',
+    JSON.stringify(Scanner.splitCityState('Seattle, Washington')) === JSON.stringify({ city: 'Seattle', state: 'Washington' }));
+  expect('splitCityState: "City, State, Country" ignores the trailing country part',
+    JSON.stringify(Scanner.splitCityState('Seattle, WA, USA')) === JSON.stringify({ city: 'Seattle', state: 'WA' }));
+  expect('splitCityState: a JSON-object value is unwrapped before splitting',
+    JSON.stringify(Scanner.splitCityState('{"name":"Austin, Texas, United States"}')) === JSON.stringify({ city: 'Austin', state: 'Texas' }));
+  expect('splitCityState: a bare city with no comma has an empty state',
+    JSON.stringify(Scanner.splitCityState('Seattle')) === JSON.stringify({ city: 'Seattle', state: '' }));
+})();
+
 // --- Ashby button groups: scanning shape + isChoiceButtonSafe guard -------------------------
 (() => {
   const doc = dom.window.document;
@@ -2030,6 +2049,13 @@ pending.push((async () => {
     const okBad = await Scanner.applyFill(entry, 'Nowhereville, Idaho');
     expect('Lever location: no suggestion matches -> false, selectedLocation stays empty',
       okBad === false && byId('lever_selected_location').value === '');
+
+    // A live probe (2026-09-24) showed the service can send a resolved-suggestion JSON object
+    // string instead of a plain "City, State" string -- must still resolve correctly.
+    byId('lever_selected_location').value = '';
+    const okJson = await Scanner.applyFill(entry, '{"name":"Austin, Texas, United States","id":"abc123"}');
+    expect('Lever location: a JSON-object value ({"name": "City, State, Country", ...}) is unwrapped and still resolves',
+      okJson === true && byId('lever_selected_location').value === 'Austin, Texas');
   }
 
   // ---- final safety check: none of the choice-widget interactions above ever submitted the
