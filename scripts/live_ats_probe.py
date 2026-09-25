@@ -240,6 +240,7 @@ FILL_JS = """async ([id, value, values]) => {
     ]);
     ok = (r && typeof r === 'object') ? !!r.ok : !!r;
     if (r && typeof r === 'object') detail = r.reason || null;
+    if (!detail && entry._lastReason) detail = String(entry._lastReason);
   } catch (e) { ok = false; detail = String(e).slice(0, 160); }
   let readback = '';
   try { readback = String(ApplyPilotScanner.getCurrentValue(entry) || ''); } catch (e) {}
@@ -250,9 +251,13 @@ FILL_JS = """async ([id, value, values]) => {
 # "couldn't read" count the review list should surface. Structure only.
 UNSEEN_JS = """(ids) => {
   const seen = new Set();
+  const isEl = (x) => x && typeof x === 'object' && x.nodeType === 1;
   for (const k in (window.__AP_REG || {})) {
     const e = window.__AP_REG[k];
-    [e.el, e.button, e.input, e.monthEl, e.yearEl].concat(e.elements || []).forEach(x => x && seen.add(x));
+    for (const v of Object.values(e || {})) {
+      if (isEl(v)) seen.add(v);
+      else if (Array.isArray(v)) v.forEach(x => { if (isEl(x)) seen.add(x); });
+    }
   }
   const out = [];
   const q = 'input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea, ' +
