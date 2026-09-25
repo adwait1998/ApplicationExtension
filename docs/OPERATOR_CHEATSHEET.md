@@ -70,8 +70,10 @@ application in your own Chrome, click once, and it fills what it can from your p
 highlights what it deliberately left alone.
 
 > **It never clicks submit and never navigates.** It fills and highlights; you review and
-> submit. The only clicks it can make are on radios and checkboxes, and the click target is
-> re-checked at the point of action so a bug cannot turn a fill into a submitted application.
+> submit. It clicks only what filling needs — radios, checkboxes, an "Add Another" button for a
+> repeating section, and Workday's own dropdown/date/prompt widgets — each through its own guard
+> that re-checks the target at the point of action and refuses anything submit-, next- or
+> save-shaped. A capturing submit shield also blocks any form submission for the whole fill.
 
 Start the local service (it binds `127.0.0.1` only and prints a token):
 
@@ -92,12 +94,14 @@ How each field is decided, first match wins:
 | Tier | What it does | Fills? |
 |---|---|---|
 | secret guard | passwords/SSN/card fields | never |
-| canary | work auth, sponsorship, salary, EEO, address, DOB — from exact profile paths only | only on an exact hit, else skipped |
-| deterministic | `autocomplete` attribute, then name/id/label patterns | yes |
+| attestation | "I certify…", "I authorize … to verify/contact", e-signatures, terms & conditions | never — you tick/sign these |
+| canary | work auth, sponsorship, salary, EEO, address, DOB — from exact profile paths only | only on an exact hit, else skipped; EEO with nothing set → "Decline to self-identify" |
+| screening | criminal record, background check, drug test, non-compete, travel, how you heard — from your Settings answers only | yes when set and the question is plainly worded; otherwise left for you |
+| deterministic | `autocomplete` attribute, then name/id/label patterns (short-answer boxes only, never essay questions) | yes |
 | structured | `work_history[]` / `education[]`, indexed by the block heading ("Work Experience 2") | yes |
 | laya | local semantic classification, confidence ≥ 0.75 | yes, above threshold |
-| answer bank | semantic match against your past answers (`answer_bank.json`) | yes |
-| draft | LLM-written from your résumé facts | yes, **badged DRAFT** |
+| answer bank | semantic match against your past answers (`answer_bank.json`); a choice field only takes an answer that IS one of its options | yes |
+| draft | LLM-written from your résumé facts; never for a choice field | yes, **badged DRAFT** |
 | unresolved | — | no, left for you |
 
 Canary questions are **never** answered by a model. An unanswerable canary is left blank on
@@ -109,12 +113,13 @@ absent from your history is refused outright ("draft refused — it claimed expe
 so a model ignoring its instructions cannot invent an employer for you. Answer-bank hits are
 never second-guessed: those are your own past words.
 
-Optional tiers, all off by default:
+Tier defaults: the **answer bank is ON** by default (toggle it in Options → Smart fill);
+**drafts and Laya are OFF**. Environment variables override the Options toggles:
 
 ```powershell
-$env:APPLYPILOT_LAYA    = "1"   # semantic classification (~2GB RAM, ~28s first load)
-$env:APPLYPILOT_ANSWERS = "1"   # reuse your past answers
-$env:APPLYPILOT_DRAFTS  = "1"   # LLM drafts (needs APPLYPILOT_ANSWERS too)
+$env:APPLYPILOT_LAYA    = "1"   # semantic classification (~2GB RAM, ~28s first load) — off by default
+$env:APPLYPILOT_ANSWERS = "0"   # answer bank — ON by default; "0" turns it off
+$env:APPLYPILOT_DRAFTS  = "1"   # LLM drafts (needs the answer bank on) — off by default
 $env:APPLYPILOT_MAX_DRAFTS = "5"  # per-page cap, default 5
 ```
 

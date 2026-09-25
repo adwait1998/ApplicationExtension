@@ -29,13 +29,15 @@
 4. Laya           optional, lazy, absent by default. Gated on confidence.
 5. Answer bank    applypilot.extension.answers — AnswerCache seed/cache
                    hit (a standard screening question, or one this bank
-                   has answered before). Optional, off by default
-                   (APPLYPILOT_ANSWERS=1).
+                   has answered before). ON by default; turned off
+                   in Options or with APPLYPILOT_ANSWERS=0. A choice
+                   field only takes an answer that is one of its options.
 6. Draft          same AnswerCache.answer() call as tier 5, but its LLM
                    missed the bank and generated new text. Filled, but
                    marked draft=True for distinct review in the UI.
-                   Optional, off by default (APPLYPILOT_DRAFTS=1, which
-                   also requires APPLYPILOT_ANSWERS=1 — see answers.py).
+                   Off by default (Options, or APPLYPILOT_DRAFTS=1; needs
+                   the answer bank on — see answers.py). Never for a
+                   choice field.
 7. Unresolved     left for the human.
 """
 from __future__ import annotations
@@ -308,9 +310,9 @@ def resolve_field(
                     )
 
     # tier 5/6: answer bank + draft — one AnswerCache.answer() call, split
-    # on its returned source. Optional, off by default; answers.match()
-    # itself returns None immediately when APPLYPILOT_ANSWERS is unset, so
-    # this is a no-op call for everyone who hasn't opted in.
+    # on its returned source. The bank is on by default; answers.match()
+    # returns None immediately when it has been switched off (Options, or
+    # APPLYPILOT_ANSWERS=0), so this is then a no-op call.
     ans = answers.match(
         field, profile, cache=answer_cache, budget=draft_budget, app_dir=app_dir, url=url
     )
