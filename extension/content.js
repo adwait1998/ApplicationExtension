@@ -285,9 +285,16 @@
     });
   }
 
-  /** Runs a (possibly-Promise-returning) applyFill call under the per-field timeout. */
-  function runFieldAttempt(entry, value, timeoutMs) {
-    var raw = Promise.resolve().then(function () { return ApplyPilotScanner.applyFill(entry, value); });
+  /** Runs a (possibly-Promise-returning) applyFill call under the per-field timeout.
+   * `isCanary` (reviewer round 5, blocker B) is threaded straight through to scanner.js's
+   * applyFill() as `{canary: true}` — true only when the fill being attempted came from the
+   * service's canary tier (see applyFills()'s own step(), the one place that knows a
+   * FillResult's `source`), which tightens a Yes/No family match down to a bare "Yes"/"No"
+   * option there. Omitted (undefined -> falsy) by every caller that isn't attempting a fresh
+   * service-sourced fill (Undo's restore-to-prior-value, the "type text" quick-fix path) so
+   * those keep today's looser matching, exactly as before. */
+  function runFieldAttempt(entry, value, timeoutMs, isCanary) {
+    var raw = Promise.resolve().then(function () { return ApplyPilotScanner.applyFill(entry, value, isCanary ? { canary: true } : undefined); });
     raw.then(function () {}, function () {}); // swallow a late settle after we stop waiting
     return withTimeout(raw, timeoutMs);
   }
@@ -633,7 +640,7 @@
         ? applyMultiValueWithProgress(entry, fill.values, label, i, total, ctx).then(
             function (ok) { return { ok: ok, timedOut: false }; },
             function (e) { return { ok: false, timedOut: !!(e && e.isTimeout), error: e }; })
-        : runFieldAttempt(entry, fillValue, ctx.fieldTimeoutMs).then(
+        : runFieldAttempt(entry, fillValue, ctx.fieldTimeoutMs, fill.source === 'canary').then(
             function (ok) { return { ok: ok, timedOut: false }; },
             function (e) { return { ok: false, timedOut: !!(e && e.isTimeout), error: e }; });
 
@@ -649,7 +656,14 @@
             values: (Array.isArray(fill.values) && fill.values.length) ? fill.values : null,
             reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft,
             status: isDraft ? 'draft' : 'verified', category: isDraft ? 'draft' : categoryForSource(fill.source),
-            required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
+            required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill),
+            // Reviewer round 5, blocker A ("didn't stick" false negatives) — the option's own
+            // text/label scanner.js's applyFill() stashed on entry._committedText at the moment
+            // of this exact commit (null for a plain text/number/tel/email/date/wd-prompt kind,
+            // which never sets it — see that function's doc comment). verifyAppliedFills() below
+            // compares its later re-read against THIS, never against `value`/`values` above,
+            // whenever it's present.
+            committedText: (entry._committedText == null ? null : entry._committedText)
           });
         } else if (outcome.timedOut) {
           for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Timed out waiting for this field to respond');
@@ -696,6 +710,19 @@
   // successfully-applied field back and moves anything that no longer matches what we set out
   // of `applied` and into `failed` as "didn't stick" — the summary only ever counts VERIFIED
   // fills.
+  //
+  // Reviewer round 5, blocker A: the re-read is compared against `a.committedText` (the option's
+  // own text/label scanner.js's applyFill() stashed at the moment it actually committed — see
+  // applied.push()'s own comment above) whenever it's present, NEVER against the service's
+  // original `value`/`values` — a <select> given "Male" whose option is <option value="1">,
+  // a decline whose page option reads nothing like the profile's own decline phrasing, a
+  // Country/Degree synonym, a phone-country combobox whose chip shows only "+1", ... all commit
+  // correctly but would never string-equal the service's own guess at what the page would say. A
+  // value that genuinely reverted still fails this check exactly as before: the fresh read-back
+  // (empty, a placeholder, or some OTHER option's text) still won't match the committed text
+  // either. Only a kind with no rendered "options" to have captured one from (a plain text/
+  // number/tel/email input, a date, wd-prompt's additive pills) has no committedText at all, so
+  // those fall back to the service's original value/values, exactly as before this fix.
   var VERIFY_SETTLE_MS = 500;
 
   function verifyAppliedFills(result) {
@@ -708,7 +735,7 @@
         if (!entry) { stillApplied.push(a); return; } // can't re-check — don't penalize it for that
         var after;
         try { after = ApplyPilotScanner.getCurrentValue(entry); } catch (e) { stillApplied.push(a); return; }
-        var target = (a.values && a.values.length) ? a.values : a.value;
+        var target = (a.committedText != null) ? a.committedText : ((a.values && a.values.length) ? a.values : a.value);
         if (isSameValue(after, target)) {
           stillApplied.push(a);
         } else {
@@ -845,7 +872,7 @@
           return next(i + 1);
         }
 
-        return runFieldAttempt(c.entry, fill.value, ctx.fieldTimeoutMs).then(function (ok) {
+        return runFieldAttempt(c.entry, fill.value, ctx.fieldTimeoutMs, fill.source === 'canary').then(function (ok) {
           if (ok) {
             var hlTargets = ApplyPilotScanner.getHighlightTargets(c.entry);
             var reasonText = (fill.reason || 'Filled') + (fill.profile_key ? ' [' + fill.profile_key + ']' : '');
@@ -854,7 +881,10 @@
               id: id, label: c.failedRecord.label, value: fill.value, values: null,
               reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: false,
               status: 'verified', category: categoryForSource(fill.source),
-              required: c.failedRecord.required, tag: c.failedRecord.tag, widget: c.failedRecord.widget
+              required: c.failedRecord.required, tag: c.failedRecord.tag, widget: c.failedRecord.widget,
+              // See applyFills()'s own applied.push() comment — same committedText contract,
+              // read from the SAME entry this second-chance attempt just (re-)committed to.
+              committedText: (c.entry._committedText == null ? null : c.entry._committedText)
             });
           } else {
             leftForYou(id, c.entry._lastReason || c.failedRecord.reason, fill.source);

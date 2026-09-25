@@ -252,7 +252,16 @@ FILL_JS = """async ([id, value, values]) => {
   } catch (e) { ok = false; detail = String(e).slice(0, 160); }
   let readback = '';
   try { readback = String(ApplyPilotScanner.getCurrentValue(entry) || ''); } catch (e) {}
-  return { ok, detail, readback: readback.slice(0, 200), kind: entry.kind };
+  // Reviewer round 5, blocker A: the option's own text/label scanner.js's applyFill() actually
+  // committed -- set only for a "pick one of several rendered options" widget kind (radio-group,
+  // select, combobox, button-group, wd-dropdown, checkbox-group, wd-checkbox-group,
+  // lever-location; see that function's own doc comment), null for anything else. THIS, never
+  // the raw `value` the service sent (which can be phrased completely differently from what the
+  // page itself renders -- "Decline to self-identify" vs. a page's own "I don't wish to
+  // answer"), is what _stuck() below judges a later re-read against.
+  let committedText = null;
+  try { committedText = (entry._committedText == null) ? null : String(entry._committedText); } catch (e) {}
+  return { ok, detail, readback: readback.slice(0, 200), committedText, kind: entry.kind };
 }"""
 
 # Interactive things on the page the scanner did NOT report as fields — the
@@ -361,15 +370,27 @@ def _is_choice(field: dict) -> bool:
     return bool(field.get("options")) or field.get("type") in ("radio", "checkbox") or bool(field.get("widget"))
 
 
-def _stuck(intended, settled: str, field: dict) -> bool:
+def _stuck(intended, settled: str, field: dict, committed_text: str | None = None) -> bool:
     """Did the value survive blur + settle? Text must read back as written
-    (phone formatting aside); a choice must show a real, non-placeholder
-    selection (the chosen option's wording can legitimately differ from the
-    intended value — "Decline to self-identify" -> "I don't wish to answer")."""
+    (phone formatting aside); a choice field's wording can legitimately differ
+    from the intended value ("Decline to self-identify" -> "I don't wish to
+    answer"), so it is judged against `committed_text` — what FILL_JS actually
+    saw scanner.js's applyFill() commit at fill time (entry._committedText),
+    never merely "is something non-placeholder showing now". Reviewer round 5,
+    blocker A: the old version accepted ANY non-empty, non-placeholder choice
+    reading unconditionally — a field that reverted to a DIFFERENT, WRONG
+    option (or kept some stale prior value) after the fill would still be
+    reported "stuck" as long as something was showing, which is not what
+    "stuck" is supposed to mean. When `committed_text` isn't available (a kind
+    applyFill() doesn't stash it for, e.g. a plain checkbox) this falls back
+    to the old, looser "something non-placeholder" signal rather than
+    regressing every such field to always FAILED."""
     got, want = _norm(settled), _norm(intended)
     if not got or _PLACEHOLDER.match(got):
         return False
     if _is_choice(field):
+        if committed_text:
+            return got == _norm(committed_text)
         return True
     if field.get("type") == "tel":
         return re.sub(r"\D", "", got) == re.sub(r"\D", "", want)
@@ -473,12 +494,13 @@ def probe(page, url: str, port: int, token: str, scanner_src: str, shots: pathli
                     settled_val = settled.get(f["id"], "")
                     if not r.get("ok"):
                         status = "FAILED"
-                    elif _stuck(fill["value"], settled_val, f):
+                    elif _stuck(fill["value"], settled_val, f, r.get("committedText")):
                         status = "verified"
                     else:
                         status = "DIDNT-STICK"
                     row.update(status=status, source=fill["source"],
                                value=str(fill["value"])[:80], readback=settled_val[:80],
+                               committed=(r.get("committedText") or "")[:80],
                                detail=r.get("detail"), draft=fill.get("draft", False),
                                choice=_is_choice(f))
                 elif f["id"] in skipped:
@@ -553,8 +575,14 @@ def summarize(results: list[dict]) -> str:
                                  f"{row['label']!r} <- {row.get('value')!r}: {row.get('detail')} "
                                  f"(after settle {row.get('readback')!r})")
                 elif row["status"] == "verified" and row.get("choice"):
+                    # Reviewer round 5, blocker A: shows the settled read-back is judged against
+                    # what applyFill() actually COMMITTED (entry._committedText), not against the
+                    # service's own `value` — a differently-worded but correct choice ("Decline
+                    # to self-identify" -> "I don't wish to answer") is expected to show
+                    # committed == after-settle while value legitimately differs.
                     lines.append(f"    - chose [{row['type'] or row['tag']}] {row['label'][:70]!r} -> "
-                                 f"{row.get('readback')!r} (intended {row.get('value')!r}, {row.get('source')})")
+                                 f"{row.get('readback')!r} (committed {row.get('committed')!r}, "
+                                 f"intended {row.get('value')!r}, {row.get('source')})")
             for u in fr.get("unseen", [])[:12]:
                 lines.append(f"    - unseen {u['tag']}[{u['type'] or u['role']}] {u['label']!r} .{u['cls']}")
         lines.append(f"- total {rec.get('total_s')}s; non-GET requests blocked: {len(rec.get('blocked_requests', []))}")

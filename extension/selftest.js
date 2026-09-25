@@ -196,12 +196,22 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('select2 select filled by full state NAME, applyFill reports success', ok === true);
   expect('select2 select value read back after fill-by-name matches "Arizona" (value="1")',
     s2Entry.el.value === '1');
+  // Reviewer round 5, blocker A: this is the EXACT "State/Province" shape the reviewer's own
+  // chrome_panel_test.py output already showed reported "Didn't stick" -- a value-attribute
+  // select ("1") given a plain profile answer ("Arizona") that can only ever compare equal
+  // against the OPTION'S OWN VISIBLE TEXT, never the opaque value attribute a page author chose.
+  expect('blocker A: getCurrentValue() returns the option\'s visible TEXT ("Arizona"), never its raw value attribute ("1")',
+    Scanner.getCurrentValue(s2Entry) === 'Arizona');
+  expect('blocker A: entry._committedText stashes that SAME visible text at commit time',
+    s2Entry._committedText === 'Arizona');
 
   s2Entry.el.selectedIndex = 0; // reset to the placeholder before the next fill
   ok = Scanner.applyFill(s2Entry, 'AZ');
   expect('select2 select filled by 2-letter CODE, applyFill reports success', ok === true);
   expect('select2 select value read back after fill-by-code cross-matched to "Arizona" (value="1")',
     s2Entry.el.value === '1');
+  expect('blocker A: getCurrentValue()/entry._committedText agree on "Arizona" even when the SERVICE\'s own fill value was the differently-worded "AZ"',
+    Scanner.getCurrentValue(s2Entry) === 'Arizona' && s2Entry._committedText === 'Arizona');
 
   // Chosen block: the opposite shape — options are 2-letter CODES, so
   // filling by the full name "Arizona" can only succeed via the same
@@ -1108,6 +1118,31 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('yes/no family: "No" with no exact/prefix match among decline-ish options is -1, never picks "Not Declared"',
     mco('No', ['Not Declared', 'None of the above']) === -1);
 
+  // -- canary-tier Yes/No: reviewer round 5, blocker B (false citizenship claim) --------------
+  // A bare "Yes"/"No" guessed BLIND by the service's canary tier (before a combobox/Workday
+  // dropdown ever reveals its real options) must land ONLY on an option that is ITSELF nothing
+  // but that one word -- never one that bundles a further claim. The live repro: a visa holder's
+  // canary "Yes" got committed to "Yes, I am a U.S. citizen or permanent resident" simply
+  // because it was the ONLY option starting with "Yes" (never ambiguous by COUNT, so the
+  // ordinary loose rule below never refused it). The 4th argument (`canaryStrict`) is what
+  // content.js now threads through only for a fill whose `source` is "canary" -- see
+  // matchAnswerFamily's own doc comment in scanner.js.
+  const CITIZEN_OPTIONS = ['Yes, I am a U.S. citizen or permanent resident', 'No, I will require sponsorship'];
+  expect('canary Yes/No: a NON-canary "Yes" keeps today\'s looser behaviour unchanged (regression guard) -- picks the only "Yes, ..." option',
+    mco('Yes', CITIZEN_OPTIONS) === 0);
+  expect('blocker B: a CANARY "Yes" against the SAME options refuses -- the only "Yes, ..." option bundles a citizenship claim, not a bare "Yes"',
+    mco('Yes', CITIZEN_OPTIONS, true) === -1);
+  expect('blocker B: a CANARY "No" is refused too, symmetrically, when the only "No" option also bundles a claim',
+    mco('No', ['Yes, I am authorized without sponsorship', 'No, I will require sponsorship'], true) === -1);
+  expect('blocker B: a CANARY "Yes" still matches a genuinely BARE "Yes" option -- never over-refuses',
+    mco('Yes', ['Yes', 'No'], true) === 0);
+  expect('blocker B: a CANARY "No" still matches a genuinely BARE "No" option',
+    mco('No', ['Yes', 'No'], true) === 1);
+  expect('blocker B: bare-word matching ignores trailing punctuation/whitespace ("Yes.", "  No  ")',
+    mco('Yes', ['Yes.', '  No  '], true) === 0 && mco('No', ['Yes.', '  No  '], true) === 1);
+  expect('blocker B: a CANARY "No" against a sentence-shaped denial ("I have never worked here") also refuses -- that non-canary fallback never applies under canaryStrict',
+    mco('No', ['I currently work here', 'I have never worked here'], true) === -1);
+
   // -- generic word-boundary containment tier (non-family, non-prose values) -------------------
   expect('generic containment: forward direction still matches a plain non-family value on a word boundary',
     mco('Senior', ['Junior (0-2 years)', 'Senior (6+ years)']) === 1);
@@ -1244,6 +1279,42 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
     negControlOkProse === false);
   expect('negative control: a prose-shaped value leaves the Yes/No field completely untouched (nothing checked)',
     negControlCheckedProse.length === 0);
+})();
+
+// --- Reviewer round 5, blocker A ("didn't stick" false negatives): the SAME EEO decline
+//     fixtures above, this time through the real applyFill() entry-point (what content.js's
+//     runFieldAttempt() actually calls) with a proper `entry`, proving getCurrentValue()
+//     returns the committed option's own visible text (never a raw value attribute) and that
+//     entry._committedText stashes that exact same text at commit time -- the two signals
+//     content.js's post-fill verify sweep now compares against each other instead of against
+//     the service's own answer string. Both fixtures' option VALUE attribute ("decline") reads
+//     nothing like its visible TEXT/label ("I do not wish to answer" / "I don't wish to
+//     answer") -- worded completely differently from the profile's own "Decline to
+//     self-identify" too -- exactly the shape that used to compare unequal against the
+//     service's answer and get reported "Didn't stick" even though the right option was
+//     sitting right there on the page. ------------------------------------------------------
+(() => {
+  const doc = dom.window.document;
+
+  const genderSelect = doc.getElementById('eeo_gender_select_fixture');
+  genderSelect.selectedIndex = 0; // reset to the placeholder before this fresh fill
+  const genderEntry = { kind: 'element', el: genderSelect };
+  const genderOk = Scanner.applyFill(genderEntry, 'Decline to self-identify');
+  expect('blocker A select: applyFill via the decline family still succeeds', genderOk === true);
+  expect('blocker A select: getCurrentValue() returns the option\'s visible TEXT ("I do not wish to answer"), never its raw value attribute ("decline")',
+    Scanner.getCurrentValue(genderEntry) === 'I do not wish to answer');
+  expect('blocker A select: entry._committedText stashes that SAME visible text at commit time, never the service\'s own differently-worded answer',
+    genderEntry._committedText === 'I do not wish to answer');
+
+  const hispanicRadios = Array.from(doc.querySelectorAll('input[name="eeo_hispanic_fixture"]'));
+  hispanicRadios.forEach((r) => { r.checked = false; }); // reset before this fresh fill
+  const hispanicEntry = { kind: 'radio-group', elements: hispanicRadios };
+  const hispanicOk = Scanner.applyFill(hispanicEntry, 'Decline to self-identify');
+  expect('blocker A radio-group: applyFill via the decline family still succeeds', hispanicOk === true);
+  expect('blocker A radio-group: getCurrentValue() returns the checked radio\'s visible LABEL ("I don\'t wish to answer"), never its raw value attribute ("decline")',
+    Scanner.getCurrentValue(hispanicEntry) === "I don't wish to answer");
+  expect('blocker A radio-group: entry._committedText stashes that SAME visible label at commit time',
+    hispanicEntry._committedText === "I don't wish to answer");
 })();
 
 // --- Workday dropdown + prompt + résumé, run STRICTLY SEQUENTIALLY -----------------------
@@ -2310,6 +2381,13 @@ pending.push((async () => {
       itiBtn.getAttribute('aria-label') === 'Change country, selected United States (+1)');
     expect('phone Country combobox: its OWN chip only ever shows the dial code, never the country name -- the real bug this guards against',
       byId('gh_phone_country_value').querySelector('.select__single-value').textContent === '+1');
+    // Reviewer round 5, blocker A: this is the EXACT "phone -> '+1'" shape from the reviewer's
+    // repro. getCurrentValue()/getComboboxCommittedValue() for THIS widget is UNAVOIDABLY lossy
+    // (the chip really does only ever show "+1" -- see the comment above), so entry._committedText
+    // must come from the fill function's OWN matchedText ("United States +1") instead of a later
+    // getCurrentValue() re-read, or a verify sweep comparing the two would ALWAYS see them differ.
+    expect('blocker A: entry._committedText carries the FULL option text ("United States +1") the fill function itself matched, immune to the chip\'s own lossy "+1"-only display',
+      entry._committedText === 'United States +1');
   }
 
   // ---- combobox: Greenhouse phone "Country", ALREADY showing the applicant's country ----
@@ -2445,6 +2523,59 @@ pending.push((async () => {
         'Yes, I will require H-1B sponsorship', 'Yes, I will require TN visa support', 'No, I will not require sponsorship'
       ]));
     container.remove();
+  }
+
+  // ---- button-group: reviewer round 5, blocker B (false citizenship claim), end-to-end
+  //      through the real applyFill() entry-point -- proves fillOptions.canary threads all the
+  //      way down to fillButtonGroup's own matchChoiceOption call. Unlike the sponsorship group
+  //      above, this fixture has only ONE "Yes, ..." option -- never ambiguous by COUNT, which
+  //      is exactly the gap a canary-tier value must refuse on its own wording instead. ---------
+  {
+    function makeCitizenGroup() {
+      const groupContainer = doc.createElement('div');
+      const yesBtn = doc.createElement('button');
+      yesBtn.type = 'button';
+      yesBtn.textContent = 'Yes, I am a U.S. citizen or permanent resident';
+      yesBtn.setAttribute('aria-pressed', 'false');
+      const noBtn = doc.createElement('button');
+      noBtn.type = 'button';
+      noBtn.textContent = 'No, I will require sponsorship';
+      noBtn.setAttribute('aria-pressed', 'false');
+      // A real click -> aria-pressed toggle (same observable contract isChoiceButtonSelected()
+      // reads), so fillButtonGroup's own post-click verification has something genuine to see —
+      // without this, a bare <button> with no listener at all would make even a CORRECT match
+      // report "button click did not register as selected", which is not what this test is
+      // about (see the panel-test tab / matchChoiceOption unit checks above for the matching
+      // logic itself; this block is purely about the fillOptions.canary threading).
+      [yesBtn, noBtn].forEach((btn) => {
+        btn.addEventListener('click', () => {
+          yesBtn.setAttribute('aria-pressed', String(btn === yesBtn));
+          noBtn.setAttribute('aria-pressed', String(btn === noBtn));
+        });
+      });
+      groupContainer.appendChild(yesBtn);
+      groupContainer.appendChild(noBtn);
+      doc.body.appendChild(groupContainer);
+      return { kind: 'button-group', buttons: [yesBtn, noBtn], container: groupContainer, label: 'Citizenship (blocker B fixture)', yesBtn: yesBtn };
+    }
+
+    const nonCanaryEntry = makeCitizenGroup();
+    const nonCanaryOk = await Scanner.applyFill(nonCanaryEntry, 'Yes');
+    expect('blocker B regression guard: a NON-canary "Yes" keeps today\'s behaviour unchanged -- commits the only "Yes, ..." option',
+      nonCanaryOk === true && Scanner.isChoiceButtonSelected(nonCanaryEntry.yesBtn) === true);
+    nonCanaryEntry.container.remove();
+
+    const canaryEntry = makeCitizenGroup();
+    const canaryOk = await Scanner.applyFill(canaryEntry, 'Yes', { canary: true });
+    expect('blocker B: applyFill(entry, "Yes", {canary: true}) REFUSES to commit the bundled citizenship claim',
+      canaryOk === false);
+    expect('blocker B: the citizenship button was never actually selected',
+      Scanner.isChoiceButtonSelected(canaryEntry.yesBtn) === false);
+    expect('blocker B: the refusal still carries optionsSeen (structured data), so content.js\'s EXISTING second-chance /resolve path picks this field up exactly like any other "no confident match"',
+      JSON.stringify(canaryEntry._lastOptions) === JSON.stringify([
+        'Yes, I am a U.S. citizen or permanent resident', 'No, I will require sponsorship'
+      ]));
+    canaryEntry.container.remove();
   }
 
   // ---- real Ashby shape: no <form> at all, every button (including the decoy) type-less ----
