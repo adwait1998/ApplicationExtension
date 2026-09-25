@@ -266,6 +266,58 @@
     resumeLineEl.textContent = 'No résumé upload on this page.';
   }
 
+  // Item 5 (Review rows): the human-facing word for each of content.js's fixed `status` values
+  // (see applyFills()/verifyAppliedFills() there), and which CSS modifier draws it.
+  var STATUS_LABELS = {
+    verified: 'Verified', draft: 'Draft', left_for_you: 'Left for you',
+    kept_value: 'Kept your value', failed: 'Failed', didnt_stick: "Didn't stick"
+  };
+
+  /** Required-not-yet-filled rows first, stable otherwise — item 5's "required fields that are
+   * not filled come first". Only ever applied to needsYou/failed (nothing in filled/drafts is
+   * "not filled"). */
+  function sortRequiredFirst(list) {
+    return list
+      .map(function (item, idx) { return { item: item, idx: idx }; })
+      .sort(function (a, b) {
+        var ra = a.item.required ? 0 : 1;
+        var rb = b.item.required ? 0 : 1;
+        return ra !== rb ? ra - rb : a.idx - b.idx;
+      })
+      .map(function (w) { return w.item; });
+  }
+
+  /** One row: label + status badge, its value (facts/drafts only — never for needsYou/failed,
+   * which never had one), and a reason/source line. `data-field-id` (the qualified id
+   * background.js's applyFrameReport() stamped on) is what a click routes to SCROLL_TO_FIELD —
+   * absent (e.g. a row from before this build's ids existed) simply makes that row unclickable,
+   * never an error.
+   */
+  function buildRow(entry, cssClass, showValue) {
+    var row = document.createElement('div');
+    row.className = 'field-row ' + cssClass;
+    if (entry.id) {
+      row.dataset.fieldId = entry.id;
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.title = 'Click to jump to this field on the page';
+    }
+    var statusText = STATUS_LABELS[entry.status] || '';
+    var html = '<div class="row-top"><span class="label">' + escapeHtml(entry.label || '(unlabeled field)') + '</span>' +
+      (statusText ? '<span class="status-badge status-' + escapeHtml(entry.status) + '">' + escapeHtml(statusText) + '</span>' : '') +
+      '</div>';
+    if (showValue && entry.value != null && entry.value !== '') {
+      html += '<div class="value">' + escapeHtml(entry.value) + '</div>';
+    }
+    var reasonBits = [];
+    if (entry.reason) reasonBits.push(escapeHtml(entry.reason));
+    if (entry.source) reasonBits.push('source: ' + escapeHtml(entry.source));
+    if (entry.profile_key) reasonBits.push(escapeHtml(entry.profile_key));
+    if (reasonBits.length) html += '<div class="reason">' + reasonBits.join(' &middot; ') + '</div>';
+    row.innerHTML = html;
+    return row;
+  }
+
   // Facts / drafts / needs-you / failed are always rendered as separate, clearly-labelled
   // groups — never merged into one flat list (drafts in particular must never be mistaken for
   // a fact pulled straight from the profile).
@@ -273,22 +325,15 @@
     resultsBox.innerHTML = '';
     var filled = state.filled || [];
     var drafts = state.drafts || [];
-    var needsYou = state.needsYou || [];
-    var failed = state.failed || [];
+    var needsYou = sortRequiredFirst(state.needsYou || []);
+    var failed = sortRequiredFirst(state.failed || []);
 
     if (filled.length) {
       var filledTitle = document.createElement('div');
       filledTitle.className = 'section-title';
       filledTitle.textContent = 'Filled (' + filled.length + ')';
       resultsBox.appendChild(filledTitle);
-      filled.forEach(function (a) {
-        var row = document.createElement('div');
-        row.className = 'field-row filled';
-        row.innerHTML =
-          '<div class="value">' + escapeHtml(a.value) + '</div>' +
-          '<div class="reason">' + escapeHtml(a.reason || '') + (a.profile_key ? ' &middot; ' + escapeHtml(a.profile_key) : '') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      filled.forEach(function (a) { resultsBox.appendChild(buildRow(a, 'filled', true)); });
     }
 
     if (drafts.length) {
@@ -296,15 +341,7 @@
       draftTitle.className = 'section-title draft-title';
       draftTitle.textContent = 'Drafted — review before submitting (' + drafts.length + ')';
       resultsBox.appendChild(draftTitle);
-      drafts.forEach(function (a) {
-        var row = document.createElement('div');
-        row.className = 'field-row draft';
-        row.innerHTML =
-          '<div class="draft-badge">DRAFT</div>' +
-          '<div class="value">' + escapeHtml(a.value) + '</div>' +
-          '<div class="reason">' + escapeHtml(a.reason || '') + (a.profile_key ? ' &middot; ' + escapeHtml(a.profile_key) : '') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      drafts.forEach(function (a) { resultsBox.appendChild(buildRow(a, 'draft', true)); });
     }
 
     if (needsYou.length) {
@@ -312,12 +349,7 @@
       skipTitle.className = 'section-title';
       skipTitle.textContent = 'Need you (' + needsYou.length + ')';
       resultsBox.appendChild(skipTitle);
-      needsYou.forEach(function (s) {
-        var row = document.createElement('div');
-        row.className = 'field-row skipped';
-        row.innerHTML = '<div class="reason">' + escapeHtml(s.reason || 'Left for you to fill in') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      needsYou.forEach(function (s) { resultsBox.appendChild(buildRow(s, 'skipped', false)); });
 
       // A single, once-per-render nudge: only when drafts are off (the operator's own Settings
       // toggle, a LOCAL-ONLY preference read directly from storage) AND at least one "need
@@ -341,12 +373,7 @@
       failTitle.className = 'section-title';
       failTitle.textContent = 'Could not fill (' + failed.length + ')';
       resultsBox.appendChild(failTitle);
-      failed.forEach(function (f) {
-        var row = document.createElement('div');
-        row.className = 'field-row failed';
-        row.innerHTML = '<div class="reason">' + escapeHtml(f.reason || '') + '</div>';
-        resultsBox.appendChild(row);
-      });
+      failed.forEach(function (f) { resultsBox.appendChild(buildRow(f, 'failed', false)); });
     }
 
     if (!resultsBox.children.length) {
@@ -872,6 +899,29 @@
     } finally {
       markAppliedBtn.disabled = false;
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // REVIEW ROWS (item 5): clicking (or pressing Enter/Space on, for keyboard users) any row with
+  // a field id scrolls that field into view in its own frame and flashes its highlight —
+  // background.js's SCROLL_TO_FIELD splits the qualified id and messages the right frame. One
+  // delegated listener (resultsBox's contents are fully replaced on every render — see
+  // renderResults()/buildRow() above) rather than one per row.
+  // ---------------------------------------------------------------------
+  function scrollToRow(row) {
+    if (!row || !row.dataset || !row.dataset.fieldId || activeTabId == null) return;
+    chrome.runtime.sendMessage({ type: 'SCROLL_TO_FIELD', tabId: activeTabId, id: row.dataset.fieldId })
+      .catch(function () {});
+  }
+  resultsBox.addEventListener('click', function (e) {
+    scrollToRow(e.target.closest('[data-field-id]'));
+  });
+  resultsBox.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var row = e.target.closest('[data-field-id]');
+    if (!row) return;
+    e.preventDefault();
+    scrollToRow(row);
   });
 
   optionsBtn.addEventListener('click', function () {

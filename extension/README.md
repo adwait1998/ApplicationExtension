@@ -224,6 +224,18 @@ updates to say so. A second fill of the same page within the hour updates that o
 than creating a duplicate (the service's own behavior — see `app_log.record()`) — exactly what a
 multi-step form's later steps, or just clicking Fill again, produce.
 
+## Review rows
+
+Every row in Filled / Drafted / Need you / Could not fill shows the field's own label, a status
+badge (**Verified**, **Draft**, **Left for you**, **Kept your value**, **Failed**, or **Didn't
+stick**), and — when the fill had one — its source (`profile`, `answer_bank`, `draft`, ...).
+Clicking a row asks `background.js` to route to the exact frame that field lives in (every row's
+id is qualified with its own frame — see `applyFrameReport()`), which scrolls it into view and
+flashes its highlight right on the page. Within "Need you" and "Could not fill", a **required**
+field that's still unfilled sorts to the top of its section, so the field most likely to block
+your application is never buried below a dozen optional ones. The summary line's "N couldn't
+read" count (see "Report honestly" below) is unchanged by any of this.
+
 ## Fill every frame
 
 About a quarter of real job postings are a company's own careers page embedding the actual

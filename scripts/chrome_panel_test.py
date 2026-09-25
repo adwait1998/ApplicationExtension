@@ -249,7 +249,7 @@ REMEMBER_ANSWERS_PAGE_BYTES = b"""<!DOCTYPE html>
   <label for="notice_period">What is your notice period?</label>
   <input type="text" id="notice_period" name="remember_test_skip_notice">
   <label for="salary_expect">Desired salary</label>
-  <input type="text" id="salary_expect" name="remember_test_skip_salary">
+  <input type="text" id="salary_expect" name="remember_test_skip_salary" required>
   <label for="fake_password">Set a password for this portal (optional)</label>
   <input type="password" id="fake_password" name="fake_password">
 </form>
@@ -1182,6 +1182,45 @@ with sync_playwright() as p:
         check("the details list shows the skipped question together with its reason",
               "Desired salary" in (details_text or "") and "profile" in (details_text or ""),
               repr(details_text))
+
+        # =====================================================================
+        # TAB 11 continued — REVIEW ROWS (item 5): every row shows a label and a status badge;
+        #          a REQUIRED-but-unfilled field (Desired salary, marked `required` in this
+        #          fixture) sorts before a non-required one in the same "Need you" section even
+        #          though it was scanned later in the DOM; clicking a row scrolls/flashes the
+        #          real field on the real page.
+        # =====================================================================
+        rows_info = panel11.evaluate("""
+            () => Array.from(document.querySelectorAll('#results .field-row')).map(el => ({
+                label: el.querySelector('.label') ? el.querySelector('.label').textContent : '',
+                status: el.querySelector('.status-badge') ? el.querySelector('.status-badge').textContent : '',
+                fieldId: el.dataset.fieldId || null,
+            }))
+        """)
+        needs_you_rows = [r for r in rows_info if r["status"].lower() in ("left for you", "kept your value")]
+        check("every 'needs you' row shows a label and a status badge",
+              len(needs_you_rows) >= 2 and all(r["label"] and r["status"] for r in needs_you_rows),
+              json.dumps(needs_you_rows))
+        labels_in_order = [r["label"] for r in needs_you_rows]
+        salary_idx = next((i for i, l in enumerate(labels_in_order) if "salary" in l.lower()), None)
+        notice_idx = next((i for i, l in enumerate(labels_in_order) if "notice period" in l.lower()), None)
+        check("the REQUIRED-but-unfilled field (Desired salary) sorts before the non-required "
+              "one (notice period) in the same section, even though it was scanned later in the DOM",
+              salary_idx is not None and notice_idx is not None and salary_idx < notice_idx,
+              json.dumps(labels_in_order))
+
+        salary_row_id = next((r["fieldId"] for r in needs_you_rows if "salary" in r["label"].lower()), None)
+        check("the salary row carries a clickable field id", bool(salary_row_id), json.dumps(needs_you_rows))
+        if salary_row_id:
+            panel11.click(f'[data-field-id="{salary_row_id}"]')
+            try:
+                tab11.wait_for_function(
+                    "() => document.getElementById('salary_expect').getAttribute('data-applypilot-flash') === 'true'",
+                    timeout=3000)
+                flashed = True
+            except Exception:
+                flashed = False
+            check("clicking a row flashes the real field on the real page", flashed)
 
         # =====================================================================
         # TAB 12 — APPLICATION LOG (item 4): a completed fill automatically POSTs /log (never a

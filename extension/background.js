@@ -1076,6 +1076,16 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     });
     return true;
   }
+  if (msg.type === 'SCROLL_TO_FIELD') {
+    // Item 5 (Review rows): only an extension page — never a content script — can message a
+    // SPECIFIC frame, which is why this one-line fan-out lives here rather than in sidepanel.js
+    // calling chrome.tabs.sendMessage directly (that would always hit frame 0).
+    var scrollParts = splitQualifiedId(msg.id);
+    if (!scrollParts) { sendResponse({ ok: false, error: 'not a recognizable field id' }); return false; }
+    chrome.tabs.sendMessage(msg.tabId, { type: 'FLASH_FIELD', id: scrollParts.localId }, { frameId: scrollParts.frameId })
+      .then(sendResponse, function (e) { sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }); });
+    return true;
+  }
   if (msg.type === 'LOG_STATUS') {
     callLogStatus(msg.id, msg.status).then(function (resp) {
       if (!resp || !resp.ok) { sendResponse(resp); return; }

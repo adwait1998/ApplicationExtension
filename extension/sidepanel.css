@@ -373,10 +373,33 @@ button.secondary.cancel:hover { background: var(--err-bg); }
    real person's name. */
 .field-row.draft { background: var(--draft-bg); border: 1px solid var(--draft-border); }
 
+/* Item 5 (Review rows): every row with a field id is clickable (scrolls/flashes it on the
+   page) — a plain pointer + a focus ring is the only affordance needed; the row's own
+   background already carries the status color. */
+.field-row[data-field-id] { cursor: pointer; }
+.field-row[data-field-id]:hover { filter: brightness(1.12); }
+.field-row[data-field-id]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .field-row .label { font-weight: 600; }
-.field-row .value { color: var(--ok); }
+.field-row .value { color: var(--ok); margin-top: 2px; }
 .field-row .reason { color: var(--text-dim); margin-top: 2px; }
 .field-row.draft .value { color: var(--draft); }
+
+.status-badge {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #fff;
+}
+.status-badge.status-verified { background: var(--ok); }
+.status-badge.status-draft { background: var(--draft); }
+.status-badge.status-left_for_you, .status-badge.status-kept_value { background: var(--warn); }
+.status-badge.status-failed, .status-badge.status-didnt_stick { background: var(--err); }
 
 .section-title.draft-title { color: var(--draft); }
 
