@@ -411,6 +411,14 @@ RESUME_TAILOR_PAGE_BYTES = b"""<!DOCTYPE html>
 #   - sponsor_combobox_silent: the negative control — the stub answers NOTHING for this field on
 #     the second call (simulating "the service still can't tell"), so it must stay empty and be
 #     reported 'left_for_you', never silently dropped and never falsely "Filled".
+#   - citizen_combobox: reviewer round 5, blocker B (false citizenship claim) — a bare canary
+#     "Yes" on the FIRST call must NEVER auto-commit "Yes, I am a U.S. citizen or permanent
+#     resident" just because it is the only option starting with "Yes" (never ambiguous by
+#     COUNT, unlike sponsor_combobox's two "Yes, ..." options above — this is the narrower gap a
+#     canary-tier value must refuse on its OWN). The stub then answers NOTHING on the second,
+#     options-aware call (same "still can't tell" shape as sponsor_combobox_silent), so this also
+#     proves the field ends up 'left_for_you' and empty rather than silently keeping a false
+#     claim from the first pass.
 # This lets one page prove "exactly two /resolve calls total" while covering both outcomes.
 #
 # The react-select-style markup below (`.select__control`/`.select__input[role=combobox]`/
@@ -454,6 +462,22 @@ SPONSOR_RESOLVE_PAGE_BYTES = b"""<!DOCTYPE html>
         </div>
       </div>
       <div class="select__menu" id="sponsor_silent_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="select" id="citizen_field">
+    <label id="citizen_label">Are you a U.S. citizen or permanent resident?</label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="citizen_value">
+          <input type="text" role="combobox" id="citizen_input" class="select__input" name="citizen_combobox"
+                 aria-labelledby="citizen_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="citizen_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="citizen_menu" style="display:none;"></div>
     </div>
   </div>
 </form>
@@ -527,6 +551,148 @@ SPONSOR_RESOLVE_PAGE_BYTES = b"""<!DOCTYPE html>
     ['Yes, I will require H-1B sponsorship', 'Yes, I will require TN visa support', 'No, I will not require sponsorship']);
   window.__sponsorSilentSelect = makeSimpleSelect('sponsor_silent_input', 'sponsor_silent_toggle', 'sponsor_silent_menu', 'sponsor_silent_value',
     ['Yes, I will require O-1 sponsorship', 'Yes, I will require E-3 sponsorship', 'No, I will not require sponsorship']);
+  // Reviewer round 5, blocker B fixture: only ONE option starts with "Yes" here (unlike
+  // sponsor_combobox's two above) -- a bare canary "Yes" is never ambiguous by COUNT against
+  // this list, which is exactly the gap a canary-tier value must refuse on its own wording.
+  window.__citizenSelect = makeSimpleSelect('citizen_input', 'citizen_toggle', 'citizen_menu', 'citizen_value',
+    ['Yes, I am a U.S. citizen or permanent resident', 'No, I will require sponsorship']);
+</script>
+</body></html>
+"""
+
+# A fixture for reviewer round 5, blocker A ("didn't stick" false negatives). Every field here
+# fills SUCCESSFULLY on the FIRST pass (no ambiguity, no second-chance /resolve — that machinery
+# is SPONSOR_RESOLVE_PAGE_BYTES's job above) — this page is purely about whether content.js's
+# POST-fill verify sweep (~500ms later) reports that success honestly:
+#   - gender_va_select: a plain <select> whose OPTION VALUE attribute ("1"/"2"/"3") reads nothing
+#     like its visible text ("Male"/"Female"/"Decline to Answer") — the reviewer's own repro
+#     verbatim (a <option value="1">Male</option> given "Male").
+#   - decline_combobox: a react-select whose real option text ("I don't wish to answer") is
+#     worded completely differently from the profile's own decline phrasing ("Decline to
+#     self-identify") — resolved via the SAME decline answer-family matchAnswerFamily already
+#     uses elsewhere, never a canary/second-resolve concern.
+#   - revert_select: the NEGATIVE control. Its own <script> genuinely wipes the committed
+#     selection back to the placeholder ~200ms after a real `change` event — well inside
+#     content.js's 500ms VERIFY_SETTLE_MS window — so this must STILL be reported "didn't stick"
+#     after this fix, proving the fix compares against what's ACTUALLY on the page a moment
+#     later, not just blindly trusting entry._committedText forever.
+BLOCKER_A_VERIFY_PAGE_BYTES = b"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Blocker A verify-sweep fixture</title></head>
+<body>
+<h1>Blocker A verify-sweep fixture</h1>
+<form id="blocker-a-form">
+  <label for="gender_va_select">Gender</label>
+  <select id="gender_va_select" name="gender_va_select">
+    <option value="">Select one</option>
+    <option value="1">Male</option>
+    <option value="2">Female</option>
+    <option value="3">Decline to Answer</option>
+  </select>
+
+  <div class="select" id="decline_field">
+    <label id="decline_label">Race/Ethnicity self-identification</label>
+    <div class="select-shell">
+      <div class="select__control">
+        <div class="select__value-container" id="decline_value">
+          <input type="text" role="combobox" id="decline_input" class="select__input" name="decline_combobox"
+                 aria-labelledby="decline_label" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        </div>
+        <div class="select__indicators">
+          <button type="button" aria-label="Toggle flyout" id="decline_toggle">&#9662;</button>
+        </div>
+      </div>
+      <div class="select__menu" id="decline_menu" style="display:none;"></div>
+    </div>
+  </div>
+
+  <label for="revert_select">Department (reverts after commit - negative control)</label>
+  <select id="revert_select" name="revert_select">
+    <option value="">-- Select --</option>
+    <option value="eng">Engineering</option>
+    <option value="sales">Sales</option>
+  </select>
+</form>
+<script>
+  window.__FORM_SUBMITTED__ = false;
+  document.getElementById('blocker-a-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.__FORM_SUBMITTED__ = true;
+  });
+
+  // Same makeSimpleSelect() react-select mock as sponsor-resolve-page.html above -- duplicated
+  // rather than shared (this repo's test fixtures have no module system; every fixture page is
+  // its own fully independent, inlined <script>, the same convention each one already uses).
+  function makeSimpleSelect(inputId, toggleId, menuId, valueId, options) {
+    var input = document.getElementById(inputId);
+    var toggle = document.getElementById(toggleId);
+    var menu = document.getElementById(menuId);
+    var valueContainer = document.getElementById(valueId);
+    var committed = null;
+    var mousedownArmed = null;
+
+    function renderValue() {
+      Array.prototype.slice.call(valueContainer.querySelectorAll('.select__single-value')).forEach(function (n) { n.remove(); });
+      if (!committed) return;
+      var sv = document.createElement('div');
+      sv.className = 'select__single-value';
+      sv.textContent = committed;
+      valueContainer.insertBefore(sv, input);
+    }
+    function openMenu() { menu.style.display = 'block'; input.setAttribute('aria-expanded', 'true'); }
+    function closeMenu() { menu.style.display = 'none'; input.setAttribute('aria-expanded', 'false'); }
+    function renderOptions() {
+      menu.innerHTML = '';
+      options.forEach(function (text) {
+        var opt = document.createElement('div');
+        opt.className = 'select__option';
+        opt.setAttribute('role', 'option');
+        opt.textContent = text;
+        opt.addEventListener('mousedown', function (e) { e.preventDefault(); mousedownArmed = text; });
+        opt.addEventListener('click', function () {
+          if (mousedownArmed !== text) return;
+          mousedownArmed = null;
+          committed = text;
+          renderValue();
+          input.value = '';
+          closeMenu();
+        });
+        menu.appendChild(opt);
+      });
+    }
+    menu.style.display = 'none';
+    toggle.addEventListener('mouseup', function () {
+      if (menu.style.display === 'block') { closeMenu(); return; }
+      renderOptions();
+      openMenu();
+    });
+    toggle.addEventListener('click', function (e) { e.preventDefault(); });
+    input.addEventListener('keyup', function (e) {
+      if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(); openMenu(); }
+    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    input.addEventListener('input', function () {
+      renderOptions();
+      openMenu();
+    });
+    input.addEventListener('blur', function () {
+      setTimeout(function () { input.value = ''; closeMenu(); }, 0);
+    });
+    return { committedValue: function () { return committed; } };
+  }
+  window.__declineSelect = makeSimpleSelect('decline_input', 'decline_toggle', 'decline_menu', 'decline_value',
+    ["I don't wish to answer", 'Hispanic or Latino', 'Not Hispanic or Latino']);
+
+  // Negative control: simulates a controlled-component re-render wiping the operator's
+  // selection shortly after it commits, well inside content.js's own 500ms VERIFY_SETTLE_MS
+  // window, so the post-fill verify sweep's re-read must still catch it.
+  document.getElementById('revert_select').addEventListener('change', function () {
+    var self = this;
+    if (self.selectedIndex === 0) return; // the revert's OWN change event -- never loop
+    setTimeout(function () {
+      self.selectedIndex = 0;
+      self.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 200);
+  });
 </script>
 </body></html>
 """
@@ -753,6 +919,13 @@ class StubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/blocker-a-verify-page.html"):
+            body = BLOCKER_A_VERIFY_PAGE_BYTES
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path.startswith("/kept-values-page.html"):
             body = KEPT_VALUES_PAGE_BYTES
             self.send_response(200)
@@ -811,7 +984,7 @@ class StubHandler(BaseHTTPRequestHandler):
                 # filled in — recognized here by `f["options"]` no longer being empty.
                 for f in fields:
                     name = f.get("name") or ""
-                    if name not in ("sponsor_combobox", "sponsor_combobox_silent"):
+                    if name not in ("sponsor_combobox", "sponsor_combobox_silent", "citizen_combobox"):
                         continue
                     # Replace whatever build_fills()'s generic default already produced for this
                     # field (a plain "Test Value fN", since it has no options at scan time) with
@@ -838,9 +1011,43 @@ class StubHandler(BaseHTTPRequestHandler):
                             "reason": "canary match (sponsorship) — names your H-1B specifically",
                             "profile_key": "canary:sponsorship", "source": "canary", "draft": False,
                         })
-                    # else (sponsor_combobox_silent, options non-empty): deliberately answer
-                    # NOTHING for it — neither a fill NOR a skip — the negative control for "the
-                    # second resolve returns nothing" (item 4's own control case).
+                    # else (sponsor_combobox_silent OR citizen_combobox, options non-empty):
+                    # deliberately answer NOTHING for it — neither a fill NOR a skip. For
+                    # sponsor_combobox_silent this is the negative control for "the second
+                    # resolve returns nothing" (item 4's own control case); for citizen_combobox
+                    # it also proves blocker B's fix end to end — since a bare canary "Yes" must
+                    # have been REFUSED on the first pass (never committing the citizenship claim
+                    # below), this is the only way the field can reach a second call at all.
+            if "blocker-a-verify-page" in url:
+                # Reviewer round 5, blocker A: three deliberate, always-succeeds-on-the-first-pass
+                # answers (see BLOCKER_A_VERIFY_PAGE_BYTES's own comment for what each proves).
+                for f in fields:
+                    name = f.get("name") or ""
+                    if name == "gender_va_select":
+                        fills = [x for x in fills if x["id"] != f["id"]]
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "Male",
+                            "reason": "test stub: profile says Male",
+                            "profile_key": "test.gender", "source": "profile", "draft": False,
+                        })
+                    elif name == "decline_combobox":
+                        # build_fills() always skips a "combobox"-widget field (real options are
+                        # unknown at scan time — see its own comment), so this must also clear it
+                        # out of `skipped`, not just `fills`, or it would be reported TWICE.
+                        fills = [x for x in fills if x["id"] != f["id"]]
+                        skipped = [x for x in skipped if x["id"] != f["id"]]
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "Decline to self-identify",
+                            "reason": "test stub: profile says decline",
+                            "profile_key": "test.race_decline", "source": "profile", "draft": False,
+                        })
+                    elif name == "revert_select":
+                        fills = [x for x in fills if x["id"] != f["id"]]
+                        fills.append({
+                            "id": f["id"], "auto_fill": True, "value": "Engineering",
+                            "reason": "test stub: profile says Engineering",
+                            "profile_key": "test.department", "source": "profile", "draft": False,
+                        })
             if "kept-values-page" in url:
                 # Reviewer round 4: build_fills() always leaves "combobox"-widget fields for the
                 # human (see its own comment — real options are unknown at scan time), which would
@@ -959,6 +1166,7 @@ PAGE_BASE = f"{SERVICE_URL}/test-page.html"
 WRAPPER_URL = f"{SERVICE_URL}/embed-wrapper.html"
 RESUME_TAILOR_URL = f"{SERVICE_URL}/resume-tailor-page.html"
 SPONSOR_RESOLVE_URL = f"{SERVICE_URL}/sponsor-resolve-page.html"
+BLOCKER_A_VERIFY_URL = f"{SERVICE_URL}/blocker-a-verify-page.html"
 KEPT_VALUES_URL = f"{SERVICE_URL}/kept-values-page.html"
 
 
@@ -2498,9 +2706,15 @@ with sync_playwright() as p:
         #          content.js's resolveAmbiguousChoiceFields() gives the service exactly ONE more
         #          chance, with the real options filled in, before the verify sweep. The SAME
         #          page also carries the negative control (a second combobox the stub answers
-        #          NOTHING for on the second call) so one page proves "exactly two /resolve calls
-        #          total" while covering both outcomes — see SPONSOR_RESOLVE_PAGE_BYTES/
-        #          StubHandler.do_POST's "sponsor-resolve-page" branch above.
+        #          NOTHING for on the second call), PLUS (reviewer round 5, blocker B) a THIRD
+        #          combobox whose ambiguity is narrower still — only ONE option starts with "Yes"
+        #          ("Yes, I am a U.S. citizen or permanent resident"), so a bare canary "Yes" is
+        #          never ambiguous by COUNT and must instead be refused on its own wording (see
+        #          matchAnswerFamily's canaryStrict branch in scanner.js) — never auto-committing
+        #          a false citizenship claim for a visa holder. One page proves "exactly two
+        #          /resolve calls total" while covering all three outcomes — see
+        #          SPONSOR_RESOLVE_PAGE_BYTES/StubHandler.do_POST's "sponsor-resolve-page" branch
+        #          above.
         # =====================================================================
         tab23 = ctx.new_page()
         tab23.goto(SPONSOR_RESOLVE_URL + "#t=23")
@@ -2542,6 +2756,26 @@ with sync_playwright() as p:
         silent_needs_you23 = next((n for n in needs_you23 if n.get("label") == "Do you require sponsorship (silent-control combobox)?"), None)
         check("tab 23 CONTROL: that field is honestly reported 'left for you', never a silent drop and never a false 'Filled'",
               silent_needs_you23 is not None and silent_needs_you23.get("status") == "left_for_you", str(silent_needs_you23))
+
+        # Reviewer round 5, blocker B — false citizenship claim: citizen_combobox has only ONE
+        # option starting with "Yes" ("Yes, I am a U.S. citizen or permanent resident"), unlike
+        # sponsor_combobox's two above — never ambiguous by COUNT, which is exactly the shape
+        # that let a bare canary "Yes" slip through the old loose matcher and commit a false
+        # citizenship claim for a visa holder. It must be refused on the FIRST pass (same as the
+        # positive/negative controls above, sent to the second, options-aware /resolve call), and
+        # since the stub answers NOTHING for it on that second call (same shape as
+        # sponsor_combobox_silent), it must end up 'left for you' and completely empty — never
+        # the citizenship claim, on the first pass OR the second.
+        committed_citizen23 = tab23.eval_on_selector(
+            "#citizen_value", "el => { const n = el.querySelector('.select__single-value'); return n ? n.textContent : null; }")
+        check("tab 23 blocker B: a bare canary 'Yes' NEVER commits the bundled citizenship claim — the field stays completely empty",
+              committed_citizen23 is None, repr(committed_citizen23))
+        citizen_needs_you23 = next((n for n in needs_you23 if n.get("label") == "Are you a U.S. citizen or permanent resident?"), None)
+        check("tab 23 blocker B: the field is honestly reported 'left for you', never a silent drop and never a false 'Filled'",
+              citizen_needs_you23 is not None and citizen_needs_you23.get("status") == "left_for_you", str(citizen_needs_you23))
+        citizen_filled23 = next((f for f in filled23 if "citizen" in str(f.get("value") or "").lower()), None)
+        check("tab 23 blocker B: no filled/verified row anywhere claims citizenship or permanent residency",
+              citizen_filled23 is None, str(citizen_filled23))
 
         counters23 = submission_counters(tab23)
         check("tab 23: no native form submission at any point in the second-chance round trip",
@@ -2685,6 +2919,65 @@ with sync_playwright() as p:
         check("tab 24: no native form submission at any point", counters24["form"] is False, json.dumps(counters24))
 
         # =====================================================================
+        # TAB 25 — reviewer round 5, blocker A ("didn't stick" false negatives): content.js's
+        #          post-fill verify sweep now compares its later re-read against what scanner.js's
+        #          applyFill() actually committed (entry._committedText — the matched option's OWN
+        #          text/label), never against the service's own answer string. Three fields, three
+        #          outcomes — see BLOCKER_A_VERIFY_PAGE_BYTES's own comment for the full reasoning:
+        #            (a) gender_va_select — a value-attribute <select> given "Male" must end
+        #                VERIFIED (the reviewer's own repro, verbatim);
+        #            (b) decline_combobox — a decline-worded react-select whose page text reads
+        #                nothing like the profile's own decline phrasing must ALSO end VERIFIED;
+        #            (c) revert_select — the NEGATIVE control: a field that genuinely reverts
+        #                after commit (well inside the 500ms verify window) must STILL end
+        #                "didn't stick" — this fix must never become too lenient to catch a real
+        #                revert.
+        # =====================================================================
+        tab25 = ctx.new_page()
+        tab25.goto(BLOCKER_A_VERIFY_URL + "#t=25")
+        tab25_id = find_tab_id(helper, "#t=25")
+        check("found tab 25's chrome tab id", tab25_id is not None)
+
+        panel25 = ctx.new_page()
+        panel25.goto(f"{panel_url}?tabId={tab25_id}")
+        panel25.wait_for_function("() => window.__applyPilotPanelReady === true", timeout=5000)
+        panel25.click("#scanBtn")
+        state25 = wait_for_done(helper, tab25_id, timeout_s=60)
+        check("tab 25's fill reached a terminal status", state25 is not None and state25.get("status") == "done",
+              str(state25)[:200])
+
+        filled25 = (state25 or {}).get("filled") or []
+        failed25 = (state25 or {}).get("failed") or []
+
+        gender_row25 = next((f for f in filled25 if f.get("label") == "Gender"), None)
+        check('tab 25a: a value-attribute select (<option value="1">Male</option>) given "Male" ends VERIFIED, never "didn\'t stick"',
+              gender_row25 is not None and gender_row25.get("status") == "verified", str(gender_row25))
+
+        decline_row25 = next((f for f in filled25 if f.get("label") == "Race/Ethnicity self-identification"), None)
+        check("tab 25b: a decline-worded react-select (page text \"I don't wish to answer\" vs. the "
+              "profile's own \"Decline to self-identify\") ends VERIFIED",
+              decline_row25 is not None and decline_row25.get("status") == "verified", str(decline_row25))
+        committed_decline25 = tab25.eval_on_selector(
+            "#decline_value", "el => { const n = el.querySelector('.select__single-value'); return n ? n.textContent : null; }")
+        check("tab 25b: the page really did commit its OWN wording, not the service's",
+              committed_decline25 == "I don't wish to answer", repr(committed_decline25))
+
+        revert_label25 = "Department (reverts after commit - negative control)"
+        revert_failed25 = next((f for f in failed25 if f.get("label") == revert_label25), None)
+        check("tab 25c NEGATIVE CONTROL: a field that genuinely reverts after commit (inside the "
+              "verify-sweep window) still ends \"didn't stick\" — this fix is not too lenient",
+              revert_failed25 is not None and revert_failed25.get("status") == "didnt_stick", str(revert_failed25))
+        revert_in_filled25 = next((f for f in filled25 if f.get("label") == revert_label25), None)
+        check("tab 25c NEGATIVE CONTROL: that same field is never ALSO reported verified",
+              revert_in_filled25 is None, str(revert_in_filled25))
+        reverted_select25 = tab25.eval_on_selector("#revert_select", "el => el.value")
+        check("tab 25c: the real page confirms it actually IS back at the placeholder",
+              reverted_select25 == "", repr(reverted_select25))
+
+        counters25 = submission_counters(tab25)
+        check("tab 25: no native form submission at any point", counters25["form"] is False, json.dumps(counters25))
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
@@ -2695,7 +2988,7 @@ with sync_playwright() as p:
         # =====================================================================
         # the one rule that matters: NOTHING above ever submitted the mock form.
         # =====================================================================
-        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22), ("tab23", tab23), ("tab24", tab24)):
+        for name, pg in (("tab2", tab2), ("tab3", tab3), ("tab4", tab4), ("tab6", tab6), ("tab7", tab7), ("tab8", tab8), ("tab11", tab11), ("tab12", tab12), ("tab13", tab13), ("tab14", tab14), ("tab15", tab15), ("tab16", tab16), ("tab17", tab17), ("tab18", tab18), ("tab21", tab21), ("tab22", tab22), ("tab23", tab23), ("tab24", tab24), ("tab25", tab25)):
             counters = submission_counters(pg)
             check(f"{name}: no native form submission", counters["form"] is False, json.dumps(counters))
             check(f"{name}: no Workday submit click registered", counters["wd"] == 0, json.dumps(counters))

@@ -1451,6 +1451,29 @@
     return indices[0];
   }
 
+  /** True once `optionText`, with every character that isn't a plain a-z letter stripped out
+   * (punctuation AND whitespace alike), is EXACTLY `word` ("yes"/"no") — "Yes", "Yes.", "  YES  ",
+   * "No!" all count; "Yes, I am a U.S. citizen or permanent resident" does not (the extra letters
+   * survive the strip). Used only for a canary-tier Yes/No guess — see findUniqueBareYesNo. */
+  function isBareYesNoOption(optionText, word) {
+    return cleanText(optionText).toLowerCase().replace(/[^a-z]/g, '') === word;
+  }
+
+  /** Like findUniqueMatch, but for a canary-tier bare "yes"/"no" — returns the option's index
+   * only when EXACTLY ONE option is nothing but that single word once punctuation/whitespace is
+   * stripped (see isBareYesNoOption), -1 both when none qualify and when two or more do. */
+  function findUniqueBareYesNo(optionTexts, word) {
+    var idx = -1;
+    var count = 0;
+    for (var i = 0; i < optionTexts.length; i++) {
+      if (isBareYesNoOption(optionTexts[i], word)) {
+        count++;
+        if (count === 1) idx = i; else return -1;
+      }
+    }
+    return count === 1 ? idx : -1;
+  }
+
   var NEGATION_RE = /\bnot\b|n't/i;
 
   // Matches BOTH a decline-shaped VALUE ("Decline to self-identify") and a decline-shaped
@@ -1493,13 +1516,32 @@
    * ("recognised family, no fitting option -- stop here, never guess"), or null ("value doesn't
    * belong to any of these families -- the caller should keep looking", i.e. fall through to
    * generic word-boundary containment).
+   *
+   * `canaryStrict` (reviewer round 5, blocker B): true only when the value being matched is a
+   * plain "Yes"/"No" guessed BLIND by the service's canary tier for a widget whose real options
+   * are not known until content.js's FIRST /resolve call already went out (a combobox/Workday
+   * dropdown only renders its options once opened -- see resolveAmbiguousChoiceFields' header
+   * comment in content.js). A live repro (reviewer's final round) showed the ordinary loose
+   * "starts with Yes" rule below commit a visa holder to "Yes, I am a U.S. citizen or permanent
+   * resident" -- a false citizenship claim -- simply because it was the ONLY option starting
+   * with "Yes" (never ambiguous by COUNT, so findUniqueMatch's own "never the first of several"
+   * guard never fired). See findUniqueBareYesNo just above.
    */
-  function matchAnswerFamily(v, optionTexts) {
+  function matchAnswerFamily(v, optionTexts, canaryStrict) {
     // -- decline to answer -----------------------------------------------------------------
     if (DECLINE_RE.test(v)) return findDeclineMatch(optionTexts);
 
     // -- plain yes/no -----------------------------------------------------------------------
     if (v === 'yes' || v === 'no') {
+      if (canaryStrict) {
+        // A blind canary guess may only land on an option that is ITSELF nothing but the bare
+        // word (punctuation/whitespace aside) -- never one that bundles a further claim. Any
+        // other shape (including the "no literal Yes/No option at all" sentence-shaped case the
+        // non-canary fallback below handles) refuses here, which sends the field to content.js's
+        // option-aware second /resolve round trip instead, where canary.choose_option judges the
+        // actual claim against the whole profile rather than guessing blind.
+        return findUniqueBareYesNo(optionTexts, v);
+      }
       var plainIdx = findUniqueMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
       if (plainIdx !== -1 || v === 'yes') return plainIdx;
       // Ground truth (live probe, 2026-09-24, boards.greenhouse.io/robinhood): a "have you ever
@@ -1599,9 +1641,12 @@
    * matchWorkdayDropdownOption's degree-family and country-alias logic) as steps BEFORE calling
    * this -- those are untouched and still run first.
    *
+   * `canaryStrict` (reviewer round 5, blocker B) — see matchAnswerFamily's doc comment — is
+   * passed straight through to it; every other tier here is unaffected by it.
+   *
    * Returns an option index, or -1 when nothing matches confidently enough to fill blind.
    */
-  function matchChoiceOption(value, optionTexts) {
+  function matchChoiceOption(value, optionTexts, canaryStrict) {
     var norm = function (s) { return cleanText(s).toLowerCase(); };
     var v = norm(value);
     if (!v) return -1;
@@ -1655,7 +1700,7 @@
     //    fitting option (returns its index) or not (returns -1) -- see matchAnswerFamily.
     //    Family values can legitimately run long ("I am a veteran, but not a protected
     //    veteran" is 9 words), so this check happens BEFORE the prose guard below.
-    var familyResult = matchAnswerFamily(v, optionTexts);
+    var familyResult = matchAnswerFamily(v, optionTexts, canaryStrict);
     if (familyResult !== null) return familyResult;
 
     // A long, free-text/prose-shaped value (more than ~6 words -- an open-ended answer, not a
@@ -1704,7 +1749,7 @@
    * matchChoiceOption's answer families / word-boundary containment (see above -- this is the
    * ONE shared final tier, also used by findOptionMatch and setRadioValue).
    */
-  function matchWorkdayDropdownOption(target, optionTexts) {
+  function matchWorkdayDropdownOption(target, optionTexts, canaryStrict) {
     var norm = function (s) { return cleanText(s).toLowerCase(); };
     var t = norm(target);
     if (!t) return -1;
@@ -1724,7 +1769,7 @@
       }
     }
 
-    return matchChoiceOption(target, optionTexts);
+    return matchChoiceOption(target, optionTexts, canaryStrict);
   }
 
   /**
@@ -1744,7 +1789,7 @@
    * consecutive rounds that render no new option labels at all — a long/virtualized list
    * (Country, State, Source) that only renders a window of its options at a time.
    */
-  function fillWorkdayDropdown(entry, value) {
+  function fillWorkdayDropdown(entry, value, canaryStrict) {
     var button = entry.button;
     var doc = ownerDoc(button);
     if (!isWorkdayDropdownOpenerSafe(button)) {
@@ -1760,7 +1805,7 @@
 
       var optionEls = collectWorkdayListboxOptions(listbox);
       var texts = optionEls.map(optionAccessibleText);
-      var idx = matchWorkdayDropdownOption(target, texts);
+      var idx = matchWorkdayDropdownOption(target, texts, canaryStrict);
 
       // Compares the RENDERED LABELS, not just how many there are: a virtualized listbox can
       // keep showing the same COUNT of options on every round (a fixed-size sliding window)
@@ -1778,7 +1823,7 @@
         return wdSleep(150).then(function () {
           optionEls = collectWorkdayListboxOptions(listbox);
           texts = optionEls.map(optionAccessibleText);
-          idx = matchWorkdayDropdownOption(target, texts);
+          idx = matchWorkdayDropdownOption(target, texts, canaryStrict);
           var key = texts.join('␟');
           var grew = key !== lastKey;
           return scrollRound(roundsLeft - 1, grew ? 0 : staleRounds + 1, key);
@@ -2672,7 +2717,7 @@
   /** Fills ONE value into a combobox: open, match the rendered options, and if nothing
    * confident is there yet (an async/filtered catalog), type to filter and re-read once. Never
    * picks the first option, and never trusts typed-but-unselected text as a fill. */
-  function fillComboboxOne(entry, value, doc) {
+  function fillComboboxOne(entry, value, doc, canaryStrict) {
     if (!isComboboxInputSafe(entry.input)) {
       return Promise.resolve({ ok: false, reason: 'safety guard refused the combobox input' });
     }
@@ -2688,14 +2733,14 @@
     var phoneBtn = pairedPhoneCountryButton(entry.input);
     if (phoneBtn) {
       var alreadyCountry = phoneCountrySelectedName(phoneBtn);
-      if (alreadyCountry && matchChoiceOption(target, [alreadyCountry]) === 0) {
+      if (alreadyCountry && matchChoiceOption(target, [alreadyCountry], canaryStrict) === 0) {
         return Promise.resolve({ ok: true, matchedText: alreadyCountry });
       }
     }
 
     var already = getComboboxChipTexts(entry);
     for (var ai = 0; ai < already.length; ai++) {
-      if (matchChoiceOption(target, [already[ai]]) === 0 || matchCityStateOption(target, [already[ai]]) === 0) {
+      if (matchChoiceOption(target, [already[ai]], canaryStrict) === 0 || matchCityStateOption(target, [already[ai]]) === 0) {
         return Promise.resolve({ ok: true, matchedText: already[ai] });
       }
     }
@@ -2719,7 +2764,7 @@
 
       function matchAndCommitOrFilter(els) {
         var texts = els.map(optionAccessibleText);
-        var idx = matchChoiceOption(target, texts);
+        var idx = matchChoiceOption(target, texts, canaryStrict);
         if (idx === -1) idx = matchCityStateOption(target, texts);
         if (idx !== -1) return commitComboboxOption(entry, menu, els, idx, doc);
 
@@ -2758,7 +2803,7 @@
               var elsBack = comboboxOptionEls(reopened);
               function tryMatch(elsBack) {
                 var textsBack = elsBack.map(optionAccessibleText);
-                var idxBack = matchChoiceOption(target, textsBack);
+                var idxBack = matchChoiceOption(target, textsBack, canaryStrict);
                 if (idxBack === -1) idxBack = matchCityStateOption(target, textsBack);
                 if (idxBack !== -1) return commitComboboxOption(entry, reopened, elsBack, idxBack, doc);
                 dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape', 27);
@@ -2781,7 +2826,7 @@
             });
           }
           var texts2 = found.els.map(optionAccessibleText);
-          var idx2 = matchChoiceOption(target, texts2);
+          var idx2 = matchChoiceOption(target, texts2, canaryStrict);
           if (idx2 === -1) idx2 = matchCityStateOption(target, texts2);
           if (idx2 === -1) {
             dispatchKeyboardEvent(entry.input, 'keydown', 'Escape', 'Escape', 27);
@@ -2800,12 +2845,12 @@
 
   /** `value` may be a single term or an array (a multi-select combobox) — added one at a time,
    * same discipline as fillWorkdayPromptValue: one failed/unmatched term never blocks the rest. */
-  function fillComboboxValue(entry, value, doc) {
+  function fillComboboxValue(entry, value, doc, canaryStrict) {
     if (Array.isArray(value)) {
       var results = [];
       function next(i) {
         if (i >= value.length) return Promise.resolve(results);
-        return fillComboboxOne(entry, value[i], doc).then(function (r) {
+        return fillComboboxOne(entry, value[i], doc, canaryStrict).then(function (r) {
           results.push({ term: value[i], result: r });
           return next(i + 1);
         });
@@ -2816,7 +2861,7 @@
         return { ok: anyOk, failedTerms: failedTerms };
       });
     }
-    return fillComboboxOne(entry, value, doc);
+    return fillComboboxOne(entry, value, doc, canaryStrict);
   }
 
   // ---- Ashby-style Yes/No (and other short) button groups ----------------------------------
@@ -2962,11 +3007,11 @@
    * pre-click state -- a mirror that was already checked before we ever touched the page (e.g.
    * still reflecting a DIFFERENT button's earlier selection) proves nothing about whether
    * clicking THIS button did anything. */
-  function fillButtonGroup(entry, value, doc) {
+  function fillButtonGroup(entry, value, doc, canaryStrict) {
     var target = String(value == null ? '' : value).trim();
     if (!target) return Promise.resolve({ ok: false, reason: 'empty value' });
     var texts = entry.buttons.map(accessibleControlText);
-    var idx = matchChoiceOption(target, texts);
+    var idx = matchChoiceOption(target, texts, canaryStrict);
     if (idx === -1) {
       // Never quote `target` (the value being filled in) -- an EEO/disability answer or other
       // applicant-provided value must never land in an exported report; the button group's
@@ -3995,7 +4040,7 @@
    * that function's doc comment). Returns -1 when nothing matches. Shared by setSelectValue()
    * and the read-back check inside it.
    */
-  function findOptionMatch(el, text) {
+  function findOptionMatch(el, text, canaryStrict) {
     var target = String(text == null ? '' : text).trim().toLowerCase();
     var i;
 
@@ -4025,11 +4070,11 @@
     // 3. shared matcher: answer families, then word-boundary containment (never raw substring).
     var optionTexts = [];
     for (i = 0; i < el.options.length; i++) optionTexts.push(el.options[i].textContent);
-    return matchChoiceOption(text, optionTexts);
+    return matchChoiceOption(text, optionTexts, canaryStrict);
   }
 
-  function setSelectValue(el, text) {
-    var matchIndex = findOptionMatch(el, text);
+  function setSelectValue(el, text, canaryStrict) {
+    var matchIndex = findOptionMatch(el, text, canaryStrict);
     if (matchIndex === -1) return false;
     var setter = nativeSetterFor(el, 'selectedIndex');
     if (setter) setter.call(el, matchIndex);
@@ -4294,7 +4339,7 @@
     return null;
   }
 
-  function setRadioValue(elements, text) {
+  function setRadioValue(elements, text, canaryStrict) {
     var target = String(text == null ? '' : text).trim().toLowerCase();
     if (!target) { clearRadioGroup(elements); return true; }
     var match = elements.filter(function (r) { return cleanText(getLabel(r)).toLowerCase() === target; })[0];
@@ -4303,7 +4348,7 @@
       // Shared matcher: answer families, then word-boundary containment (never raw substring) --
       // see matchChoiceOption's doc comment. Radio labels are the "option texts" here.
       var labels = elements.map(function (r) { return getLabel(r); });
-      var idx = matchChoiceOption(text, labels);
+      var idx = matchChoiceOption(text, labels, canaryStrict);
       if (idx !== -1) match = elements[idx];
     }
     if (!match) return false;
@@ -4328,7 +4373,14 @@
   function getCurrentValue(entry) {
     if (entry.kind === 'radio-group') {
       var checked = entry.elements.filter(function (r) { return r.checked; })[0];
-      return checked ? checked.value : '';
+      // Reviewer round 5, blocker A ("didn't stick" false negatives): the checked radio's own
+      // visible LABEL, never its raw HTML value attribute -- <input value="1"> labelled "Male"
+      // must read back "Male" (what a /resolve answer and a human both call it), not the opaque
+      // "1" a page author happened to pick. applyFill()'s radio-group branch stashes this exact
+      // same label on entry._committedText at the moment of a successful commit; content.js's
+      // verify sweep re-reads THIS function later and compares it against that stash, so the two
+      // must always agree.
+      return checked ? cleanText(getLabel(checked)) : '';
     }
     if (entry.kind === 'date-parts') return getDatePartsValue(entry);
     if (entry.kind === 'wd-date-my' || entry.kind === 'wd-date-y' || entry.kind === 'wd-date-mdy') return getWorkdayDateValue(entry);
@@ -4349,6 +4401,27 @@
     }
     var el = entry.el;
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') return el.checked;
+    // Reviewer round 5, blocker A: a native <select>'s own selected OPTION TEXT, never the raw
+    // value attribute -- same reasoning as radio-group above (<option value="1">Male</option>
+    // must read back "Male"). Only reached for a plain <select> (every other widget kind already
+    // returned above); a plain text/textarea input falls through unchanged to `el.value` below.
+    //
+    // A selected option whose OWN value attribute is '' is the conventional "no real selection"
+    // placeholder shape every fixture/live ATS in this project uses (<option value="">Select
+    // one</option>, "-- Select --", "Select a state", ...) -- this MUST keep reading back as ''
+    // (never that placeholder's own display text), exactly like the pre-fix `el.value` did,
+    // because isMeaningfulExistingValue()/the "never overwrite the user" check in content.js
+    // treats any non-empty getCurrentValue() as a real, protect-worthy prior answer. A live
+    // regression caught by this build's OWN new panel-test tab (25): reading the placeholder's
+    // TEXT here made content.js think a freshly-scanned, never-touched <select> already held a
+    // meaningful value, and refused to fill it at all -- silently turning "Filled" into
+    // "kept your value" for every plain select starting on its default option. Only a genuinely
+    // SELECTED (non-placeholder) option's text is ever returned instead of ''.
+    if (el.tagName === 'SELECT') {
+      var selOpt = el.options[el.selectedIndex];
+      if (!selOpt || selOpt.value === '') return '';
+      return cleanText(selOpt.text);
+    }
     return el.value;
   }
 
@@ -4360,16 +4433,46 @@
    * — callers must `Promise.resolve()` the result rather than assume it is always synchronous.
    * A human-readable reason for a `false`/failed result is stashed on `entry._lastReason` for
    * these two kinds (see content.js), since a bare boolean can't carry "no confident match".
+   *
+   * `fillOptions.canary` (reviewer round 5, blocker B — false citizenship claim) is true only
+   * when this fill's value came from the service's canary tier (content.js's applyFills() is the
+   * one place that knows a FillResult's own `source`, and threads it through here). It tightens
+   * a Yes/No family match (matchAnswerFamily) down to an option that is ITSELF nothing but the
+   * bare word "Yes"/"No" -- never one that bundles a further claim ("Yes, I am a U.S. citizen or
+   * permanent resident" is a materially different, possibly FALSE, statement for a visa holder
+   * than a plain "Yes"). A canary answer is a blind guess for exactly the widget kinds whose real
+   * options are unknown until opened (combobox, Workday dropdown -- see
+   * content.js's resolveAmbiguousChoiceFields() header comment); threaded into radio-group/
+   * select/button-group too, since they share the very same matcher. Ignored by every other
+   * kind, and a non-canary value keeps today's looser behaviour everywhere.
+   *
+   * Reviewer round 5, blocker A ("didn't stick" false negatives): on a successful commit to any
+   * widget kind that picks ONE of several rendered options (radio-group, select, combobox,
+   * button-group, wd-dropdown, checkbox-group, wd-checkbox-group, lever-location), this also
+   * stashes the option's own text/label onto entry._committedText. content.js's post-fill verify
+   * sweep (~500ms later) compares a fresh getCurrentValue() read against THAT, never against the
+   * service's own answer string -- a value the service phrased differently from what the page
+   * actually renders (a <select> option's VALUE attribute, "USA" vs "United States of America",
+   * a decline whose page wording shares no tokens with the profile's own decline phrasing, a
+   * phone-country combobox whose committed CHIP shows only the dial code "+1" while the widget's
+   * own fill function's `matchedText` carries the full option text, ...) is judged against what
+   * actually landed on the page, never against the service's own guess at what the page would
+   * say. Left unset for every other kind (plain text/number/tel/email inputs, dates, wd-prompt's
+   * additive pills) -- content.js falls back to the service's original value for those, exactly
+   * as before.
    */
-  function applyFill(entry, value) {
+  function applyFill(entry, value, fillOptions) {
+    var canaryStrict = !!(fillOptions && fillOptions.canary);
     if (entry.kind === 'radio-group') {
-      var rgOk = setRadioValue(entry.elements, value);
+      var rgOk = setRadioValue(entry.elements, value, canaryStrict);
       // Never quote `value` (the answer being filled in -- an EEO/disability answer or other
       // applicant-provided value must never land in an exported report); the radio group's
       // OWN option labels are page furniture and safe to list.
       if (!rgOk) {
         var radioLabels = entry.elements.map(function (r) { return getLabel(r); });
         entry._lastReason = reasonWithOptions('no confident match among the radio options, or the selection did not stick', radioLabels);
+      } else {
+        entry._committedText = getCurrentValue(entry);
       }
       return rgOk;
     }
@@ -4378,7 +4481,7 @@
       return setWorkdayDateValue(entry, value);
     }
     if (entry.kind === 'wd-dropdown') {
-      return fillWorkdayDropdown(entry, value).then(function (r) {
+      return fillWorkdayDropdown(entry, value, canaryStrict).then(function (r) {
         entry._lastReason = r.reason || '';
         // The option texts this popup actually rendered when the match failed (see
         // fillWorkdayDropdown's reasonWithOptions()/optionsSeen) -- absent (null) on success, so
@@ -4387,6 +4490,7 @@
         // verify sweep) reads this to give the service the real options it never saw the first
         // time. Never anything the applicant typed -- only this widget's own page furniture.
         entry._lastOptions = r.optionsSeen || null;
+        if (r.ok) entry._committedText = (r.matchedText != null) ? r.matchedText : getCurrentValue(entry);
         return !!r.ok;
       });
     }
@@ -4399,9 +4503,13 @@
         return !!r.ok;
       });
     }
-    if (entry.kind === 'checkbox-group') return applyCheckboxGroupValue(entry, value);
+    if (entry.kind === 'checkbox-group') {
+      var cgOk = applyCheckboxGroupValue(entry, value);
+      if (cgOk) entry._committedText = getCurrentValue(entry);
+      return cgOk;
+    }
     if (entry.kind === 'combobox') {
-      return fillComboboxValue(entry, value, ownerDoc(entry.input)).then(function (r) {
+      return fillComboboxValue(entry, value, ownerDoc(entry.input), canaryStrict).then(function (r) {
         entry._lastReason = r.reason ||
           (r.failedTerms && r.failedTerms.length ? ('no confident match for ' + r.failedTerms.length + ' of ' + value.length + ' requested terms') : '');
         // See the wd-dropdown branch above -- same optionsSeen/entry._lastOptions contract. Only
@@ -4409,19 +4517,22 @@
         // path's aggregate {ok, failedTerms} result has no single option list to offer, so this
         // is simply cleared (null) for it, same as on any success.
         entry._lastOptions = r.optionsSeen || null;
+        if (r.ok) entry._committedText = (r.matchedText != null) ? r.matchedText : getCurrentValue(entry);
         return !!r.ok;
       });
     }
     if (entry.kind === 'button-group') {
-      return fillButtonGroup(entry, value, ownerDoc(entry.buttons[0])).then(function (r) {
+      return fillButtonGroup(entry, value, ownerDoc(entry.buttons[0]), canaryStrict).then(function (r) {
         entry._lastReason = r.reason || '';
         entry._lastOptions = r.optionsSeen || null;
+        if (r.ok) entry._committedText = (r.matchedText != null) ? r.matchedText : getCurrentValue(entry);
         return !!r.ok;
       });
     }
     if (entry.kind === 'lever-location') {
       return fillLeverLocation(entry, value, ownerDoc(entry.input)).then(function (r) {
         entry._lastReason = r.reason || '';
+        if (r.ok) entry._committedText = (r.matchedText != null) ? r.matchedText : getCurrentValue(entry);
         return !!r.ok;
       });
     }
@@ -4433,10 +4544,15 @@
       entry._lastReason = cgResult ? '' : reasonWithOptions(
         'no confident match among "' + entry.label + '"',
         entry.boxes.map(getWorkdayCheckboxGroupOptionLabel));
+      if (cgResult) entry._committedText = getCurrentValue(entry);
       return cgResult;
     }
     var el = entry.el;
-    if (el.tagName === 'SELECT') return setSelectValue(el, value);
+    if (el.tagName === 'SELECT') {
+      var selOk = setSelectValue(el, value, canaryStrict);
+      if (selOk) entry._committedText = getCurrentValue(entry);
+      return selOk;
+    }
     if (el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox') {
       var cbOk = setCheckboxValue(el, value);
       if (!cbOk) entry._lastReason = 'checkbox did not reach the intended checked state';
