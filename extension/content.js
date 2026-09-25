@@ -469,19 +469,23 @@
       var f = fieldsById[idish.id];
       return (f && f.widget) || '';
     }
+    function tagFor(idish) {
+      var f = fieldsById[idish.id];
+      return (f && f.tag) || '';
+    }
 
     function step(i) {
       if (i >= fills.length) return Promise.resolve();
 
       if (ctx.isCancelled()) {
         for (var c = i; c < fills.length; c++) {
-          failed.push({ id: fills[c].id, reason: 'Not attempted — cancelled', status: 'failed', required: requiredFor(fills[c]), widget: widgetFor(fills[c]) });
+          failed.push({ id: fills[c].id, reason: 'Not attempted — cancelled', status: 'failed', required: requiredFor(fills[c]), tag: tagFor(fills[c]), widget: widgetFor(fills[c]) });
         }
         return Promise.resolve();
       }
       if (ctx.overBudget()) {
         for (var b = i; b < fills.length; b++) {
-          failed.push({ id: fills[b].id, reason: 'Not attempted — time budget exceeded', status: 'failed', required: requiredFor(fills[b]), widget: widgetFor(fills[b]) });
+          failed.push({ id: fills[b].id, reason: 'Not attempted — time budget exceeded', status: 'failed', required: requiredFor(fills[b]), tag: tagFor(fills[b]), widget: widgetFor(fills[b]) });
         }
         return Promise.resolve();
       }
@@ -492,7 +496,7 @@
       ctx.onProgress({ current: i + 1, total: total, label: label });
 
       if (!entry) {
-        failed.push({ id: fill.id, reason: 'Field no longer found on the page (did the page change after scanning?)', status: 'failed', required: requiredFor(fill), widget: widgetFor(fill) });
+        failed.push({ id: fill.id, reason: 'Field no longer found on the page (did the page change after scanning?)', status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill) });
         return step(i + 1);
       }
       if (!fill.auto_fill) {
@@ -502,7 +506,7 @@
         for (var t = 0; t < targets.length; t++) highlight(targets[t], 'skipped', fill.reason || 'Not confident enough to auto-fill');
         needsYou.push({
           id: fill.id, label: label, reason: fill.reason || 'Not confident enough to auto-fill',
-          tag: (fieldsById[fill.id] || {}).tag, status: 'left_for_you', required: requiredFor(fill), widget: widgetFor(fill)
+          status: 'left_for_you', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
         });
         return step(i + 1);
       }
@@ -533,8 +537,8 @@
         var keepTargets = ApplyPilotScanner.getHighlightTargets(entry);
         for (var kt = 0; kt < keepTargets.length; kt++) highlight(keepTargets[kt], 'skipped', 'kept your value');
         needsYou.push({
-          id: fill.id, label: label, reason: 'kept your value', tag: (fieldsById[fill.id] || {}).tag,
-          status: 'kept_value', required: requiredFor(fill), widget: widgetFor(fill)
+          id: fill.id, label: label, reason: 'kept your value',
+          status: 'kept_value', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
         });
         return step(i + 1);
       }
@@ -558,13 +562,13 @@
             id: fill.id, label: label, value: fill.value,
             values: (Array.isArray(fill.values) && fill.values.length) ? fill.values : null,
             reason: fill.reason, profile_key: fill.profile_key, source: fill.source, draft: isDraft,
-            status: isDraft ? 'draft' : 'verified', required: requiredFor(fill), widget: widgetFor(fill)
+            status: isDraft ? 'draft' : 'verified', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
           });
         } else if (outcome.timedOut) {
           for (var h2 = 0; h2 < hlTargets.length; h2++) highlight(hlTargets[h2], 'skipped', 'Timed out waiting for this field to respond');
           failed.push({
             id: fill.id, label: label, reason: 'Timed out after ' + Math.round(ctx.fieldTimeoutMs / 1000) + 's — the page did not respond in time',
-            status: 'failed', required: requiredFor(fill), widget: widgetFor(fill)
+            status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
           });
         } else {
           // entry._lastReason is set by scanner.js's applyFill() for the Workday popup
@@ -574,7 +578,7 @@
           for (var h3 = 0; h3 < hlTargets.length; h3++) highlight(hlTargets[h3], 'skipped', 'Could not match "' + fill.value + '" to an option' + extra);
           failed.push({
             id: fill.id, label: label, reason: 'Could not match value "' + fill.value + '" to an option on the page' + extra,
-            status: 'failed', required: requiredFor(fill), widget: widgetFor(fill)
+            status: 'failed', required: requiredFor(fill), tag: tagFor(fill), widget: widgetFor(fill)
           });
         }
       }).then(function () { return step(i + 1); });
@@ -586,8 +590,8 @@
         var sEntry = registry[skip.id];
         needsYou.push({
           id: skip.id, label: (fieldsById[skip.id] || {}).label || (fieldsById[skip.id] || {}).name,
-          reason: skip.reason || 'Skipped — please answer this yourself', tag: (fieldsById[skip.id] || {}).tag,
-          status: 'left_for_you', required: requiredFor(skip), widget: widgetFor(skip)
+          reason: skip.reason || 'Skipped — please answer this yourself',
+          status: 'left_for_you', required: requiredFor(skip), tag: tagFor(skip), widget: widgetFor(skip)
         });
         if (!sEntry) continue;
         var sTargets = ApplyPilotScanner.getHighlightTargets(sEntry);
@@ -626,7 +630,7 @@
             highlight(hlTargets[h], 'skipped', "Didn't stick — the page reverted this field after it was filled");
           }
           reverted.push({
-            id: a.id, label: a.label, source: a.source, required: a.required, widget: a.widget,
+            id: a.id, label: a.label, source: a.source, required: a.required, tag: a.tag, widget: a.widget,
             status: 'didnt_stick',
             reason: "Didn't stick — the page reverted this field after it was filled (re-render, or the widget cleared itself)"
           });
@@ -1106,7 +1110,7 @@
       if (!already) {
         var drafts = (state && state.drafts || []).concat([{
           id: fieldId, label: label, value: text, reason: 'Cover letter draft inserted', profile_key: null,
-          source: 'cover-letter', draft: true, status: 'draft', required: false, widget: 'textarea'
+          source: 'cover-letter', draft: true, status: 'draft', required: false, tag: 'textarea', widget: ''
         }]);
         var counts = (state && state.counts) || emptyCounts();
         patchReportedState({

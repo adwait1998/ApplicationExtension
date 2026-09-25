@@ -36,6 +36,7 @@
   var cancelBtn = document.getElementById('cancelBtn');
   var undoBtn = document.getElementById('undoBtn');
   var reportBtn = document.getElementById('reportBtn');
+  var exportReportBtn = document.getElementById('exportReportBtn');
   var statusBox = document.getElementById('statusBox');
   var staleBanner = document.getElementById('staleBanner');
   var progressBox = document.getElementById('progressBox');
@@ -410,6 +411,7 @@
       cancelBtn.hidden = true;
       undoBtn.disabled = true;
       reportBtn.disabled = true;
+      exportReportBtn.disabled = true;
       progressBox.hidden = true;
       fillSummaryEl.hidden = true;
       resumeLineEl.hidden = true;
@@ -447,6 +449,11 @@
     scanBtn.disabled = !scriptable || isRunning;
     cancelBtn.hidden = !isRunning;
     undoBtn.disabled = isRunning || stale || !state || !state.undoAvailable;
+    // Item 6 (Export fill report): anything worth reporting on — enabled once there's at least
+    // one row in any of the four lists, on a result that's current for this page.
+    var hasRows = !!(state && (((state.filled || []).length) + ((state.drafts || []).length) +
+      ((state.needsYou || []).length) + ((state.failed || []).length)) > 0);
+    exportReportBtn.disabled = isRunning || stale || !hasRows;
 
     renderProgress(isRunning ? state.progress : null);
 
@@ -681,6 +688,76 @@
         reportBtn.disabled = false;
       }
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // EXPORT FILL REPORT (item 6). Purely a transform of state already sitting in
+  // chrome.storage.session — no page access, no permission gate, nothing injected. Per field:
+  // frame, label, tag/widget, status, source and reason — NEVER a value, on purpose, since this
+  // is meant to be sent to someone else to diagnose a bad fill.
+  // ---------------------------------------------------------------------
+  // A handful of reason strings quote the actual attempted value for the operator's OWN benefit
+  // on screen (e.g. `Could not match "Senior Engineer" to an option`) — genuinely useful there,
+  // but exactly what this export must never carry off the machine. Rather than trust every
+  // reason-generating call site (present and future, including the service's own `fill.reason`
+  // text) to never do this, every quoted substring is redacted here, at the one place this
+  // export is actually built.
+  function redactQuoted(text) {
+    return String(text || '').replace(/"[^"]*"/g, '"[redacted]"');
+  }
+
+  function reportRow(entry) {
+    return {
+      frame: entry.frame || null,
+      label: entry.label || '',
+      tag: entry.tag || '',
+      widget: entry.widget || '',
+      status: entry.status || '',
+      source: entry.source || '',
+      reason: redactQuoted(entry.reason || '')
+    };
+  }
+
+  function buildFillReport(state) {
+    var host = '', path = '';
+    try {
+      var u = new URL(state.url || '');
+      host = u.host;
+      path = u.pathname;
+    } catch (e) {
+      // a state with no valid url at all — page/host stay empty rather than throwing
+    }
+    return {
+      page: { host: host, path: path },
+      counts: state.counts || {},
+      couldNotRead: state.couldNotRead || 0,
+      skippedFrames: state.skippedFrames || 0,
+      fields: []
+        .concat((state.filled || []).map(reportRow))
+        .concat((state.drafts || []).map(reportRow))
+        .concat((state.needsYou || []).map(reportRow))
+        .concat((state.failed || []).map(reportRow))
+    };
+  }
+
+  exportReportBtn.addEventListener('click', async function () {
+    if (activeTabId == null) return;
+    try {
+      var stored = await chrome.storage.session.get(stateKey(activeTabId));
+      var state = stored[stateKey(activeTabId)];
+      if (!state) { setStatus('Nothing to export yet — fill this page first.', true); return; }
+      var report = buildFillReport(state);
+      var blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      var hostPart = (report.page.host || 'page').replace(/[^a-z0-9.-]/gi, '_');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'applypilot-fill-report-' + hostPart + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      setStatus('Saved the fill report (labels/status/source only — never values). Send it when a form fills badly.');
+    } catch (e) {
+      setStatus('Could not export the fill report: ' + (e && e.message ? e.message : e), true);
+    }
   });
 
   // ---------------------------------------------------------------------

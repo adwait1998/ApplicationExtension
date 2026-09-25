@@ -236,6 +236,16 @@ field that's still unfilled sorts to the top of its section, so the field most l
 your application is never buried below a dozen optional ones. The summary line's "N couldn't
 read" count (see "Report honestly" below) is unchanged by any of this.
 
+## Export fill report
+
+**Export fill report** downloads a JSON file built entirely from what's already in
+`chrome.storage.session` — no page access, no permission prompt. Per field: which frame it's in
+(id and URL), its label, its tag/widget, its status, its source, and its reason — plus the page's
+host/path and the fill's counts. **Never a value, anywhere in the file** — even a reason string
+that quotes the attempted value for your own benefit on screen (e.g. `Could not match "Senior
+Engineer" to an option`) has that quoted text redacted before it's written out, since this file is
+meant to be sent to someone else to diagnose a bad fill.
+
 ## Fill every frame
 
 About a quarter of real job postings are a company's own careers page embedding the actual

@@ -1275,6 +1275,46 @@ with sync_playwright() as p:
               panel12.eval_on_selector("#markAppliedBtn", "el => el.hidden") is True)
 
         # =====================================================================
+        # TAB 12 continued — EXPORT FILL REPORT (item 6): downloads a JSON file with, per field,
+        #          frame/label/tag-or-widget/status/source/reason, page host/path and counts --
+        #          and NEVER a field's value, anywhere in the file.
+        # =====================================================================
+        check("the Export fill report button is enabled once there's a completed fill to export",
+              panel12.eval_on_selector("#exportReportBtn", "el => el.disabled") is False)
+        try:
+            with panel12.expect_download(timeout=5000) as export_download_info:
+                panel12.click("#exportReportBtn")
+            export_download = export_download_info.value
+            check("clicking Export fill report triggers a real download",
+                  export_download.suggested_filename.startswith("applypilot-fill-report-"),
+                  export_download.suggested_filename)
+            export_path = export_download.path()
+            report = json.loads(pathlib.Path(export_path).read_text(encoding="utf-8"))
+        except Exception as e:
+            check("clicking Export fill report triggers a real download", False, str(e))
+            report = None
+        if report is not None:
+            check("the report names this page's host and path",
+                  report.get("page", {}).get("path", "").endswith("test-page.html"), json.dumps(report.get("page")))
+            check("the report's counts match the fill's own counts",
+                  report.get("counts", {}).get("filled") == (state12.get("counts") or {}).get("filled"),
+                  json.dumps(report.get("counts")))
+            fields = report.get("fields") or []
+            check("the report has one row per field across every list (filled+drafts+needsYou+failed)",
+                  len(fields) == sum((state12.get("counts") or {}).get(k, 0) for k in ("filled", "drafts", "needsYou", "failed")),
+                  f"report has {len(fields)} rows, state counts: {json.dumps(state12.get('counts'))}")
+            check("every row has a label, a status, and a frame (frameId + url)",
+                  all(f.get("label") and f.get("status") and f.get("frame", {}).get("url") for f in fields),
+                  json.dumps(fields[:3]))
+            check("at least one row's frame url matches this tab's own page",
+                  any("test-page.html" in (f.get("frame") or {}).get("url", "") for f in fields), json.dumps(fields[:3]))
+            raw_report_text = json.dumps(report)
+            check("NO field value anywhere in the exported report (the whole point of this export)",
+                  '"value"' not in raw_report_text and '"values"' not in raw_report_text, raw_report_text[:300])
+            check("the actual filled VALUES ('Test Value ...') never appear anywhere in the report text",
+                  "Test Value" not in raw_report_text, raw_report_text[:300])
+
+        # =====================================================================
         # tabs.onRemoved cleanup
         # =====================================================================
         tab1.close()
