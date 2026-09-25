@@ -1200,11 +1200,45 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   expect('matchChoiceOption has the SAME fix (shared matchDegreeFamily helper, not just the Workday-specific path)',
     Scanner.matchChoiceOption('Bachelor of Design', SPECIFIC_BACHELOR_TITLES) === 1);
 
+  // An acronym is matched as the WHOLE title it abbreviates ("MS" = "Master of Science"), never
+  // as letters inside another title ("ma" begins every "Master ..." title) -- so each resolves to
+  // its own title, and one no listed title names still resolves to nothing.
   const SPECIFIC_MASTER_TITLES = ['Master of Arts', 'Master of Science', 'Master of Business Administration'];
-  expect('Workday degree family, SEVERAL specific titles: a bare "MS" acronym is -1, never the first ("Master of Arts") -- a false degree claim',
-    mwdo('MS', SPECIFIC_MASTER_TITLES) === -1);
-  expect('Workday degree family, SEVERAL specific titles: a bare "MA" acronym is ALSO -1 (every title starts with "Master", so "ma" cannot discriminate)',
-    mwdo('MA', SPECIFIC_MASTER_TITLES) === -1);
+  expect('Workday degree family, SEVERAL specific titles: a bare "MS" acronym resolves to "Master of Science", never the first ("Master of Arts")',
+    mwdo('MS', SPECIFIC_MASTER_TITLES) === 1);
+  expect('Workday degree family, SEVERAL specific titles: a bare "MA" acronym resolves to "Master of Arts"',
+    mwdo('MA', SPECIFIC_MASTER_TITLES) === 0);
+  expect('Workday degree family, SEVERAL specific titles: "M.Eng" (no listed title names it, no generic level listed) is -1, never the first',
+    mwdo('M.Eng', SPECIFIC_MASTER_TITLES) === -1);
+
+  // Greenhouse's standard "Degree" list, verbatim from job-boards.greenhouse.io/twitch
+  // (2026-09-25). An operator's "M.S." was left unfilled against it: two options belong to the
+  // master family ("Master of Business Administration (M.B.A.)", "Master's Degree") and neither
+  // contains "ms". When no listed title names the applicant's own degree, the generic level
+  // option is the one true answer; a DIFFERENT specific title (the M.B.A.) never is.
+  const GH_DEGREES = ["Associate's Degree", "Bachelor's Degree", 'Doctor of Medicine (M.D.)',
+    'Doctor of Philosophy (Ph.D.)', "Engineer's Degree", 'High School', 'Juris Doctor (J.D.)',
+    'Master of Business Administration (M.B.A.)', "Master's Degree", 'Other'];
+  const ghDeg = (v, opts) => { const o = opts || GH_DEGREES; const i = Scanner.matchChoiceOption(v, o); return i === -1 ? null : o[i]; };
+  for (const v of ['M.S.', 'MS', 'MSc', 'Master of Science', 'M.A.', 'M.Eng', 'MFA', 'Master of Design', 'MHCI', 'Masters']) {
+    expect(`Greenhouse degree list: "${v}" -> "Master's Degree" (no listed title names it; the generic level is true)`,
+      ghDeg(v) === "Master's Degree");
+  }
+  expect('Greenhouse degree list: "MBA" still -> its own listed title', ghDeg('MBA') === 'Master of Business Administration (M.B.A.)');
+  expect('Greenhouse degree list: "M.B.A." still -> its own listed title', ghDeg('M.B.A.') === 'Master of Business Administration (M.B.A.)');
+  expect('Greenhouse degree list: "Ph.D." -> its own listed title', ghDeg('Ph.D.') === 'Doctor of Philosophy (Ph.D.)');
+  expect(`Greenhouse degree list: "B.E." -> "Bachelor's Degree"`, ghDeg('B.E.') === "Bachelor's Degree");
+  expect('Greenhouse degree list: a bare "Doctorate" stays unfilled (M.D., Ph.D. and J.D. are all doctorates -- never guessed)',
+    ghDeg('Doctorate') === null);
+  expect('NEGATIVE CONTROL: "M.S." never lands on the M.B.A. option', ghDeg('M.S.') !== 'Master of Business Administration (M.B.A.)');
+  expect('NEGATIVE CONTROL: "Ph.D." never lands on the M.D. or J.D. option',
+    ghDeg('Ph.D.') !== 'Doctor of Medicine (M.D.)' && ghDeg('Ph.D.') !== 'Juris Doctor (J.D.)');
+  const CURLY_APOS = String.fromCharCode(0x2019);
+  const GH_DEGREES_CURLY = GH_DEGREES.map(t => t.replace("'", CURLY_APOS));
+  expect('Greenhouse degree list with typographic apostrophes: "M.S." -> the curly-apostrophe "Master' + CURLY_APOS + 's Degree"',
+    ghDeg('M.S.', GH_DEGREES_CURLY) === 'Master' + CURLY_APOS + 's Degree');
+  expect(`an M.B.A. against a list with no M.B.A. title -> the generic "Master's Degree" (true), never "Master of Science"`,
+    ghDeg('MBA', ["Bachelor's Degree", 'Master of Science', "Master's Degree"]) === "Master's Degree");
 
   expect('Workday degree family: a GENERIC level list ("Bachelor\'s Degree"/"Master\'s Degree"/...) still resolves via the exactly-one-in-family tier (no regression)',
     mwdo('Bachelor of Design', ["High School Diploma", "Associate's Degree", "Bachelor's Degree", "Master's Degree", 'Doctorate']) === 2);
@@ -2130,8 +2164,12 @@ pending.push((async () => {
   // Negative control (no regression): several GENUINELY DIFFERENT specific titles must still
   // refuse rather than being swept up by the new bare-stem tie-break (their stems differ).
   const SPECIFIC_MASTER_TITLES = ['Master of Arts', 'Master of Science', 'Master of Business Administration'];
-  expect('matchChoiceOption: bare-stem tie-break never fires for genuinely DIFFERENT specific titles -- "MS" still refuses (no regression)',
-    Scanner.matchChoiceOption('MS', SPECIFIC_MASTER_TITLES) === -1);
+  // (A value one of them DOES name -- "MS" = "Master of Science" -- resolves to that title in
+  // the whole-title tier before this tie-break is ever reached; see the Workday block above.)
+  expect('matchChoiceOption: bare-stem tie-break never fires for genuinely DIFFERENT specific titles -- "M.Eng" (named by none of them) still refuses (no regression)',
+    Scanner.matchChoiceOption('M.Eng', SPECIFIC_MASTER_TITLES) === -1);
+  expect('matchChoiceOption: "MS" resolves to its OWN title ("Master of Science") among different specific titles',
+    Scanner.matchChoiceOption('MS', SPECIFIC_MASTER_TITLES) === 1);
 
   // Ground truth: a "have you ever worked here" screening question can render with NO literal
   // "Yes"/"No" option at all -- every choice is a full first-person sentence.
@@ -2202,6 +2240,11 @@ pending.push((async () => {
       okBad2 === false && Scanner.getComboboxCommittedValue(entry) === 'United States of America');
     expect('Country combobox: entry._lastOptions carries the actual rendered (filtered) option texts as structured data',
       JSON.stringify(entry._lastOptions) === JSON.stringify(['Canada']));
+    // Ground truth (live, 2026-09-25, job-boards.greenhouse.io/twitch): Greenhouse's Escape only
+    // clears the search text, so a failed fill used to leave the real menu OPEN over the form.
+    // The mock now behaves the same way (see test-page.html's makeReactSelect).
+    expect('Country combobox: a failed fill leaves its menu CLOSED, never open over the form',
+      byId('gh_country_menu').style.display !== 'block');
   }
 
   // ---- combobox: ambiguous negative control (two rendered options both contain "Engineer") ----
@@ -2211,6 +2254,8 @@ pending.push((async () => {
     const ok = await Scanner.applyFill(entry, 'Engineer');
     expect('combobox ambiguous negative control: "Engineer" matches BOTH "Software Engineer" and "Site Engineer" -> stays unfilled',
       ok === false && Scanner.getComboboxCommittedValue(entry) === '');
+    expect('combobox ambiguous negative control: the refused fill leaves the menu CLOSED',
+      byId('gh_ambiguous_menu').style.display !== 'block');
     // Negative control for optionsSeen too: two GENUINELY DIFFERENT option texts both matching
     // is still real ambiguity -- entry._lastOptions is still populated (so a second-chance
     // /resolve round trip can still try), but the fill itself still correctly refuses above.
@@ -2744,6 +2789,59 @@ pending.push((async () => {
   expect('captureStructure() never records a real field VALUE for the shadow text input (structure only, per its own privacy invariant)',
     !structure.nodes.some(n => n.id === 'shadow_name_input' && JSON.stringify(n).includes('Ada Lovelace')));
 })());
+
+// ---- Greenhouse (job-boards) Education blocks: section heading + zero-based block ids ----
+// Markup mirrored from job-boards.greenhouse.io/twitch (2026-09-25): each block is a
+// div.education--form holding its OWN div.education--header "Education" (not an h1-h6), and
+// its fields' ids end "--0", "--1", ... (zero-based). Before this, no field in the block had a
+// section, so "Start date year"/"End date year" (scanned apart from the comboboxes) were never
+// recognised as education dates, and a second block's "school--1" read as the FIRST entry.
+{
+  const ghDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  ghDom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 };
+  };
+  const gdoc = ghDom.window.document;
+  const combo = (slot, n, label) => `<div class="select"><div class="select__container"><label id="${slot}--${n}-label" for="${slot}--${n}" class="label select__label">${label}</label><div class="select-shell"><div><div class="select__control"><div class="select__value-container"><div class="select__input-container"><input id="${slot}--${n}" class="select__input" role="combobox" aria-labelledby="${slot}--${n}-label" type="text" autocomplete="off"></div></div><div class="select__indicators"><button type="button" aria-label="Toggle flyout" class="icon-button">v</button></div></div></div></div></div></div>`;
+  const yearBox = (slot, n, label) => `<div class="text-input-wrapper"><div class="input-wrapper"><label id="${slot}--${n}-label" for="${slot}--${n}" class="label">${label}</label><input id="${slot}--${n}" type="number" class="input"></div></div>`;
+  // The live nesting matters: each month combobox's input sits 9 levels below the level where
+  // the "Education" header is a sibling (education--half-width-container > education--date-
+  // container > div.select > ...), deeper than the general heading search reaches.
+  const dates = (n) => `<div class="education--half-width-container"><div class="education--date-container">${combo('start-month', n, 'Start date month')}${yearBox('start-year', n, 'Start date year')}</div><div class="education--date-container">${combo('end-month', n, 'End date month')}${yearBox('end-year', n, 'End date year')}</div></div>`;
+  const eduBlock = (n) => `<div class="education--form"><hr><div class="education--header">Education</div>${combo('school', n, 'School')}${combo('degree', n, 'Degree')}${combo('discipline', n, 'Discipline')}${dates(n)}${n ? '<button type="button">Remove education</button>' : ''}</div>`;
+  const scanById = () => {
+    const sc = Scanner.scanFields(gdoc);
+    const m = {};
+    sc.fields.forEach(f => { const e = sc.registry[f.id]; const el = (e && (e.input || e.el)) || null; if (el && el.id) m[el.id] = f; });
+    return m;
+  };
+  gdoc.body.innerHTML = `<form id="application-form"><div class="application--questions"><div class="question--header">Why Twitch?</div><label for="why">Tell us why</label><textarea id="why"></textarea><label for="first_name">First Name</label><input id="first_name" type="text"></div><div class="education--container">${eduBlock(0)}${eduBlock(1)}<button type="button" class="add-another-button">Add another</button></div><div><label for="linkedin">LinkedIn Profile</label><input id="linkedin" type="text"></div></form>`;
+  const byElId = scanById();
+  for (const n of [0, 1]) {
+    for (const slot of ['school', 'degree', 'discipline', 'start-month', 'start-year', 'end-month', 'end-year']) {
+      const f = byElId[`${slot}--${n}`];
+      expect(`Greenhouse Education block ${n + 1}: "${slot}--${n}" has section "Education" and 1-based section_index ${n + 1}`,
+        !!f && f.section === 'Education' && f.section_index === n + 1);
+    }
+  }
+  expect('the Education header never leaks onto a field AFTER its block (LinkedIn Profile)',
+    !!byElId.linkedin && byElId.linkedin.section === '' && byElId.linkedin.section_index === null);
+  expect('NEGATIVE CONTROL: a header-styled element whose text is not a repeating-section name ("Why Twitch?") is never a section',
+    !!byElId.why && byElId.why.section === '');
+  expect('countSectionBlocks counts both Greenhouse Education blocks (1-based, so 2 -- not 1)',
+    Scanner.countSectionBlocks(gdoc, 'education') === 2);
+  const ghAddBtn = Scanner.findAddButtonForKind(gdoc, 'education');
+  expect('findAddButtonForKind finds the "Add another" button after the Education blocks',
+    !!ghAddBtn && ghAddBtn.textContent === 'Add another');
+
+  // NEGATIVE CONTROL: a form that numbers its blocks from 1 ("school--1", no "--0" twin
+  // anywhere) keeps its own index -- only a real zero-based sequence is shifted.
+  gdoc.body.innerHTML = `<form><div class="education--container">${eduBlock(1)}</div></form>`;
+  const oneBased = scanById();
+  expect('NEGATIVE CONTROL: ids numbered from 1 (no "--0" twin) keep section_index 1, never shifted to 2',
+    !!oneBased['school--1'] && oneBased['school--1'].section_index === 1
+    && !!oneBased['start-year--1'] && oneBased['start-year--1'].section_index === 1);
+}
 
 Promise.all(pending).then(() => {
   let failed = 0;

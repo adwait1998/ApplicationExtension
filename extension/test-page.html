@@ -1605,7 +1605,14 @@
     input.addEventListener('keyup', function (e) {
       if (e.key === 'ArrowDown' && menu.style.display !== 'block') { renderOptions(cfg.async ? [] : unfilteredOptions()); openMenu(); }
     });
-    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    // Ground truth (live, 2026-09-25, job-boards.greenhouse.io/twitch): Escape only clears the
+    // typed search text -- the menu stays OPEN; blur or the toggle closes it. A mock that closed
+    // on Escape hid a real bug: a failed fill left the real menu open over the form.
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      input.value = '';
+      if (menu.style.display === 'block') renderOptions(cfg.async ? [] : unfilteredOptions());
+    });
 
     var debounce = null;
     input.addEventListener('input', function () {

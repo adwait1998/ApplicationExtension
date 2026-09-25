@@ -358,6 +358,38 @@
     return false;
   }
 
+  // Greenhouse (job-boards) heads each repeating block with a plain div -- "education--header"
+  // holding "Education" (live, 2026-09-25, job-boards.greenhouse.io/twitch) -- neither an h1-h6
+  // nor a "title"/"heading" class. Accepted only when its WHOLE text names a repeating section,
+  // so an arbitrary "*header" element (a question's own header, a page banner) never becomes a
+  // field's section.
+  var REPEATING_SECTION_HEADER_TEXT_RE =
+    /^(education|work\s+experience|work\s+history|employment(\s+history)?|experience)\s*\*?$/i;
+
+  function isRepeatingSectionHeader(node) {
+    if (!node || node.nodeType !== 1) return false;
+    var cls = (node.getAttribute && node.getAttribute('class')) || '';
+    if (!/header/i.test(cls)) return false;
+    return REPEATING_SECTION_HEADER_TEXT_RE.test(cleanText(node.textContent));
+  }
+
+  // The same repeating-block header, searched further up than findPrecedingHeading's general 8
+  // levels: a Greenhouse month combobox's input sits 9 levels below the level where "Education"
+  // is a sibling (live, 2026-09-25). Only this narrowly recognised header is searched this far --
+  // general headings keep the nearer bound. Never looks INSIDE earlier siblings, so a field after
+  // the block (LinkedIn, ...) never picks up the block's header.
+  function findRepeatingSectionHeaderAbove(el) {
+    var node = el;
+    for (var depth = 0; depth < 16 && node; depth++) {
+      if (node.tagName === 'FORM' || node.tagName === 'BODY' || node.tagName === 'HTML') break;
+      for (var sib = node.previousElementSibling; sib; sib = sib.previousElementSibling) {
+        if (isRepeatingSectionHeader(sib)) return cleanText(sib.textContent);
+      }
+      node = node.parentElement;
+    }
+    return '';
+  }
+
   // Nearest preceding heading-like element, walking sibling-then-up. Bounded at the
   // enclosing <form> (or body/html) so a page-level <h1> title never gets mistaken for a
   // field's section — that boundary is what keeps this "nearest enclosing", not "any
@@ -368,7 +400,7 @@
       if (node.tagName === 'FORM' || node.tagName === 'BODY' || node.tagName === 'HTML') break;
       var sib = node.previousElementSibling;
       while (sib) {
-        if (isHeadingLike(sib)) {
+        if (isHeadingLike(sib) || isRepeatingSectionHeader(sib)) {
           var t = cleanText(sib.textContent);
           if (t) return t;
         }
@@ -420,6 +452,22 @@
    * none (or there is no heading at all), it falls back to a number parsed from the field's
    * own name/id (Workday-style `workExperience-2--jobTitle`).
    */
+  // Greenhouse (job-boards) numbers a repeating block's field ids "school--0", "school--1", ...
+  // from ZERO (live, 2026-09-25), where everything downstream -- the structured tier's
+  // education[section_index - 1], countSectionBlocks -- is 1-based: read as-is, a second block's
+  // "school--1" was filled from the FIRST education entry. Zero-based only when the same
+  // field's "--0" twin exists on the page; a form that numbers from 1 has none and keeps its own.
+  function blockIndexFromIdSuffix(el) {
+    var id = el && el.id;
+    var m = id ? /^(.+)--(\d{1,2})$/.exec(id) : null;
+    if (!m) return null;
+    var n = parseInt(m[2], 10);
+    var doc = ownerDoc(el);
+    var zeroBased = !!(doc && doc.getElementById && doc.getElementById(m[1] + '--0'));
+    if (zeroBased) return n + 1;
+    return n >= 1 ? n : null;
+  }
+
   function getSectionContext(el) {
     var doc = ownerDoc(el);
     var section = '';
@@ -435,8 +483,13 @@
 
     if (!section) section = findPrecedingHeading(el);
     if (!section) section = findAriaLabelledbyGroup(el, doc);
+    if (!section) section = findRepeatingSectionHeaderAbove(el);
 
     var sectionIndex = section ? extractSectionIndex(section) : null;
+    if (sectionIndex === null && section &&
+        (EDUCATION_KIND_SECTION_RE.test(section) || WORK_KIND_SECTION_RE.test(section))) {
+      sectionIndex = blockIndexFromIdSuffix(el);
+    }
     if (sectionIndex === null) {
       var nameIndex = extractSectionIndex(el.name || el.id || '');
       if (nameIndex !== null) sectionIndex = nameIndex;
@@ -1347,7 +1400,58 @@
    * options as mere spelling variants of the identical level (see matchDegreeFamily below),
    * never to widen which OPTIONS count as a family match in the first place. */
   function degreeBareStem(text) {
-    return normalizeToken(text).replace(/degree$/, '').replace(/'/g, '');
+    return normalizeToken(text).replace(/degree$/, '').replace(/['’]/g, '');
+  }
+
+  // An acronym -> the full title it abbreviates, both normalised (see normalizeToken). Lets a
+  // specific title be recognised in either spelling ("M.S." = "Master of Science" = a listed
+  // "(MS)") by comparing WHOLE titles -- never by finding a 2-letter acronym inside another
+  // title's letters ("ma" begins every "Master ..." title, "ba" every "Bachelor ...").
+  var DEGREE_ACRONYM_TITLES = {
+    ms: 'masterofscience', msc: 'masterofscience', ma: 'masterofarts',
+    mba: 'masterofbusinessadministration', me: 'masterofengineering', meng: 'masterofengineering',
+    mfa: 'masteroffinearts', mdes: 'masterofdesign', march: 'masterofarchitecture',
+    mca: 'masterofcomputerapplications', mtech: 'masteroftechnology',
+    mhci: 'masterofhumancomputerinteraction', mps: 'masterofprofessionalstudies',
+    bs: 'bachelorofscience', bsc: 'bachelorofscience', ba: 'bachelorofarts',
+    be: 'bachelorofengineering', beng: 'bachelorofengineering', btech: 'bacheloroftechnology',
+    bfa: 'bacheloroffinearts', bdes: 'bachelorofdesign', barch: 'bachelorofarchitecture',
+    bca: 'bachelorofcomputerapplications', bba: 'bachelorofbusinessadministration',
+    phd: 'doctorofphilosophy', edd: 'doctorofeducation', dba: 'doctorofbusinessadministration',
+    md: 'doctorofmedicine', jd: 'jurisdoctor', aa: 'associateofarts', as: 'associateofscience'
+  };
+
+  /** The whole-title keys `text` can be recognised by: its own normalised title with any
+   * "(...)" part removed, and that parenthesised acronym's title -- each acronym expanded. So
+   * "Master of Business Administration (M.B.A.)", "MBA" and "M.B.A." all share one key. */
+  function degreeTitleKeys(text) {
+    var raw = String(text == null ? '' : text);
+    var keys = [];
+    function add(tok) {
+      if (!tok) return;
+      var k = DEGREE_ACRONYM_TITLES[tok] || tok;
+      if (keys.indexOf(k) === -1) keys.push(k);
+    }
+    add(normalizeToken(raw.replace(/\([^)]*\)/g, ' ')).replace(/['’]/g, ''));
+    var paren = /\(([^)]*)\)/.exec(raw);
+    if (paren) add(normalizeToken(paren[1]).replace(/['’]/g, ''));
+    return keys;
+  }
+
+  // A family's GENERIC level, once "degree"/"diploma"/"or equivalent" and apostrophes are
+  // stripped: "Master's Degree", "Masters Degree or Equivalent", "High School Diploma", ...
+  var DEGREE_GENERIC_STEMS = {
+    doctorate: ['doctorate', 'doctoral', 'doctors'],
+    master: ['master', 'masters'],
+    bachelor: ['bachelor', 'bachelors'],
+    associate: ['associate', 'associates'],
+    highschool: ['highschool', 'secondary', 'secondaryschool']
+  };
+
+  function isGenericDegreeOption(text, fam) {
+    var stem = normalizeToken(text).replace(/['’()]/g, '')
+      .replace(/orequivalent$/, '').replace(/(degree|diploma)$/, '');
+    return (DEGREE_GENERIC_STEMS[fam] || []).indexOf(stem) !== -1;
   }
 
   function matchDegreeFamily(value, optionTexts) {
@@ -1360,9 +1464,18 @@
     }
     if (famMatches.length === 1) return famMatches[0];
     if (famMatches.length < 2) return -1;
+    // The option naming the applicant's OWN title: the same whole title (acronyms expanded --
+    // see degreeTitleKeys), or, for a spelled-out value, that title inside a longer option
+    // ("Bachelor of Design" in "Bachelor of Design (BDes)"). A short acronym is never searched
+    // for inside other words.
+    var valueKeys = degreeTitleKeys(value);
     var specificTok = normalizeToken(value);
     var specificMatches = famMatches.filter(function (idx) {
-      return normalizeToken(optionTexts[idx]).indexOf(specificTok) !== -1;
+      var optKeys = degreeTitleKeys(optionTexts[idx]);
+      for (var k = 0; k < valueKeys.length; k++) {
+        if (optKeys.indexOf(valueKeys[k]) !== -1) return true;
+      }
+      return specificTok.length >= 8 && normalizeToken(optionTexts[idx]).indexOf(specificTok) !== -1;
     });
     if (specificMatches.length === 1) return specificMatches[0];
 
@@ -1384,6 +1497,13 @@
         var withDegreeWord = famMatches.filter(function (idx) { return /degree/i.test(optionTexts[idx]); });
         return withDegreeWord.length === 1 ? withDegreeWord[0] : famMatches[0];
       }
+      // No listed title names the applicant's own degree, but the list offers the family's
+      // GENERIC level: that is the one true answer (an M.S. IS a "Master's Degree"), where any
+      // OTHER specific title is false (live, 2026-09-25, job-boards.greenhouse.io/twitch: "M.S."
+      // against "Master of Business Administration (M.B.A.)" + "Master's Degree" used to be
+      // left unfilled).
+      var generic = famMatches.filter(function (idx) { return isGenericDegreeOption(optionTexts[idx], fam); });
+      if (generic.length === 1) return generic[0];
     }
     return -1;
   }
@@ -2667,6 +2787,38 @@
     }, 1500, doc);
   }
 
+  /** Closes this combobox's menu if it is still open. Greenhouse's react-select ignores Escape
+   * for closing -- it only clears the search text (live, 2026-09-25,
+   * job-boards.greenhouse.io/twitch) -- so a failed attempt used to leave the real menu open over
+   * the form. Blur closes it (and is a no-op once closed); only while the menu is verifiably
+   * still open is the "Toggle flyout" control used, since it is a genuine open/close toggle.
+   * Best-effort; always resolves. */
+  function closeComboboxMenu(entry, doc) {
+    function isOpen() {
+      var m = resolveComboboxMenu(entry);
+      return !!(m && isVisible(m));
+    }
+    if (!isOpen()) return Promise.resolve(true);
+    var input = entry.input;
+    var blurred = false;
+    try {
+      if (input.ownerDocument && input.ownerDocument.activeElement === input) {
+        input.blur();
+        blurred = true;
+      }
+    } catch (e) { /* best-effort */ }
+    var afterBlur = blurred
+      ? waitFor(function () { return isOpen() ? null : true; }, 300, doc)
+      : Promise.resolve(null);
+    return afterBlur.then(function () {
+      if (!isOpen()) return true;
+      var scope = comboboxFieldScope(input);
+      var toggle = scope && scope.querySelector ? scope.querySelector('button[aria-label="Toggle flyout" i]') : null;
+      if (toggle && isVisible(toggle) && !toggle.disabled) dispatchMouseEvent(toggle, 'mouseup');
+      return waitFor(function () { return isOpen() ? null : true; }, 500, doc).then(function (closed) { return !!closed; });
+    });
+  }
+
   /** For a "City, State" value, the part to type to filter an async catalog is just the city. */
   function comboboxFilterQuery(target) {
     var t = String(target || '').trim();
@@ -2840,6 +2992,9 @@
           return commitComboboxOption(entry, found.menu, found.els, idx2, doc);
         });
       }
+    }).then(function (result) {
+      if (result && result.ok) return result;
+      return closeComboboxMenu(entry, doc).then(function () { return result; });
     });
   }
 
@@ -4272,6 +4427,21 @@
     return Math.max(maxIndex, 1);
   }
 
+  /** Every DOM element a registry entry stands for, whatever its kind -- a radio group's radios,
+   * a date's parts, a combobox's or Workday prompt's input, a Workday dropdown's button, ... --
+   * never undefined. (Reading only `entry.el` threw on a combobox or Workday dropdown the moment
+   * one sat in a repeating section, taking the whole "Add another" expansion down with it.) */
+  function entryElements(entry) {
+    var out = [];
+    if (!entry) return out;
+    function add(x) { if (x && x.nodeType === 1 && out.indexOf(x) === -1) out.push(x); }
+    function addAll(list) { if (list) for (var i = 0; i < list.length; i++) add(list[i]); }
+    addAll(entry.elements); addAll(entry.boxes); addAll(entry.buttons);
+    add(entry.el); add(entry.input); add(entry.button);
+    add(entry.monthEl); add(entry.dayEl); add(entry.yearEl); add(entry.maskedEl);
+    return out;
+  }
+
   function elementDocPosition(a, b) {
     if (a === b) return 0;
     var pos = a.compareDocumentPosition(b);
@@ -4302,9 +4472,7 @@
     for (var i = 0; i < scanned.fields.length; i++) {
       var f = scanned.fields[i];
       if (!f.section || !re.test(f.section)) continue;
-      var entry = scanned.registry[f.id];
-      var els = entry.kind === 'radio-group' ? entry.elements :
-        (entry.kind === 'date-parts' ? [entry.monthEl, entry.yearEl] : [entry.el]);
+      var els = entryElements(scanned.registry[f.id]);
       for (var e = 0; e < els.length; e++) {
         if (!lastFieldEl || elementDocPosition(lastFieldEl, els[e]) < 0) lastFieldEl = els[e];
       }

@@ -107,6 +107,11 @@ with sync_playwright() as p:
         r = fill_combobox("Role*", "Engineer")
         check("NEGATIVE CONTROL (real Chrome): ambiguous combobox match ('Engineer' -> 2 options) stays unfilled",
               r.get("ok") is False and r.get("committed") == "", str(r))
+        # Real Greenhouse only clears the search text on Escape (the mock now does the same), so
+        # a refused fill must close the menu itself rather than leave it open over the form.
+        menu_display = page.evaluate("() => document.getElementById('gh_ambiguous_menu').style.display")
+        check("a refused combobox fill leaves its menu CLOSED in real Chrome (Escape alone would not)",
+              menu_display != "block", repr(menu_display))
 
         # Async/filtered catalog -- real setTimeout-driven debounce.
         r = fill_combobox("School*", "University of Washington")

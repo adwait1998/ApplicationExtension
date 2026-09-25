@@ -573,7 +573,12 @@ operator's real form. Each becomes exactly one `FieldDescriptor` with a `widget`
   a bare `.click()`. Matches an option by exact text, then a small explicit degree-family
   (bachelor/master/doctorate/associate/high-school) or country-alias table, then a one-way
   "option contains target" check — **never** the first option when nothing matches
-  confidently; it presses Escape and reports instead.
+  confidently; it presses Escape and reports instead. The degree step (shared with Greenhouse's
+  react-select Degree field) picks the option naming the applicant's own degree, with acronyms
+  compared as whole titles ("M.S." = "Master of Science" = a listed "(MS)", never the letters
+  "ma" inside every "Master ..." title); when no listed title names it, it picks the family's
+  generic level ("Master's Degree") if the list has one — an M.S. is a master's degree, where a
+  different specific title (an M.B.A.) would be false. With neither, it is left for you.
 - **`wd-prompt`** — `div[data-automation-id^="formField-"] >
   div[data-automation-id="multiSelectContainer"]`, with an inner `<input>` (Field of Study,
   School, Certification, Skills, ...). Types the term, presses Enter, polls up to ~3s for
@@ -681,8 +686,11 @@ disappearing from the count.
   purpose (no
   MutationObserver auto-fill, per the "nothing runs automatically" rule). It DOES now handle
   the narrower "Add Another" case within a single step (Workday's "My Experience" repeating
-  work-history/education blocks) — see "The one rule that matters" above — but only for the
-  section kinds it recognizes (work history, education) and only up to 10 add-clicks per fill.
+  work-history/education blocks, and Greenhouse's Education "Add another") — see "The one rule
+  that matters" above — but only for the section kinds it recognizes (work history, education)
+  and only up to 10 add-clicks per fill. Greenhouse numbers its blocks' field ids from zero
+  (`school--0`, `school--1`); the scanner reports them 1-based like every other section index,
+  so block 2 is filled from your second education entry, never your first.
 - **"Add Another" expansion can't always find the right button.** `findAddButtonForKind()`
   requires the button to sit after the section's last field with no other section's field in
   between; a page whose markup doesn't fit that shape (or genuinely has no such button) is
