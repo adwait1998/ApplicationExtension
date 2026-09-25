@@ -431,6 +431,8 @@
             <input type="text" id="p_full_name" data-path="personal.full_name"></div>
           <div><label for="p_preferred_name">Preferred name</label>
             <input type="text" id="p_preferred_name" data-path="personal.preferred_name"></div>
+          <div><label for="p_pronouns">Pronouns</label>
+            <input type="text" id="p_pronouns" data-path="personal.pronouns" placeholder="e.g. she/her — left blank if empty; never guessed"></div>
           <div><label for="p_email">Email</label>
             <input type="email" id="p_email" data-path="personal.email"></div>
           <div><label for="p_phone">Phone</label>
@@ -547,6 +549,113 @@
         </div>
         <div id="educationList"></div>
         <button type="button" class="secondary small" id="addEducationBtn">+ Add education</button>
+      </div>
+    </details>
+
+    <details class="section" id="sectionEeo">
+      <summary><span class="section-title">Equal opportunity (voluntary)</span></summary>
+      <div class="section-body">
+        <div class="hint" style="margin-top:4px;">
+          Voluntary. Unset = Decline to self-identify. Used only for EEO questions, never anywhere else.
+        </div>
+        <div class="field-grid">
+          <div><label for="eeo_gender">Gender</label>
+            <select id="eeo_gender" data-path="eeo_voluntary.gender">
+              <option value="Decline to self-identify">Decline to self-identify</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Non-binary">Non-binary</option>
+            </select></div>
+          <div><label for="eeo_hispanic">Hispanic or Latino</label>
+            <select id="eeo_hispanic" data-path="eeo_voluntary.hispanic_latino">
+              <option value="Decline to self-identify">Decline to self-identify</option>
+              <option value="Yes">Yes</option>
+              <option value="No">No</option>
+            </select></div>
+          <div><label for="eeo_race">Race / ethnicity</label>
+            <select id="eeo_race" data-path="eeo_voluntary.race_ethnicity">
+              <option value="Decline to self-identify">Decline to self-identify</option>
+              <option value="American Indian or Alaska Native">American Indian or Alaska Native</option>
+              <option value="Asian">Asian</option>
+              <option value="Black or African American">Black or African American</option>
+              <option value="Hispanic or Latino">Hispanic or Latino</option>
+              <option value="Native Hawaiian or Other Pacific Islander">Native Hawaiian or Other Pacific Islander</option>
+              <option value="White">White</option>
+              <option value="Two or More Races">Two or More Races</option>
+            </select></div>
+          <div><label for="eeo_veteran">Veteran status</label>
+            <select id="eeo_veteran" data-path="eeo_voluntary.veteran_status">
+              <option value="Decline to self-identify">Decline to self-identify</option>
+              <option value="I am not a veteran">I am not a veteran</option>
+              <option value="I am a veteran, but not a protected veteran">I am a veteran, but not a protected veteran</option>
+              <option value="I am a protected veteran">I am a protected veteran</option>
+            </select></div>
+          <div><label for="eeo_disability">Disability status</label>
+            <select id="eeo_disability" data-path="eeo_voluntary.disability_status">
+              <option value="Decline to self-identify">Decline to self-identify</option>
+              <option value="No, I do not have a disability">No, I do not have a disability</option>
+              <option value="Yes, I have a disability (or had one in the past)">Yes, I have a disability (or had one in the past)</option>
+            </select></div>
+          <div><label for="eeo_orientation">Sexual orientation</label>
+            <select id="eeo_orientation" data-path="eeo_voluntary.sexual_orientation">
+              <option value="Decline to self-identify">Decline to self-identify</option>
+              <option value="Heterosexual">Heterosexual</option>
+              <option value="Gay">Gay</option>
+              <option value="Lesbian">Lesbian</option>
+              <option value="Bisexual">Bisexual</option>
+              <option value="Asexual">Asexual</option>
+              <option value="Queer">Queer</option>
+            </select></div>
+          <div><label for="eeo_transgender">Transgender</label>
+            <select id="eeo_transgender" data-path="eeo_voluntary.transgender">
+              <option value="Decline to self-identify">Decline to self-identify</option>
+              <option value="No">No</option>
+              <option value="Yes">Yes</option>
+            </select></div>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" id="sectionScreening">
+      <summary><span class="section-title">Common screening questions</span></summary>
+      <div class="section-body">
+        <div>
+          <label for="s_criminal">Have you ever been convicted of a crime?</label>
+          <select id="s_criminal" data-path="screening.criminal_conviction">
+            <option value="">(unset)</option>
+            <option value="No">No</option>
+            <option value="Yes">Yes</option>
+          </select>
+          <div class="hint">Only "No" is auto-answered, and only for plain "have you been convicted" questions; anything else is left for you.</div>
+        </div>
+        <div class="field-grid" style="margin-top:14px;">
+          <div><label for="s_background">Willing to undergo a background check?</label>
+            <select id="s_background" data-path="screening.background_check_consent">
+              <option value="">(unset)</option>
+              <option value="Yes">Yes</option>
+              <option value="No">No</option>
+            </select></div>
+          <div><label for="s_drugtest">Willing to undergo a drug test?</label>
+            <select id="s_drugtest" data-path="screening.drug_test_consent">
+              <option value="">(unset)</option>
+              <option value="Yes">Yes</option>
+              <option value="No">No</option>
+            </select></div>
+          <div><label for="s_noncompete">Bound by a non-compete or non-solicit?</label>
+            <select id="s_noncompete" data-path="screening.non_compete">
+              <option value="">(unset)</option>
+              <option value="No">No</option>
+              <option value="Yes">Yes</option>
+            </select></div>
+          <div><label for="s_travel">Willing to travel for this role?</label>
+            <select id="s_travel" data-path="screening.willing_to_travel">
+              <option value="">(unset)</option>
+              <option value="Yes">Yes</option>
+              <option value="No">No</option>
+            </select></div>
+          <div><label for="s_howheard">How did you hear about us?</label>
+            <input type="text" id="s_howheard" data-path="screening.how_heard" placeholder="e.g. LinkedIn"></div>
+        </div>
       </div>
     </details>
 

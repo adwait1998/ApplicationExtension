@@ -23,8 +23,8 @@
  *
  * The editor never constructs a fresh JSON object from only the fields it renders.
  * It keeps the full profile object returned by GET /profile/full in `profileData` and
- * mutates that in place, so sections this UI doesn't know about (eeo_voluntary,
- * resume_facts, availability, ...) round-trip untouched instead of being silently
+ * mutates that in place, so sections this UI doesn't know about (resume_facts,
+ * availability, ...) round-trip untouched instead of being silently
  * deleted on save. personal.password is never in that object in the first place —
  * the service strips it before this page ever sees it — and this file never adds a
  * field for it, never renders it, and strips it defensively if a future response
@@ -286,9 +286,18 @@
         try { data = JSON.parse(text); } catch (e) { data = null; }
       }
       if (!resp.ok) {
-        var msg = (data && data.detail) ? data.detail : ('HTTP ' + resp.status);
+        // `detail` is usually a plain string (FastAPI's ordinary HTTPException shape), but some
+        // endpoints (e.g. /profile/import-resume's 409 identity_mismatch) send a structured
+        // object instead — prefer its own .message for display, and keep the raw object on
+        // err.detail so a caller that needs the structured fields (code/resume_name/
+        // profile_name) doesn't have to re-parse anything.
+        var detail = data && data.detail;
+        var msg = typeof detail === 'string' ? detail
+          : (detail && detail.message) ? detail.message
+          : ('HTTP ' + resp.status);
         var err = new Error(msg);
         err.status = resp.status;
+        err.detail = detail;
         throw err;
       }
       return data;
@@ -328,6 +337,23 @@
 
   function truthy(v) {
     return v != null && String(v).trim() !== '';
+  }
+
+  // -- EEO selects: default to "Decline to self-identify", preserve unrecognised values --------
+
+  var EEO_DEFAULT = 'Decline to self-identify';
+
+  // Appends a synthetic <option> (visibly marked as unrecognised) when `value` doesn't match any
+  // of a <select>'s built-in options -- e.g. a legacy free-text veteran_status string saved
+  // before this dropdown existed. Preserves and shows it as selected instead of silently
+  // overwriting it with the default or dropping it on the next save.
+  function ensurePreservedOption(selectEl, value) {
+    var has = Array.prototype.some.call(selectEl.options, function (o) { return o.value === value; });
+    if (has) return;
+    var opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = value + ' (unrecognized value — kept as-is)';
+    selectEl.appendChild(opt);
   }
 
   // -- loading -------------------------------------------------------------------
@@ -396,6 +422,18 @@
         var v = dottedGet(profileData, el.getAttribute('data-path'));
         el.value = v == null ? '' : v;
       });
+
+    // EEO selects: default to "Decline to self-identify" when the stored value is absent or
+    // empty. An unrecognised stored value (e.g. a legacy veteran_status string from before this
+    // dropdown existed) is preserved and shown as an extra selected option instead -- see
+    // ensurePreservedOption(). Screening selects are NOT touched here: their "(unset)" option
+    // already has value="" and the generic binding above already selects it correctly.
+    profileEditorEl.querySelectorAll('select[data-path^="eeo_voluntary."]').forEach(function (el) {
+      var stored = dottedGet(profileData, el.getAttribute('data-path'));
+      var want = truthy(stored) ? String(stored) : EEO_DEFAULT;
+      ensurePreservedOption(el, want);
+      el.value = want;
+    });
 
     // tri-state boolean radios: select "unset" unless the stored value is
     // strictly true/false — never guess Yes or No for a legally-sensitive
@@ -672,12 +710,17 @@
     importResume(file);
   });
 
-  function importResume(file) {
+  // `allowIdentityChange` is NEVER set automatically — the only caller that ever passes it is
+  // the "Replace <profile> with <résumé>" button built by showIdentityMismatchWarning(), i.e.
+  // an explicit operator click after seeing the warning below. A plain upload always calls this
+  // with just `file`.
+  function importResume(file, allowIdentityChange) {
     fileBtnLabel.classList.add('busy');
-    setImportStatus('info', 'Reading your résumé…');
+    setImportStatus('info', allowIdentityChange ? 'Replacing the active profile’s identity and re-reading your résumé…' : 'Reading your résumé…');
 
     var formData = new FormData();
     formData.append('file', file, file.name);
+    if (allowIdentityChange) formData.append('allow_identity_change', 'true');
 
     fetch(apiUrl('/profile/import-resume'), {
       method: 'POST',
@@ -700,12 +743,65 @@
         setImportStatus('err', 'The service rejected the token — check it in the connection settings above.');
         return;
       }
+      if (err && err.status === 409 && err.detail && err.detail.code === 'identity_mismatch') {
+        // The service wrote NOTHING in this case (see server-side identity_mismatch check) --
+        // it's purely the operator's call whether the résumé is meant to replace who this
+        // profile is for. Shown as a distinct warning, never folded into the generic error path.
+        showIdentityMismatchWarning(err.detail, file);
+        return;
+      }
       // Every other case (unsupported type, oversized file, corrupt/encrypted
       // PDF, no extractable text, ...) is raised by the service as a safe,
       // human-readable detail message — see resume_import.py. Surface it
       // as-is rather than re-wording it.
       setImportStatus('err', 'Could not import that résumé: ' + ((err && err.message) || 'unknown error') + '.');
     });
+  }
+
+  // detail: { code: "identity_mismatch", resume_name, profile_name, message }. Renders a
+  // clearly-styled warning (not the generic error box) with exactly two operator choices:
+  // "Cancel" (does nothing further — the failed attempt already wrote nothing) or "Replace ...",
+  // which re-sends the SAME File object with allow_identity_change=true. Never retried
+  // automatically — only this button's click ever takes that path.
+  function showIdentityMismatchWarning(detail, file) {
+    detail = detail || {};
+    var resumeName = detail.resume_name || 'the résumé';
+    var profileName = detail.profile_name || 'the active profile';
+    var message = detail.message ||
+      ('This résumé looks like it belongs to "' + resumeName + '", not "' + profileName + '".');
+
+    importStatusEl.className = 'warn';
+    importStatusEl.innerHTML = '';
+
+    var msgEl = document.createElement('div');
+    msgEl.textContent = message;
+    importStatusEl.appendChild(msgEl);
+
+    var actions = document.createElement('div');
+    actions.style.marginTop = '10px';
+    actions.style.display = 'flex';
+    actions.style.flexWrap = 'wrap';
+    actions.style.gap = '8px';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'secondary small';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function () {
+      setImportStatus('', '');
+    });
+
+    var replaceBtn = document.createElement('button');
+    replaceBtn.type = 'button';
+    replaceBtn.className = 'small';
+    replaceBtn.textContent = 'Replace ' + profileName + ' with ' + resumeName;
+    replaceBtn.addEventListener('click', function () {
+      importResume(file, true);
+    });
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(replaceBtn);
+    importStatusEl.appendChild(actions);
   }
 
   function handleImportSuccess(data) {

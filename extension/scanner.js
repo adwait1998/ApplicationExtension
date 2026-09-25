@@ -1040,14 +1040,25 @@
 
   // ---- degree / country synonyms (explicit families only -- no guessing outside them) ------
 
-  function normalizeToken(s) { return String(s == null ? '' : s).toLowerCase().replace(/[.\s]/g, ''); }
+  // Strips dots, whitespace AND hyphens -- the last of those matters for degree names that are
+  // legitimately hyphenated ("Human-Computer Interaction"), not just abbreviations with dots
+  // ("B.E.") or spaces ("Bachelor of Science"). No existing token in either family list below
+  // contains a hyphen, so widening this is purely additive for values that previously matched
+  // nothing at all.
+  function normalizeToken(s) { return String(s == null ? '' : s).toLowerCase().replace(/[.\s-]/g, ''); }
 
   var WD_DEGREE_FAMILY_TOKENS = {
     doctorate: ['phd', 'doctorate', 'doctoral', 'dsc', 'edd', 'dba'],
     master: ['ms', 'msc', 'ma', 'mba', 'me', 'meng', 'mfa', 'mtech', 'master', 'masters',
-      'masterofscience', 'masterofarts', 'masterofengineering', 'masterofbusinessadministration'],
+      'masterofscience', 'masterofarts', 'masterofengineering', 'masterofbusinessadministration',
+      // Design/creative-field synonyms (the primary user is a product/UX designer).
+      'mdes', 'masterofdesign', 'masteroffinearts', 'march', 'masterofarchitecture',
+      'mca', 'mhci', 'masterofhumancomputerinteraction', 'mps', 'masterofprofessionalstudies'],
     bachelor: ['bs', 'bsc', 'ba', 'be', 'beng', 'btech', 'bachelor', 'bachelors',
-      'bachelorofscience', 'bachelorofarts', 'bachelorofengineering'],
+      'bachelorofscience', 'bachelorofarts', 'bachelorofengineering',
+      // Design/creative-field synonyms (the primary user is a product/UX designer).
+      'bdes', 'bachelorofdesign', 'bfa', 'bacheloroffinearts', 'barch', 'bachelorofarchitecture',
+      'bca', 'bba', 'bachelorofbusinessadministration'],
     associate: ['as', 'aa', 'associate', 'associates', 'associatedegree'],
     highschool: ['hs', 'ged', 'highschool', 'secondary', 'highschoolorequivalent']
   };
@@ -1078,7 +1089,178 @@
     return WD_COUNTRY_ALIASES[normalizeToken(value)] || null;
   }
 
-  /** Match priority: exact (normalised) -> normalised synonym (degree family / country alias) -> one-way contains. */
+  // ---- answer-family matching (EEO / screening yes-no-shaped questions) --------------------
+  //
+  // A "family" here is a known SHAPE of profile value for a decline-to-answer, gender, veteran,
+  // disability, or race/ethnicity question -- distinct from the Workday-specific degree/country
+  // synonyms above, which stay exactly as they were. Once a value is recognised as belonging to
+  // one of these families, matching is scoped to ONLY that family's own option patterns: if none
+  // of them fit, matchAnswerFamily returns -1 immediately, and matchChoiceOption() below NEVER
+  // falls through to generic word-boundary containment for a family-recognised value. A wrong
+  // pick on one of these questions is a false statement on a real EEO question, so "no confident
+  // match" must always win over a fuzzy guess.
+
+  function findFirstMatch(optionTexts, re) {
+    for (var i = 0; i < optionTexts.length; i++) {
+      if (re.test(cleanText(optionTexts[i]))) return i;
+    }
+    return -1;
+  }
+
+  var NEGATION_RE = /\bnot\b|n't/i;
+
+  // Matches BOTH a decline-shaped VALUE ("Decline to self-identify") and a decline-shaped
+  // OPTION ("I don't wish to answer", "Not Declared", "I DO NOT WISH TO SELF-IDENTIFY", ...) --
+  // deliberately the SAME regex for both sides, since an option expressing "I decline to answer
+  // this" is recognised by the same set of phrasings the value itself uses. No `$` anchor, so a
+  // Workday-style trailing suffix ("... (United States of America)") never breaks the match.
+  var DECLINE_RE = /decline|prefer not|rather not|not declared|do(n'?t| not) (wish|want)|choose not|not to (say|answer|disclose)|self[-\s]?identify/i;
+
+  var RACE_VALUES = [
+    'american indian or alaska native', 'asian', 'black or african american',
+    'hispanic or latino', 'native hawaiian or other pacific islander', 'white', 'two or more races'
+  ];
+
+  /**
+   * `v` must already be cleanText()+lowercased (matchChoiceOption's job, so this can be called
+   * directly with the same normalised value it already computed). Returns an option index, -1
+   * ("recognised family, no fitting option -- stop here, never guess"), or null ("value doesn't
+   * belong to any of these families -- the caller should keep looking", i.e. fall through to
+   * generic word-boundary containment).
+   */
+  function matchAnswerFamily(v, optionTexts) {
+    // -- decline to answer -----------------------------------------------------------------
+    if (DECLINE_RE.test(v)) return findFirstMatch(optionTexts, DECLINE_RE);
+
+    // -- plain yes/no -----------------------------------------------------------------------
+    if (v === 'yes' || v === 'no') {
+      return findFirstMatch(optionTexts, new RegExp('^\\s*' + v + '\\b', 'i'));
+    }
+
+    // -- gender -------------------------------------------------------------------------------
+    if (v === 'male') return findFirstMatch(optionTexts, /^(male|man)\b/i);
+    if (v === 'female') return findFirstMatch(optionTexts, /^(female|woman)\b/i);
+    if (/^non[-\s]?binary$/.test(v)) return findFirstMatch(optionTexts, /non[-\s]?binary/i);
+
+    // -- veteran status -----------------------------------------------------------------------
+    // Four distinct known phrasings, each with its OWN fallback chain -- deliberately NOT a
+    // single shared regex, because "not a veteran" and "not a protected veteran" mean different
+    // things and conflating them is exactly the kind of guess this project refuses to make.
+    if (v === 'i am not a veteran') {
+      var vr = findFirstMatch(optionTexts, /\bnot a veteran\b/i);
+      if (vr === -1) vr = findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
+      if (vr === -1) vr = findFirstMatch(optionTexts, /^\s*no\b/i);
+      return vr;
+    }
+    if (v === 'i am a veteran, but not a protected veteran') {
+      var vr2 = findFirstMatch(optionTexts, /\bveteran\b.*\bnot a protected\b/i);
+      if (vr2 === -1) vr2 = findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
+      return vr2;
+    }
+    if (v === 'i am a protected veteran' ||
+        v === 'i identify as one or more of the classifications of protected veteran') {
+      for (var i = 0; i < optionTexts.length; i++) {
+        var ot = cleanText(optionTexts[i]);
+        if (/(protected veteran|identify as one or more)/i.test(ot) && !NEGATION_RE.test(ot)) return i;
+      }
+      return -1;
+    }
+    if (v === 'i am not a protected veteran') {
+      // Legacy value, deliberately ambiguous between "not a veteran at all" and "veteran but
+      // not protected" -- never guess between them.
+      return findFirstMatch(optionTexts, /\bnot a protected veteran\b/i);
+    }
+
+    // -- disability status ----------------------------------------------------------------------
+    if (/disability/.test(v) && /^no\b/.test(v)) {
+      for (var j = 0; j < optionTexts.length; j++) {
+        var otD = cleanText(optionTexts[j]);
+        var fitsNo = /^\s*no\b/i.test(otD) || /do(n'?t| not) have a disability/i.test(otD);
+        if (fitsNo && !/wish|want|answer/i.test(otD)) return j;
+      }
+      return -1;
+    }
+    if (/disability/.test(v) && /^yes\b/.test(v)) {
+      for (var k = 0; k < optionTexts.length; k++) {
+        var otY = cleanText(optionTexts[k]);
+        var fitsYes = /^\s*yes\b/i.test(otY) || /\bi have a disability\b/i.test(otY) || /have had one/i.test(otY);
+        if (fitsYes && !NEGATION_RE.test(otY)) return k;
+      }
+      return -1;
+    }
+
+    // -- race / ethnicity -----------------------------------------------------------------------
+    if (RACE_VALUES.indexOf(v) !== -1) {
+      var raceRe = new RegExp('^' + escapeRegExp(v) + '\\b', 'i');
+      return findFirstMatch(optionTexts, raceRe);
+    }
+
+    return null; // not a recognised family -- caller falls through to generic containment
+  }
+
+  /**
+   * Shared choice/option matcher for native <select>s, radio-button labels, and Workday's
+   * custom dropdown widget. Priority: exact (normalised) -> answer families (decline-to-answer,
+   * yes/no, gender, veteran, disability, race -- see matchAnswerFamily above) -> word-boundary
+   * containment (NEVER a raw substring -- see the project brief: "Male" must never match
+   * "Female" just because "female".indexOf("male") !== -1). Callers keep their OWN pre-existing
+   * special-case tiers (findOptionMatch's US-state cross-match and option.value match,
+   * matchWorkdayDropdownOption's degree-family and country-alias logic) as steps BEFORE calling
+   * this -- those are untouched and still run first.
+   *
+   * Returns an option index, or -1 when nothing matches confidently enough to fill blind.
+   */
+  function matchChoiceOption(value, optionTexts) {
+    var norm = function (s) { return cleanText(s).toLowerCase(); };
+    var v = norm(value);
+    if (!v) return -1;
+    var i;
+
+    // 1. exact normalised match.
+    for (i = 0; i < optionTexts.length; i++) {
+      if (norm(optionTexts[i]) === v) return i;
+    }
+
+    // 2. answer families -- a recognised family short-circuits here, whether it finds a
+    //    fitting option (returns its index) or not (returns -1) -- see matchAnswerFamily.
+    //    Family values can legitimately run long ("I am a veteran, but not a protected
+    //    veteran" is 9 words), so this check happens BEFORE the prose guard below.
+    var familyResult = matchAnswerFamily(v, optionTexts);
+    if (familyResult !== null) return familyResult;
+
+    // A long, free-text/prose-shaped value (more than ~6 words -- an open-ended answer, not a
+    // pick from a short list of choices) is NEVER matched by containment: a rambling sentence
+    // that happens to contain an option word ("...I know Figma..." containing "no" inside
+    // "know", or "...but I am open to it" containing a 4-letter "Open" option) is not the same
+    // as the user picking that option. Only an exact match (tier 1, already tried above) can
+    // resolve a value this long -- the word-boundary anchoring below guards against SHORT
+    // accidental substrings, but not against a merely-long-enough option word turning up
+    // somewhere in an otherwise unrelated sentence.
+    if (v.split(/\s+/).filter(Boolean).length > 6) return -1;
+
+    // 3. word-boundary containment. Forward direction (option contains value) is tried across
+    //    ALL options first; only if that finds nothing at all does the reverse direction (value
+    //    contains option) get tried -- and only for options of >= 4 (cleaned) characters, so a
+    //    short option text ("no", "ok") can never win just by coincidentally appearing inside a
+    //    longer value string.
+    var valueRe = new RegExp('\\b' + escapeRegExp(v) + '\\b', 'i');
+    for (i = 0; i < optionTexts.length; i++) {
+      var otNorm = norm(optionTexts[i]);
+      if (otNorm && valueRe.test(otNorm)) return i;
+    }
+    for (i = 0; i < optionTexts.length; i++) {
+      var otNorm2 = norm(optionTexts[i]);
+      if (otNorm2.length < 4) continue;
+      if (new RegExp('\\b' + escapeRegExp(otNorm2) + '\\b', 'i').test(v)) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Match priority: exact (normalised) -> normalised synonym (degree family / country alias) ->
+   * matchChoiceOption's answer families / word-boundary containment (see above -- this is the
+   * ONE shared final tier, also used by findOptionMatch and setRadioValue).
+   */
   function matchWorkdayDropdownOption(target, optionTexts) {
     var norm = function (s) { return cleanText(s).toLowerCase(); };
     var t = norm(target);
@@ -1104,11 +1286,7 @@
       }
     }
 
-    for (i = 0; i < optionTexts.length; i++) {
-      var ot = norm(optionTexts[i]);
-      if (ot && ot.indexOf(t) !== -1) return i;
-    }
-    return -1;
+    return matchChoiceOption(target, optionTexts);
   }
 
   /**
@@ -1736,10 +1914,11 @@
   })();
 
   /**
-   * Finds the index of the <select> option matching `text`, trying (in
-   * order): exact text/value match, US state name<->code cross-match, then
-   * a loose case-insensitive substring match. Returns -1 when nothing
-   * matches. Shared by setSelectValue() and the read-back check inside it.
+   * Finds the index of the <select> option matching `text`, trying (in order): exact text/value
+   * match, US state name<->code cross-match, then matchChoiceOption's answer families /
+   * word-boundary containment (shared with setRadioValue and matchWorkdayDropdownOption -- see
+   * that function's doc comment). Returns -1 when nothing matches. Shared by setSelectValue()
+   * and the read-back check inside it.
    */
   function findOptionMatch(el, text) {
     var target = String(text == null ? '' : text).trim().toLowerCase();
@@ -1768,12 +1947,10 @@
       }
     }
 
-    // 3. case-insensitive contains (either direction).
-    for (i = 0; i < el.options.length; i++) {
-      var optText2 = cleanText(el.options[i].textContent).toLowerCase();
-      if (optText2 && (optText2.indexOf(target) !== -1 || target.indexOf(optText2) !== -1)) return i;
-    }
-    return -1;
+    // 3. shared matcher: answer families, then word-boundary containment (never raw substring).
+    var optionTexts = [];
+    for (i = 0; i < el.options.length; i++) optionTexts.push(el.options[i].textContent);
+    return matchChoiceOption(text, optionTexts);
   }
 
   function setSelectValue(el, text) {
@@ -2048,10 +2225,11 @@
     var match = elements.filter(function (r) { return cleanText(getLabel(r)).toLowerCase() === target; })[0];
     if (!match) match = elements.filter(function (r) { return String(r.value).toLowerCase() === target; })[0];
     if (!match) {
-      match = elements.filter(function (r) {
-        var l = cleanText(getLabel(r)).toLowerCase();
-        return l && (l.indexOf(target) !== -1 || target.indexOf(l) !== -1);
-      })[0];
+      // Shared matcher: answer families, then word-boundary containment (never raw substring) --
+      // see matchChoiceOption's doc comment. Radio labels are the "option texts" here.
+      var labels = elements.map(function (r) { return getLabel(r); });
+      var idx = matchChoiceOption(text, labels);
+      if (idx !== -1) match = elements[idx];
     }
     if (!match) return false;
     // A native click is the most faithful simulation of a real user selecting a radio
@@ -2446,6 +2624,7 @@
     isWorkdayOptionSafe: isWorkdayOptionSafe,
     resolveWorkdayListbox: resolveWorkdayListbox,
     matchWorkdayDropdownOption: matchWorkdayDropdownOption,
+    matchChoiceOption: matchChoiceOption,
     fillWorkdayDropdown: fillWorkdayDropdown,
     degreeFamilyOf: degreeFamilyOf,
     countryAliasOf: countryAliasOf,

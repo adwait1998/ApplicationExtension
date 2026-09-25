@@ -676,5 +676,40 @@
   });
 })();
 </script>
+
+<!-- ===================================================================
+     EEO answer-family matcher fixtures (matchChoiceOption) -- a plain native
+     <select> and two plain radio groups, exercised DIRECTLY by id via
+     Scanner.setSelectValue()/setRadioValue() in selftest.js, never through
+     the whole-page scanFields() scan. Deliberately kept display:none (same
+     convention as decoy_hidden_select / display_none_field above) so these
+     do NOT perturb the page-wide field counts other checks rely on (in
+     particular "radio group captured as ONE field with 2 options", which
+     counts every radio-type field on this whole document). Option wording
+     deliberately differs from the exact profile value text ("Decline to
+     self-identify") so these checks exercise the DECLINE answer-family
+     match, not just an exact-text shortcut.
+     =================================================================== -->
+<div id="eeo_matcher_fixtures" style="display:none">
+  <select id="eeo_gender_select_fixture">
+    <option value="">Select one</option>
+    <option value="male">Male</option>
+    <option value="female">Female</option>
+    <option value="decline">I do not wish to answer</option>
+  </select>
+
+  <div id="eeo_hispanic_radio_fixture">
+    <label><input type="radio" name="eeo_hispanic_fixture" value="yes"> Yes</label>
+    <label><input type="radio" name="eeo_hispanic_fixture" value="no"> No</label>
+    <label><input type="radio" name="eeo_hispanic_fixture" value="decline"> I don't wish to answer</label>
+  </div>
+
+  <!-- negative control: ONLY Yes/No -- a decline-shaped value must find no
+       confident match here and must leave both radios unchecked. -->
+  <div id="eeo_negative_control_radio_fixture">
+    <label><input type="radio" name="eeo_negative_control_fixture" value="yes"> Yes</label>
+    <label><input type="radio" name="eeo_negative_control_fixture" value="no"> No</label>
+  </div>
+</div>
 </body>
 </html>

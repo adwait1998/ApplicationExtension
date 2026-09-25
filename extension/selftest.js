@@ -935,6 +935,200 @@ expect('negative case: unrelated pre-existing field has no section_index bleed-t
   scratch.remove();
 })();
 
+// --- matchChoiceOption: shared choice/option matcher (decline / yes-no / gender / veteran /
+//     disability / race answer families, plus word-boundary containment) -------------------
+// Pure-function checks, no DOM needed -- exercises the exact matcher shared by findOptionMatch
+// (native <select>), setRadioValue (radio labels), and matchWorkdayDropdownOption (Workday's
+// custom dropdown). The bug this replaces: the old final tier was a raw substring "contains
+// either direction" check, which picked "Female" for value "Male" because
+// "female".indexOf("male") !== -1 -- see the project brief.
+(() => {
+  const mco = Scanner.matchChoiceOption;
+
+  // -- decline family: every real-world option phrasing from the bug report must resolve -----
+  const declineOptions = [
+    "I don't wish to answer",
+    'I do not want to answer',
+    'Decline To Self Identify',
+    'I DO NOT WISH TO SELF-IDENTIFY',
+    'Not Declared',
+    'Prefer not to say',
+    'I do not wish to answer. (United States of America)'
+  ];
+  declineOptions.forEach((opt) => {
+    expect('decline family: "Decline to self-identify" matches option "' + opt + '"',
+      mco('Decline to self-identify', [opt]) === 0);
+  });
+  expect('decline family: recognised value with ONLY [Yes, No] options finds nothing (-1), never guesses Yes/No',
+    mco('Decline to self-identify', ['Yes', 'No']) === -1);
+
+  // -- gender family: the original reported bug, directly -------------------------------------
+  expect('the original bug is fixed: "Male" never matches "Female" via raw substring ("female".indexOf("male") !== -1)',
+    mco('Male', ['Female']) === -1);
+  expect('gender family: "Male" with [Female, Man, Woman] picks "Man"',
+    mco('Male', ['Female', 'Man', 'Woman']) === 1);
+  expect('gender family: "Male" with [Female, Other] (no fitting option) is -1, never falls through to fuzzy containment',
+    mco('Male', ['Female', 'Other']) === -1);
+  expect('gender family: "Female" with [Male, Female] picks "Female"',
+    mco('Female', ['Male', 'Female']) === 1);
+  expect('gender family: "Non-binary" matches an option reading "Non-Binary"',
+    mco('Non-binary', ['Male', 'Female', 'Non-Binary']) === 2);
+  expect('gender family: bare "Man" (via generic word-boundary containment, not family dispatch) picks "Man (he/him)", never "Woman"',
+    mco('Man', ['Woman (she/her)', 'Man (he/him)', 'Non-binary (they/them)']) === 1);
+
+  // -- veteran family: four distinct known phrasings, each its own fallback chain -------------
+  expect('veteran family: "I am not a veteran" exact-matches a Workday-style option set',
+    mco('I am not a veteran', [
+      'I am not a veteran',
+      'I am a veteran but not a protected veteran',
+      'I identify as one or more of the classifications of protected veteran listed above',
+      'I do not wish to self-identify'
+    ]) === 0);
+  expect('veteran family: "I am not a veteran" with NO exact option falls back to "not a protected veteran" on a Greenhouse-style set',
+    mco('I am not a veteran', [
+      'I identify as one or more of the classifications of protected veteran',
+      'I am not a protected veteran',
+      "I don't wish to answer"
+    ]) === 1);
+  expect('veteran family: "I am a veteran, but not a protected veteran" also picks "I am not a protected veteran"',
+    mco('I am a veteran, but not a protected veteran', [
+      'I identify as one or more of the classifications of protected veteran',
+      'I am not a protected veteran',
+      "I don't wish to answer"
+    ]) === 1);
+  expect('veteran family: "I am a protected veteran" picks the no-negation option, never the "not a protected veteran" one',
+    mco('I am a protected veteran', [
+      'I identify as one or more of the classifications of protected veteran',
+      'I am not a protected veteran',
+      "I don't wish to answer"
+    ]) === 0);
+  expect('veteran family: legacy "I identify as one or more of the classifications of protected veteran" also uses the no-negation rule',
+    mco('I identify as one or more of the classifications of protected veteran', [
+      "I don't wish to answer",
+      'I am not a protected veteran',
+      'I identify as one or more of the classifications of protected veteran listed above'
+    ]) === 2);
+  expect('veteran family: legacy "I am not a protected veteran" is ambiguous with no exact/phrase match -- refuses to guess (-1)',
+    mco('I am not a protected veteran', [
+      'I am not a veteran',
+      'I identify as one or more of the classifications of protected veteran listed above',
+      'I do not wish to self-identify'
+    ]) === -1);
+
+  // -- disability family ------------------------------------------------------------------------
+  const disabilityOptions = [
+    'Yes, I have a disability, or have had one in the past',
+    'No, I do not have a disability and have not had one in the past',
+    'I do not want to answer'
+  ];
+  expect('disability family: "No, I do not have a disability" picks the No option, not the decline-ish "I do not want to answer"',
+    mco('No, I do not have a disability', disabilityOptions) === 1);
+  expect('disability family: "Yes, I have a disability (or had one in the past)" picks the Yes option',
+    mco('Yes, I have a disability (or had one in the past)', disabilityOptions) === 0);
+
+  // -- race / ethnicity family: anchored-start match, never cross-matches another race ---------
+  const raceOptions = [
+    'Hispanic or Latino (United States of America)',
+    'Asian (United States of America)',
+    'White (United States of America)'
+  ];
+  expect('race family: "Asian" picks "Asian (United States of America)"', mco('Asian', raceOptions) === 1);
+  expect('race family: "Asian" never picks "Hispanic or Latino"', mco('Asian', ['Hispanic or Latino']) === -1);
+  expect('race family: "Hispanic or Latino" never picks "Asian"', mco('Hispanic or Latino', ['Asian (United States of America)']) === -1);
+  expect('race family: "Black or African American" anchored-start match with a suffix',
+    mco('Black or African American', ['Black or African American (United States of America)']) === 0);
+
+  // -- plain yes/no family ----------------------------------------------------------------------
+  expect('yes/no family: "No" with an exact "No" option present picks it directly',
+    mco('No', ['Not Declared', 'None of the above', 'No']) === 2);
+  expect('yes/no family: "No" with no exact/prefix match among decline-ish options is -1, never picks "Not Declared"',
+    mco('No', ['Not Declared', 'None of the above']) === -1);
+
+  // -- generic word-boundary containment tier (non-family, non-prose values) -------------------
+  expect('generic containment: forward direction still matches a plain non-family value on a word boundary',
+    mco('Senior', ['Junior (0-2 years)', 'Senior (6+ years)']) === 1);
+  expect('generic containment: reverse direction (value contains option) works for options >= 4 chars',
+    mco('Bachelor of Science in Computer Science', ['Computer Science']) === 0);
+  expect('generic containment: reverse direction is refused for options under 4 chars (no coincidental short-option match)',
+    mco('Not sure', ['No']) === -1);
+
+  // -- prose guard: a long free-text answer is never matched by containment, only by exact text.
+  //    Without this, a rambling sentence can coincidentally contain an option as a raw
+  //    substring OR as a genuine whole word -- neither means the user picked that option.
+  expect('prose guard: a long sentence containing "know" (which contains "no") never matches a "No" option',
+    mco('I know Figma deeply and use it daily', ['Yes', 'No']) === -1);
+  expect('prose guard: a long sentence never matches a "Yes"/"No" option even when unrelated to either',
+    mco('I know relocation can be hard, but I am open to it', ['Yes', 'No']) === -1);
+  expect('prose guard: closes the gap the >= 4 char reverse-containment rule alone would miss (a real "Open" option, coincidentally a whole word in an unrelated sentence)',
+    mco('I know relocation can be hard, but I am open to it', ['Open']) === -1);
+  expect('prose guard: does not affect a short (<= 6 word), non-family, non-prose value',
+    mco('Bachelor of Science in Computer Science', ['Computer Science']) === 0);
+  expect('prose guard: does not affect a recognised answer family even though the value itself is long (9 words)',
+    mco('I am a veteran, but not a protected veteran', [
+      'I identify as one or more of the classifications of protected veteran',
+      'I am not a protected veteran',
+      "I don't wish to answer"
+    ]) === 1);
+})();
+
+// --- Workday dropdown value matching: gender + a decline-only negative control, plus the
+//     designer-degree family synonyms added alongside the EEO matcher work above. Exercises
+//     matchWorkdayDropdownOption directly (pure function, no popup needed) since the
+//     open-popup/click plumbing is already covered by the existing async dropdown block below.
+(() => {
+  const mwdo = Scanner.matchWorkdayDropdownOption;
+  expect('Workday dropdown: "Male" with [Female, Male] picks the Male option',
+    mwdo('Male', ['Female (she/her)', 'Male (he/him)']) === 1);
+  expect('Workday dropdown: "Male" with [Female, Decline] (no fitting option) is -1, never guesses',
+    mwdo('Male', ['Female (she/her)', 'Decline']) === -1);
+
+  expect('Workday degree family: "B.Des" normalises to the bachelor family',
+    Scanner.degreeFamilyOf('B.Des') === 'bachelor');
+  expect('Workday degree family: "Master of Design" normalises to the master family',
+    Scanner.degreeFamilyOf('Master of Design') === 'master');
+  expect('Workday degree family: "BFA" normalises to the bachelor family',
+    Scanner.degreeFamilyOf('BFA') === 'bachelor');
+  expect('Workday degree family: "Master of Human-Computer Interaction" normalises to the master family (hyphen-tolerant)',
+    Scanner.degreeFamilyOf('Master of Human-Computer Interaction') === 'master');
+})();
+
+// --- end-to-end: setSelectValue / setRadioValue through the real fill path, via the hidden
+//     EEO fixtures on test-page.html (see the comment there). Also a negative control where the
+//     only options are Yes/No and the field must stay completely untouched.
+(() => {
+  const doc = dom.window.document;
+
+  const genderSelect = doc.getElementById('eeo_gender_select_fixture');
+  const genderOk = Scanner.setSelectValue(genderSelect, 'Decline to self-identify');
+  expect('end-to-end: setSelectValue resolves "Decline to self-identify" on a native <select> via the decline family',
+    genderOk === true && genderSelect.options[genderSelect.selectedIndex].textContent === 'I do not wish to answer');
+
+  const hispanicRadios = Array.from(doc.querySelectorAll('input[name="eeo_hispanic_fixture"]'));
+  const hispanicOk = Scanner.setRadioValue(hispanicRadios, 'Decline to self-identify');
+  const hispanicChecked = hispanicRadios.filter((r) => r.checked);
+  expect('end-to-end: setRadioValue resolves "Decline to self-identify" on a radio group via the decline family',
+    hispanicOk === true && hispanicChecked.length === 1 && hispanicChecked[0].value === 'decline');
+
+  // Negative control: ONLY Yes/No options -- a decline-shaped value must find no confident
+  // match and must leave the field COMPLETELY untouched (no radio checked at all).
+  const negControlRadios = Array.from(doc.querySelectorAll('input[name="eeo_negative_control_fixture"]'));
+  const negControlOk = Scanner.setRadioValue(negControlRadios, 'Decline to self-identify');
+  const negControlChecked = negControlRadios.filter((r) => r.checked);
+  expect('negative control: setRadioValue with only [Yes, No] options returns false for a decline value',
+    negControlOk === false);
+  expect('negative control: setRadioValue leaves the Yes/No field completely untouched (nothing checked)',
+    negControlChecked.length === 0);
+
+  // Negative control: a prose-shaped answer to a Yes/No radio group must also leave it
+  // completely untouched (the prose guard, exercised through the real fill path).
+  const negControlOkProse = Scanner.setRadioValue(negControlRadios, 'I know relocation can be hard, but I am open to it');
+  const negControlCheckedProse = negControlRadios.filter((r) => r.checked);
+  expect('negative control: setRadioValue with a prose-shaped value returns false on a Yes/No field',
+    negControlOkProse === false);
+  expect('negative control: a prose-shaped value leaves the Yes/No field completely untouched (nothing checked)',
+    negControlCheckedProse.length === 0);
+})();
+
 // --- Workday dropdown + prompt + résumé, run STRICTLY SEQUENTIALLY -----------------------
 // One combined async block, each step awaited before the next starts — deliberately mirroring
 // how content.js's applyFills() now processes real fills (one field at a time, never
@@ -961,6 +1155,21 @@ pending.push((async () => {
     const okBE = await Scanner.applyFill(degreeEntry, 'B.E.');
     expect('Degree dropdown filled by synonym "B.E." (dots normalised away) resolves via the bachelor-degree family',
       okBE === true && doc.getElementById('wd_degree_button_text').textContent === 'Bachelors Degree or Equivalent');
+
+    // Design/creative-field degree synonyms (the primary user is a product/UX designer).
+    const okBDes = await Scanner.applyFill(degreeEntry, 'B.Des');
+    expect('Degree dropdown filled by design synonym "B.Des" resolves via the bachelor-degree family',
+      okBDes === true && doc.getElementById('wd_degree_button_text').textContent === 'Bachelors Degree or Equivalent');
+
+    const okMDes = await Scanner.applyFill(degreeEntry, 'Master of Design');
+    expect('Degree dropdown filled by design synonym "Master of Design" resolves via the master-degree family',
+      okMDes === true && doc.getElementById('wd_degree_button_text').textContent === 'Masters Degree or Equivalent');
+
+    // Negative control: re-filling with the bachelor-family synonym afterwards must land back
+    // on Bachelors, proving "B.Des" never resolves to the Masters option it was just showing.
+    const okBDesAgain = await Scanner.applyFill(degreeEntry, 'B.Des');
+    expect('"B.Des" never picks "Masters Degree or Equivalent" -- filling it after Master of Design lands back on Bachelors',
+      okBDesAgain === true && doc.getElementById('wd_degree_button_text').textContent === 'Bachelors Degree or Equivalent');
 
     const okBad = await Scanner.applyFill(degreeEntry, 'Xyzzy Nonexistent Degree');
     expect('a Degree value with no matching option (exact, family, or contains) selects NOTHING — never falls back to the first option',
