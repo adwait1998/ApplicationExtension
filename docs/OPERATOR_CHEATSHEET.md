@@ -82,8 +82,8 @@ highlights what it deliberately left alone.
 ```
 
 Then load the extension: Chrome → `chrome://extensions` → **Developer mode** → **Load unpacked** →
-`E:\auto-apply-pipeline\extension` (or click **Reload** if it was loaded before — its ID is now
-pinned to `noooclaijfiejnfgabkemnpabcbdnaac`, so a previously pasted token is no longer needed).
+`E:\auto-apply-pipeline\extension` (if an older copy is loaded, click **Remove** on it first, then Load unpacked — the ID is now
+pinned to `noooclaijfiejnfgabkemnpabcbdnaac`, which the native host allows; no token to paste).
 From then on the extension starts the local service itself (detached, no window, logging to
 `<data dir>\logs\extension-service.log`) and fetches its token through the native host. Settings
 → Connection says "Connected automatically". Without `install-host`, the old way still works:
