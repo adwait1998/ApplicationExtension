@@ -2,7 +2,15 @@
 EEO, address, DOB — resolve ONLY from exact profile paths, with explicit
 polarity handling. Never fuzzy-matched, never LLM-answered, never cached.
 An unresolvable canary returns None so the caller keeps the field UNRESOLVED
-(which blocks deterministic auto-submit — the interlock)."""
+(which blocks deterministic auto-submit — the interlock).
+
+EEO is the one deliberate exception: voluntary self-identification always
+has a safe, lawful answer (decline), so an EEO canary with nothing in
+eeo_voluntary.* never stays unresolved — see _EEO_DECLINE below. This
+mirrors apply/v2/resolver.py's own _EEO_DEFAULTS/_DECLINE policy for the
+v2 pipeline (absent-in-profile -> decline); that module has its own
+separate implementation and never imports this one, so there is nothing
+here for it to conflict with — same rule, two independent call paths."""
 from __future__ import annotations
 
 import re
@@ -12,10 +20,40 @@ _MARKERS = {
     "sponsorship": re.compile(r"\b(sponsor\w*|visa)\b", re.I),
     "citizenship": re.compile(r"\b(citizen\w*|us person|green card|permanent resident)\b", re.I),
     "salary": re.compile(r"\b(salary|compensation|pay expectation|expected (pay|comp))\b", re.I),
-    "eeo_gender": re.compile(r"\bgender\b", re.I),
-    "eeo_race": re.compile(r"\b(race|ethnicit\w+)\b", re.I),
-    "eeo_veteran": re.compile(r"\bveteran\b", re.I),
+    # EEO / OFCCP voluntary self-identification markers. Each stays a CANARY:
+    # resolve_canary answers these ONLY from eeo_voluntary.* or the decline
+    # default (_EEO_DECLINE below) — never the answer bank, never a draft,
+    # never inferred from anything else.
+    # "sex" is only an EEO word when it is not describing a crime: "Are you a
+    # registered sex offender?" / "convicted of a sex offense?" are criminal
+    # background attestations. Without the lookahead they matched here and
+    # were answered with the applicant's GENDER ("Male") — in both the
+    # extension and the pipeline's Greenhouse adapter, which share this module.
+    "eeo_gender": re.compile(
+        r"\b(gender|sex(?!\s*-?\s*(offen\w*|crimes?|abuse|trafficking|work)\b))\b", re.I),
+    # Ethnicity ("Are you Hispanic or Latino?") is asked as its OWN question
+    # on OFCCP-style forms, separate from race — its own marker/profile
+    # field (eeo_voluntary.hispanic_latino), not folded into eeo_race.
+    "eeo_hispanic_latino": re.compile(r"\b(hispanic|latino|latina|latinx)\b", re.I),
+    # A bare "race" used to fire on "race condition" (a real label/question
+    # on engineering-adjacent forms), and on "Tracer"/"Embrace" before word
+    # boundaries were added. \b already stops the latter two (no boundary
+    # mid-token); "race condition" IS a standalone word "race" though, so it
+    # needs an explicit carve-out — never treat the engineering term as EEO.
+    "eeo_race": re.compile(r"\b(race(?!\s*-?\s*conditions?\b)|ethnicit\w+)\b", re.I),
+    "eeo_veteran": re.compile(r"\b(veteran|vevraa)\b", re.I),
     "eeo_disability": re.compile(r"\bdisabilit\w+\b", re.I),
+    # Voluntary LGBTQ+ self-identification. Nothing marked these before, so a
+    # draft-enabled path could hand "Do you identify as transgender?" to an
+    # LLM, which would guess. Same policy as the rest of EEO: the profile
+    # value if the applicant set one, else decline. ("transgender" needs its
+    # own alternative: \bgender\b can never match inside it.)
+    "eeo_orientation": re.compile(
+        r"\b(sexual orientation|transgender|lgbt\w*)\b", re.I),
+    # Pronouns are the applicant's to state, never something to infer: a
+    # guessed pronoun misgenders the applicant on their own application.
+    # Profile value or unresolved — deliberately NOT the decline default.
+    "pronouns": re.compile(r"\bpronouns?\b", re.I),
     # The bare `address` alternative matched "Email Address", "E-mail Address"
     # and "Web address", so an email input resolved as the POSTAL-address canary
     # and got filled with a street address. The lookbehinds disqualify the words
@@ -33,7 +71,23 @@ _MARKERS = {
     "password": re.compile(r"\bpassword\b", re.I),
 }
 
+_ACCOMMODATION_RE = re.compile(r"\baccommodat\w*\b", re.I)
+
 _NEGATION_RE = re.compile(r"\b(without|not require|don'?t require|do not require|no need)\b", re.I)
+
+# Canonical decline text for EEO voluntary self-identification — verbatim to
+# the JS-stored eeo_voluntary.* enum's own "Decline to self-identify" option
+# (extension/resolve.py hands this straight back as the field's literal
+# value, which the JS side then maps to each site's option wording — so the
+# casing here must match that stored value exactly, not be fuzzy-mapped).
+# Declining is always a lawful answer to voluntary self-identification, so
+# an EEO canary is NEVER left unresolved: absent or empty in the profile
+# falls back to this. apply/v2/resolver.py applies the identical absent ->
+# decline rule for its own separate pipeline (_EEO_DEFAULTS/_DECLINE there,
+# lowercased because it only feeds a fuzzy option_intent match rather than
+# emitting a literal value) — same policy, independent implementation;
+# resolver.py never imports this module, so there is nothing to conflict.
+_EEO_DECLINE = "Decline to self-identify"
 
 _TRUTHY = {"true", "yes", "y", "1"}
 _FALSY = {"false", "no", "n", "0"}
@@ -134,14 +188,30 @@ def resolve_canary(question: str, profile: dict) -> str | None:
         cur = comp.get("salary_currency", "")
         return f"{val} {cur}".strip() if val else None
 
+    # EEO: profile value if set, else the safe decline default — never None,
+    # so these never surface as "answer this yourself" (see _EEO_DECLINE).
     if _MARKERS["eeo_gender"].search(q):
-        return eeo.get("gender") or None
+        return eeo.get("gender") or _EEO_DECLINE
+    if _MARKERS["eeo_hispanic_latino"].search(q):
+        return eeo.get("hispanic_latino") or _EEO_DECLINE
     if _MARKERS["eeo_race"].search(q):
-        return eeo.get("race_ethnicity") or None
+        return eeo.get("race_ethnicity") or _EEO_DECLINE
+    if _MARKERS["eeo_orientation"].search(q):
+        if re.search(r"\btransgender\b", q, re.I):
+            return eeo.get("transgender") or _EEO_DECLINE
+        return eeo.get("sexual_orientation") or _EEO_DECLINE
     if _MARKERS["eeo_veteran"].search(q):
-        return eeo.get("veteran_status") or None
+        return eeo.get("veteran_status") or _EEO_DECLINE
     if _MARKERS["eeo_disability"].search(q):
-        return eeo.get("disability_status") or None
+        if _ACCOMMODATION_RE.search(q):
+            # "Do you need an accommodation for a disability?" asks about the
+            # applicant's own needs, not self-identification: neither
+            # disability_status nor the decline text answers it.
+            return None
+        return eeo.get("disability_status") or _EEO_DECLINE
+
+    if _MARKERS["pronouns"].search(q):
+        return per.get("pronouns") or None
 
     if _MARKERS["dob"].search(q):
         return None  # no DOB in profile — never guess
