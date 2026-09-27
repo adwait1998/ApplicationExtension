@@ -2930,6 +2930,107 @@ pending.push((async () => {
     plCommentCtx.section === '');
 }
 
+// ---- Ashby: a <label for="..."> pointing at an id the FIELD ITSELF DOES NOT HAVE (a real
+// markup bug on Ashby's own part -- the input renders with no id attribute at all), where the
+// label is a plain preceding SIBLING of the input's wrapper -- not linked by for/id, not
+// wrapping it either. Live, jobs.ashbyhq.com application forms, 2026-09-26: getLabel() fell
+// through every structured signal (label[for], wrapping label, aria-label, aria-labelledby) all
+// the way to the input's OWN placeholder ("Start typing..."), a generic prompt string with zero
+// semantic meaning, so this field was NEVER recognised as a location field at all.
+{
+  const ashDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  ashDom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 };
+  };
+  const ashdoc = ashDom.window.document;
+  ashdoc.body.innerHTML =
+    '<div class="_fieldEntry_1e3gg_28" data-field-path="_systemfield_location">' +
+      '<label class="_heading_f7cvd_52 _label_1e3gg_42" for="_systemfield_location">Location</label>' +
+      '<div class="_inputContainer_d7ago_28">' +
+        '<input class="_input_d7ago_28" placeholder="Start typing..." role="combobox">' +
+        '<button>v</button>' +
+      '</div>' +
+    '</div>';
+  const ashInput = ashdoc.querySelector('input');
+  expect('Ashby-shaped broken for/id pairing: the sibling <label>\'s real text ("Location") wins over the input\'s own generic placeholder ("Start typing...")',
+    Scanner.getLabel(ashInput) === 'Location');
+
+  // NEGATIVE CONTROL: an UNRELATED element sitting immediately before this one (a plain
+  // paragraph, or another field entirely) must stop the search right there -- never skip past
+  // it hunting for some label further back, which could grab an entirely different field's own
+  // label (the exact regression this fix first introduced, caught by the existing
+  // placeholder-only/nearby-text tests above: "How did you hear about us?" preceding an
+  // unlabelled field walked straight past that paragraph to a wrapping label two fields back).
+  ashdoc.body.innerHTML =
+    '<label for="ash_other">Some Other Field</label><input id="ash_other" type="text">' +
+    '<p>Unrelated paragraph text</p>' +
+    '<input placeholder="Type here..." type="text">';
+  const ashUnrelated = ashdoc.querySelectorAll('input')[1];
+  expect('NEGATIVE CONTROL: a non-<label> element right before this field stops the search -- never reaches back to an earlier, unrelated field\'s own label',
+    Scanner.getLabel(ashUnrelated) === 'Type here...');
+}
+
+// ---- Ashby's Location combobox: unlike react-select, a genuine commit leaves the FULL
+// selected option's text sitting directly in the input itself -- no separate chip, no
+// aria-activedescendant either (live, jobs.ashbyhq.com, 2026-09-26). verifyComboboxSelection's
+// very first check, `if (input.value) return false`, assumed the react-select convention (input
+// always clears on a real commit) and so refused every genuine Ashby selection outright: the
+// click landed, Ashby's own state updated, but our OWN code reported failure and left the field
+// unresolved. Confirmed live (and required for this to be a safe fix, not a new false positive):
+// Ashby ALSO clears the input to '' on blur when NOTHING was selected, exactly like react-select
+// does via its chip -- so "the menu is closed AND the input still holds text" can only mean a
+// real commit for this widget shape too.
+pending.push((async () => {
+  const ashCbDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  ashCbDom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 };
+  };
+  const acdoc = ashCbDom.window.document;
+  acdoc.body.innerHTML =
+    '<label for="ac_location">Location</label>' +
+    '<div>' +
+      '<input id="ac_location" role="combobox" aria-expanded="false" aria-controls="ac_listbox">' +
+      '<ul id="ac_listbox" role="listbox" style="display:none">' +
+        '<li role="option" id="ac_opt0">Tempe, Arizona, United States</li>' +
+      '</ul>' +
+    '</div>';
+  const acInput = acdoc.getElementById('ac_location');
+  const acMenu = acdoc.getElementById('ac_listbox');
+  const acOpt = acdoc.getElementById('ac_opt0');
+  // Mirrors Ashby's own real behavior: mouseup opens the menu (matching openCombobox's own
+  // "Toggle flyout" fallback path -- there is no such button here, so it falls to the ArrowDown
+  // keyup path instead; either way, this only needs SOME open trigger scanner.js already tries).
+  acInput.addEventListener('keyup', (e) => { if (e.key === 'ArrowDown') { acMenu.style.display = 'block'; acInput.setAttribute('aria-expanded', 'true'); } });
+  let mousedownArmed = false;
+  acOpt.addEventListener('mousedown', () => { mousedownArmed = true; });
+  acOpt.addEventListener('click', () => {
+    if (!mousedownArmed) return;
+    // The one thing that makes Ashby's widget different from every OTHER mock in this file:
+    // the FULL option text goes straight into the input -- never a separate chip/value display.
+    acInput.value = acOpt.textContent;
+    acMenu.style.display = 'none';
+    acInput.setAttribute('aria-expanded', 'false');
+  });
+
+  const scanned = Scanner.scanFields(acdoc);
+  const field = scanned.fields.find(f => f.label === 'Location');
+  expect('Ashby-shaped combobox fixture: scanned as widget "combobox"', !!field && field.widget === 'combobox');
+  const entry = scanned.registry[field.id];
+  const ok = await Scanner.applyFill(entry, 'Tempe, Arizona');
+  expect('Ashby-shaped combobox: a genuine commit (option clicked, full text left in the input, no chip anywhere) is recognised as a SUCCESSFUL fill',
+    ok === true);
+  expect('...and getComboboxCommittedValue() reads the SAME value back afterwards (content.js\'s verify sweep depends on exactly this)',
+    Scanner.getComboboxCommittedValue(entry) === 'Tempe, Arizona, United States');
+
+  // NEGATIVE CONTROL: typed-but-never-selected text must still never read as committed -- the
+  // fix must not just start trusting ANY non-empty input value.
+  acInput.value = 'Tempe, Ariz';
+  acInput.setAttribute('aria-expanded', 'true'); // menu still open -- nothing was ever picked
+  acMenu.style.display = 'block';
+  expect('NEGATIVE CONTROL: typed-but-not-selected text, with the menu still open, is NOT read back as committed',
+    Scanner.getComboboxCommittedValue(entry) === '');
+})());
+
 Promise.all(pending).then(() => {
   let failed = 0;
   console.log('\n--- checks ---');

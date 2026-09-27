@@ -227,6 +227,31 @@
     return '';
   }
 
+  /** ONLY the IMMEDIATELY preceding element sibling, checked at `el` itself and (if `el` has no
+   * preceding sibling of its own) at one shallow ancestor level -- covers Ashby's own shape (the
+   * label is the immediately preceding sibling of the input's WRAPPER div, one level up, not of
+   * the input itself). Deliberately never skips PAST a non-label sibling to keep hunting further
+   * back -- an unrelated element sitting right before this one (a plain paragraph, another
+   * field entirely) means this is not the bare "label immediately before its field" shape, and
+   * searching on regardless risks grabbing an entirely different field's own label (a live
+   * regression this exact mistake caused: "How did you hear about us?" preceding an UNLABELLED
+   * field walked straight past that paragraph to a wrapping label two fields back). Bounded to
+   * the LABEL tag specifically, so this can only ever find a genuine, deliberately-authored
+   * label, never arbitrary nearby prose. */
+  function getPrecedingSiblingLabel(el) {
+    var node = el;
+    for (var depth = 0; depth < 2 && node; depth++) {
+      var sib = node.previousElementSibling;
+      if (sib && sib.tagName === 'LABEL') {
+        var t = labelOwnText(sib);
+        if (t) return t;
+      }
+      if (sib) return ''; // something else sits right here -- stop, never hunt further back
+      node = node.parentElement;
+    }
+    return '';
+  }
+
   /**
    * A <label> element's own text, with the field it labels stripped out first -- both the raw
    * form control (input/select/textarea) AND a custom combobox's own "currently selected
@@ -293,13 +318,26 @@
       if (parts.length) return parts.join(' ');
     }
 
-    // 5. placeholder
+    // 5. a REAL <label> element sitting as the nearest preceding SIBLING of `el` or of a
+    // shallow ancestor -- Ashby's own shape, live, jobs.ashbyhq.com, 2026-09-26:
+    // <label for="_systemfield_location">Location</label><div><input placeholder="Start
+    // typing..." ...></div>, where the input renders with NO id attribute at all (a real markup
+    // bug on Ashby's part -- the label's own for="_systemfield_location" points at an id the
+    // field never has), so neither step 1 nor step 2 above ever finds this label. Tried BEFORE
+    // placeholder: an actual <label> naming the field is always a more deliberate signal than a
+    // generic prompt string ("Start typing...", "Type here..."). Restricted to the LABEL tag
+    // specifically (never arbitrary nearby prose, unlike the broader last-resort fallback below)
+    // so this can never misfire on unrelated nearby text.
+    var siblingLabel = getPrecedingSiblingLabel(el);
+    if (siblingLabel) return siblingLabel;
+
+    // 6. placeholder
     if (el.placeholder) {
       var t5 = cleanText(el.placeholder);
       if (t5) return t5;
     }
 
-    // 6. nearby preceding text node
+    // 7. nearby preceding text node
     var nearby = getPrecedingText(el);
     if (nearby) return nearby;
 
@@ -2693,13 +2731,35 @@
     return cleanText(opt.textContent);
   }
 
+  /** Some combobox widgets (Ashby's own application-form autocomplete, live,
+   * jobs.ashbyhq.com, 2026-09-26 — unlike react-select) never render a separate chip or set
+   * aria-activedescendant at all: a genuine commit leaves the FULL selected option's text
+   * sitting directly in the input itself, and the ONLY other state change is the menu closing.
+   * Trusted ONLY once the menu is verifiably closed (the SAME two-part check
+   * getGenericComboboxValue() above already uses: aria-expanded not "true", AND no menu element
+   * still visible) — confirmed live that this widget ALSO clears the input back to '' on blur
+   * when nothing was ever selected (exactly like react-select's own chip-based "leftover search
+   * text never survives" contract, just enforced through a different mechanism), so "the menu
+   * is closed AND the input still holds text" can only mean a real commit here too. */
+  function getInlineComboboxValue(entry) {
+    var input = entry.input;
+    var raw = cleanText(input.value || '');
+    if (!raw) return '';
+    if (input.getAttribute && input.getAttribute('aria-expanded') === 'true') return '';
+    var menu = resolveComboboxMenu(entry);
+    if (menu && isVisible(menu)) return '';
+    return raw;
+  }
+
   /** The field's current COMMITTED value (for getCurrentValue/undo) — never the search
    * input's own leftover typed text (see the project brief: typed-but-not-selected is not a
    * value). */
   function getComboboxCommittedValue(entry) {
     var chips = getComboboxChipTexts(entry);
     if (chips.length) return chips.join(', ');
-    return getGenericComboboxValue(entry);
+    var generic = getGenericComboboxValue(entry);
+    if (generic) return generic;
+    return getInlineComboboxValue(entry);
   }
 
   function normEqText(a, b) { return cleanText(a).toLowerCase() === cleanText(b).toLowerCase(); }
@@ -2748,11 +2808,14 @@
     return cleanText(String(text || '').replace(/\s*\+\d+\s*$/, ''));
   }
 
-  /** True only once `matchedText` shows up as a genuinely COMMITTED chip/aria-state AND the
-   * search input itself is empty — leftover search text sitting in the input is explicitly
-   * NOT a commit (react-select drops it on blur; see the project brief). */
+  /** True only once `matchedText` shows up as a genuinely committed chip/aria-state/inline
+   * value. Leftover search text sitting in the input, with the menu still open (or the widget
+   * genuinely uncommitted), is explicitly NOT a commit (react-select drops it on blur; Ashby's
+   * own inline-value widget — see getInlineComboboxValue() — does the same, just by clearing the
+   * input itself rather than a separate chip; either way getComboboxCommittedValue() below
+   * already only ever returns a value once ONE of those widget-specific "this was a genuine
+   * commit" signals holds). */
   function verifyComboboxSelection(entry, matchedText) {
-    if (cleanText(entry.input.value || '')) return false;
     var phoneBtn = pairedPhoneCountryButton(entry.input);
     if (phoneBtn) {
       var selectedName = phoneCountrySelectedName(phoneBtn);
@@ -2763,8 +2826,8 @@
       for (var i = 0; i < chips.length; i++) { if (normEqText(chips[i], matchedText)) return true; }
       return false;
     }
-    var generic = getGenericComboboxValue(entry);
-    return !!generic && normEqText(generic, matchedText);
+    var committed = getComboboxCommittedValue(entry);
+    return !!committed && normEqText(committed, matchedText);
   }
 
   /** True once `menu` has rendered SOMETHING to read -- at least one option, or an explicit
