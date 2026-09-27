@@ -54,6 +54,19 @@ def clean_env(data_dir: Path, port: int | None = None) -> dict:
     env["APPLYPILOT_DIR"] = str(data_dir)
     if port is not None:
         env["APPLYPILOT_EXTENSION_PORT"] = str(port)
+    # Hermetic verification must never reach a real LLM. llm_util's fallback chain
+    # calls config.find_claude_binary(), which isn't gated by SCRUB above -- block
+    # every way it can find a real Claude Code CLI: an explicit CLAUDE_BIN
+    # override, a PATH lookup (shutil.which), and (on Windows) globbing the
+    # AppData/LocalAppData install roots it also checks.
+    env["CLAUDE_BIN"] = ""
+    if os.name == "nt":
+        env["PATH"] = r"C:\Windows\System32;C:\Windows"
+        env["APPDATA"] = str(data_dir)
+        env["LOCALAPPDATA"] = str(data_dir)
+        env["USERPROFILE"] = str(data_dir)
+    else:
+        env["PATH"] = "/usr/bin:/bin"
     return env
 
 
@@ -102,6 +115,10 @@ def wait_health(port: int, token: str, timeout: float = 90) -> dict | None:
     return None
 
 
+# Blunt and name-based, not PID-scoped -- the native-messaging protocol never
+# hands back a PID. This kills every process with this name on the machine, not
+# just this run's; only run it on a machine with no legitimate running instance
+# of the app (per project rules, never run the real installer on a dev machine).
 def kill_bundle_processes(exe: Path) -> None:
     """Stop any copy of the bundle's app still running (the service the host starts)."""
     if os.name == "nt":
@@ -224,8 +241,15 @@ def check_host_starts_service(exe: Path) -> list[str]:
             proc.stdin.write(frame({"cmd": "ensure_server"}))
             proc.stdin.flush()
             reply = read_frame(proc.stdout)
-            proc.stdin.close()
-            proc.wait(timeout=60)
+            # Kill forcefully rather than closing stdin: Chrome terminates the host
+            # abruptly after every message, and a cooperative exit would never
+            # exercise the start_new_session/CREATE_NEW_PROCESS_GROUP detachment
+            # this check exists to verify (see native_host.py, popen_kwargs()).
+            proc.kill()
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                pass
             if not reply or not reply.get("ok") or reply.get("port") != port:
                 return [f"ensure_server: {reply!r}"]
             if not wait_health(port, reply["token"], timeout=30):
