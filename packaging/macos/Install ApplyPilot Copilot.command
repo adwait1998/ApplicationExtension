@@ -19,7 +19,13 @@ chmod +x "$DEST/Uninstall ApplyPilot Copilot.command"
 # macOS would silently refuse to run it, so clear the flag on these files only.
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
-"$DEST/app/ApplyPilotCopilot" install-host --extension-dir "$DEST/extension"
+# Keep going even if this fails -- the friend still needs the steps below to load the extension manually.
+if "$DEST/app/ApplyPilotCopilot" install-host --extension-dir "$DEST/extension"; then
+  echo "Connected to Chrome."
+else
+  echo
+  echo "Warning: couldn't connect to Chrome automatically. You can try running this installer again, or load the extension manually (see the next steps below)."
+fi
 
 echo
 echo "Done. Next, in Chrome:"
@@ -28,7 +34,7 @@ echo "  2. Click 'Load unpacked' and choose this folder:"
 echo "       $DEST/extension"
 echo "     (in the file picker: Home > Applications > ApplyPilot Copilot > extension)"
 echo "The setup guide is opening now."
-open "$DEST"
+open "$DEST" || true
 open -e "$DEST/SETUP.txt" || true
 echo
-read -n 1 -s -r -p "Press any key to close this window."
+read -n 1 -s -r -p "Press any key to close this window." || true

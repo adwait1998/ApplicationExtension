@@ -12,6 +12,7 @@ cd "$ROOT"
 
 PYTHON="${PYTHON:-python3}"
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/applypilot/__init__.py)"
+[ -n "$VERSION" ] || { echo "could not read __version__ from src/applypilot/__init__.py" >&2; exit 1; }
 echo "ApplyPilot Copilot friend build $VERSION (macOS arm64)"
 
 VENV="$ROOT/packaging/.venv-mac"
