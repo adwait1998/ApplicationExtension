@@ -5,7 +5,9 @@ ApplyPilot Copilot fills job applications in Chrome for you. You review every
 answer and press Submit yourself; it never submits anything.
 Everything stays on your computer.
 
-You need: Google Chrome (version 138 or newer).
+You need: Google Chrome (a recent version). The optional on-device AI
+feature (section 4 below) needs Chrome 138 or newer; everything else works
+on older versions too.
 
 
 1. Run the installer
@@ -39,7 +41,8 @@ you can dismiss it.
 ----------------------
 
 1. Right-click the ApplyPilot icon > Options.
-2. Under "Import your résumé", choose your résumé (PDF, Word or text file).
+2. Under "Get started," click "Choose file" and pick your résumé (PDF, Word
+   or text file).
 3. Check what it found, fill anything missing, and save.
 
 
