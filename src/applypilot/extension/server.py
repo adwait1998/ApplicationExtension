@@ -39,7 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from applypilot import profiles as profiles_mod
-from applypilot.extension import (answer_memory, app_log, cover_letter, job_context, llm_util, resolve,
+from applypilot.extension import (answer_memory, app_log, cover_letter, job_context, llm_bridge, llm_util, resolve,
                                   resume_import, schema, tailor)
 from applypilot.extension import settings as ext_settings
 
@@ -131,6 +131,13 @@ class LogIn(BaseModel):
 
 class LogStatusIn(BaseModel):
     status: str = ""
+
+
+class LlmResultIn(BaseModel):
+    """POST /llm/result body: a page's answer to one on-device AI job."""
+    id: str
+    text: str | None = None
+    error: str | None = None
 
 
 class CoverLetterIn(BaseModel):
@@ -431,6 +438,24 @@ def create_app(
             "cloud_llm_allowed": ext_settings.effective_settings(app_dir).get("cloud_llm_allowed", False),
             "llm_blocked_reason": llm_util.cloud_block_reason(app_dir),
         }
+
+    # ---- on-device AI bridge (see llm_bridge.py and extension/llm_bridge.js) ----
+    # Plain `def`: FastAPI runs these in its thread pool, so a poll held open
+    # waiting for a job never blocks other requests.
+
+    @app.get("/llm/next")
+    def llm_next(status: str = "unavailable", _: None = Depends(_require_token)) -> dict:
+        llm_bridge.BRIDGE.report(status)
+        if status != "available":
+            return {"job": None}
+        job = llm_bridge.BRIDGE.next_job(hold_s=llm_bridge.POLL_HOLD_S)
+        if job is None:
+            return {"job": None}
+        return {"job": {"id": job.id, "messages": job.messages, "temperature": job.temperature}}
+
+    @app.post("/llm/result")
+    def llm_result(body: LlmResultIn, _: None = Depends(_require_token)) -> dict:
+        return {"ok": llm_bridge.BRIDGE.complete(body.id, text=body.text, error=body.error)}
 
     @app.post("/resolve")
     def resolve_endpoint(body: ResolveRequest, _: None = Depends(_require_token)) -> dict:

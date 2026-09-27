@@ -100,3 +100,78 @@ def test_client_defaults_to_the_module_bridge(monkeypatch):
     fresh = llm_bridge.Bridge()
     monkeypatch.setattr(llm_bridge, "BRIDGE", fresh)
     assert llm_bridge.BridgeClient()._bridge is fresh
+
+
+# ---------------------------------------------------------------------------
+# /llm/next and /llm/result
+# ---------------------------------------------------------------------------
+
+fastapi = pytest.importorskip("fastapi")
+from fastapi.testclient import TestClient  # noqa: E402
+
+from applypilot.extension.server import create_app, get_or_create_token  # noqa: E402
+
+
+@pytest.fixture
+def bridge_client(tmp_path, monkeypatch):
+    fresh = llm_bridge.Bridge()
+    monkeypatch.setattr(llm_bridge, "BRIDGE", fresh)
+    monkeypatch.setattr(llm_bridge, "POLL_HOLD_S", 0.05)
+    token = get_or_create_token(tmp_path)
+    app = create_app(app_dir=tmp_path, root=tmp_path, profile={"personal": {}})
+    return TestClient(app), {"X-ApplyPilot-Token": token}, fresh
+
+
+def test_llm_next_needs_the_token(bridge_client):
+    client, _headers, _bridge = bridge_client
+    assert client.get("/llm/next?status=available").status_code == 401
+
+
+def test_llm_next_records_status_and_gives_no_job_when_not_ready(bridge_client):
+    client, headers, bridge = bridge_client
+    bridge.submit([{"role": "user", "content": "q"}], 0.3)
+    resp = client.get("/llm/next?status=downloadable", headers=headers)
+    assert resp.status_code == 200 and resp.json() == {"job": None}
+    assert bridge.status() == "downloadable"
+
+
+def test_llm_next_hands_out_a_job_and_result_completes_it(bridge_client):
+    client, headers, bridge = bridge_client
+    job = bridge.submit([{"role": "system", "content": "s"}, {"role": "user", "content": "q"}], 0.3)
+    resp = client.get("/llm/next?status=available", headers=headers)
+    assert resp.json() == {"job": {"id": job.id, "temperature": 0.3,
+                                   "messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "q"}]}}
+    done = client.post("/llm/result", json={"id": job.id, "text": "answer"}, headers=headers)
+    assert done.json() == {"ok": True} and job.text == "answer"
+
+
+def test_llm_next_with_nothing_queued_answers_none(bridge_client):
+    client, headers, _bridge = bridge_client
+    assert client.get("/llm/next?status=available", headers=headers).json() == {"job": None}
+
+
+def test_llm_result_for_an_unknown_job(bridge_client):
+    client, headers, _bridge = bridge_client
+    assert client.post("/llm/result", json={"id": "nope", "error": "x"}, headers=headers).json() == {"ok": False}
+
+
+def test_end_to_end_chat_through_the_endpoints(bridge_client):
+    """BridgeClient.chat waits in one thread while a 'page' polls and answers."""
+    client, headers, bridge = bridge_client
+    result = {}
+
+    def call():
+        result["text"] = llm_bridge.BridgeClient(bridge=bridge, pickup_timeout_s=5, answer_timeout_s=5).chat(
+            [{"role": "user", "content": "q"}])
+
+    t = threading.Thread(target=call, daemon=True)
+    t.start()
+    job = None
+    for _ in range(100):
+        job = client.get("/llm/next?status=available", headers=headers).json()["job"]
+        if job:
+            break
+    assert job is not None
+    client.post("/llm/result", json={"id": job["id"], "text": "from the page"}, headers=headers)
+    t.join(timeout=5)
+    assert result["text"] == "from the page"
