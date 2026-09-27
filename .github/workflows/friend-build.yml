@@ -1,0 +1,40 @@
+# Builds the friend installers. Manual only: Actions tab -> friend-build -> Run workflow.
+# The operator runs this in their OWN GitHub repo (see packaging/README.md).
+name: friend-build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build and verify
+        shell: pwsh
+        run: ./packaging/build_windows.ps1 -Python python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApplyPilotCopilot-Windows
+          path: dist/ApplyPilotCopilot-Setup-*.exe
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-14   # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and verify
+        run: PYTHON=python bash packaging/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApplyPilotCopilot-macOS-arm64
+          path: dist/ApplyPilotCopilot-macOS-arm64-*.zip
+          if-no-files-found: error
