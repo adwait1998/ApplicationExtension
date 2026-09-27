@@ -1,6 +1,6 @@
-# Builds the friend installers. Manual only: Actions tab -> friend-build -> Run workflow.
+# Builds the friend installers. Manual only: Actions tab -> installer-build -> Run workflow.
 # The operator runs this in their OWN GitHub repo (see packaging/README.md).
-name: friend-build
+name: installer-build
 
 on:
   workflow_dispatch:

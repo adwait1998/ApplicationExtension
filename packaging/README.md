@@ -27,7 +27,7 @@ This builds `build\friend\windows\`, runs `scripts/verify_friend_bundle.py` (6 c
    git push mine feat/chrome-extension
    ```
    Checked 2026-09-27: `.env` is ignored and no API keys appear anywhere in the history.
-3. On GitHub: Actions tab > **friend-build** > Run workflow.
+3. On GitHub: Actions tab > **installer-build** > Run workflow.
 4. When both jobs are green, download the two artifacts from the run's summary page.
 
 Private repos get 2,000 free Actions minutes a month; macOS minutes count 10x, and one build uses roughly 10 macOS minutes (about 100 of your minutes).
