@@ -56,6 +56,53 @@ def test_server_that_never_comes_up_is_an_honest_error(tmp_path):
     assert r["ok"] is False and "did not come up" in r["error"]
 
 
+def test_service_command_when_frozen(monkeypatch):
+    import sys as _sys
+    monkeypatch.setattr(_sys, "frozen", True, raising=False)
+    monkeypatch.setattr(_sys, "executable", r"C:\App\ApplyPilotCopilot.exe")
+    assert native_host.service_command(8787) == [r"C:\App\ApplyPilotCopilot.exe", "serve-extension", "--port", "8787"]
+
+
+def test_service_command_from_python(monkeypatch, tmp_path):
+    import sys as _sys
+    monkeypatch.delattr(_sys, "frozen", raising=False)
+    python = tmp_path / "python.exe"
+    python.write_text("")
+    monkeypatch.setattr(_sys, "executable", str(python))
+    assert native_host.service_command(9000) == [str(python), "-m", "applypilot", "serve-extension", "--port", "9000"]
+    (tmp_path / "pythonw.exe").write_text("")  # windowless interpreter next to it wins
+    assert native_host.service_command(9000)[0] == str(tmp_path / "pythonw.exe")
+
+
+import os as _os  # noqa: E402
+
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.mark.skipif(_os.name != "nt", reason="the Windows process flags only exist on Windows")
+def test_popen_kwargs_detach_on_windows_and_new_session_on_posix():
+    import subprocess as _sp
+    win = native_host.popen_kwargs(is_windows=True)
+    assert win["creationflags"] & _sp.DETACHED_PROCESS and "start_new_session" not in win
+    posix = native_host.popen_kwargs(is_windows=False)
+    assert posix == {"start_new_session": True}
+
+
+def test_start_server_uses_service_command_and_kwargs(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_popen(cmd, **kwargs):
+        seen["cmd"], seen["kwargs"] = cmd, kwargs
+        return object()
+
+    monkeypatch.setattr(native_host.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(native_host, "service_command", lambda port: ["APP", "serve-extension", "--port", str(port)])
+    native_host.start_server(8799, tmp_path)
+    assert seen["cmd"] == ["APP", "serve-extension", "--port", "8799"]
+    assert seen["kwargs"]["stdin"] is native_host.subprocess.DEVNULL
+    assert (tmp_path / "logs").is_dir()
+
+
 def test_extension_id_derivation():
     key = base64.b64encode(b"not-a-real-key").decode()
     digest = hashlib.sha256(b"not-a-real-key").hexdigest()[:32]

@@ -65,23 +65,40 @@ def server_up(port: int, token: str) -> bool:
         return False
 
 
-def start_server(port: int, app_dir: Path) -> None:
-    """Start the service detached from this short-lived host process, with no
-    console window, logging to <app_dir>/logs/extension-service.log."""
+def service_command(port: int) -> list[str]:
+    """How to launch the service. The frozen friend build re-runs its own
+    executable in serve mode (it has no ``-m``); a normal install runs
+    ``python -m applypilot serve-extension``, preferring pythonw.exe on
+    Windows so no console window opens."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "serve-extension", "--port", str(port)]
     exe = Path(sys.executable)
     windowless = exe.with_name("pythonw.exe")
     if windowless.exists():
         exe = windowless
+    return [str(exe), "-m", "applypilot", "serve-extension", "--port", str(port)]
+
+
+def popen_kwargs(is_windows: bool) -> dict:
+    """Detach the service from this short-lived host. On Windows: no console,
+    own process group. On macOS/Linux: a new session, because Chrome ends the
+    host process after every one-shot message and must not take the service
+    down with it."""
+    if is_windows:
+        return {"creationflags": (getattr(subprocess, "DETACHED_PROCESS", 0)
+                                  | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                                  | getattr(subprocess, "CREATE_NO_WINDOW", 0))}
+    return {"start_new_session": True}
+
+
+def start_server(port: int, app_dir: Path) -> None:
+    """Start the service detached from this short-lived host process, logging
+    to <app_dir>/logs/extension-service.log."""
     log_dir = Path(app_dir) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log = open(log_dir / "extension-service.log", "ab")  # noqa: SIM115 — handed to the child
-    flags = 0
-    if os.name == "nt":
-        flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                 | getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    subprocess.Popen([str(exe), "-m", "applypilot", "serve-extension", "--port", str(port)],
-                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True,
-                     creationflags=flags, env=dict(os.environ))
+    subprocess.Popen(service_command(port), stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                     close_fds=True, env=dict(os.environ), **popen_kwargs(os.name == "nt"))
 
 
 def handle(msg: dict, *, app_dir: Path, port: int = DEFAULT_PORT,
