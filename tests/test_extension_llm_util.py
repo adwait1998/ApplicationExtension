@@ -214,3 +214,71 @@ def test_probe_result_is_cached(monkeypatch):
     for _ in range(5):
         llm_util._local_endpoint_up(url)
     assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# On-device bridge (Chrome's built-in model via extension/llm_bridge.js)
+# ---------------------------------------------------------------------------
+
+def _no_env_provider(monkeypatch):
+    def _raise():
+        raise RuntimeError("No LLM provider configured.")
+    monkeypatch.setattr("applypilot.llm.get_client", _raise)
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: None)
+
+
+def _bridge(monkeypatch, status=None):
+    from applypilot.extension import llm_bridge
+    fresh = llm_bridge.Bridge()
+    if status:
+        fresh.report(status)
+    monkeypatch.setattr(llm_bridge, "BRIDGE", fresh)
+    return fresh
+
+
+def test_bridge_is_used_when_no_env_provider_and_a_page_is_ready(monkeypatch):
+    from applypilot.extension import llm_bridge
+    _no_env_provider(monkeypatch)
+    fresh = _bridge(monkeypatch, "available")
+    client = llm_util.get_llm_client()
+    assert isinstance(client, llm_bridge.BridgeClient) and client._bridge is fresh
+
+
+def test_bridge_is_not_used_when_no_page_is_ready(monkeypatch):
+    _no_env_provider(monkeypatch)
+    _bridge(monkeypatch, "downloadable")
+    with pytest.raises(RuntimeError):
+        llm_util.get_llm_client()
+
+
+def test_env_provider_still_wins_over_the_bridge(monkeypatch):
+    sentinel = object()
+    monkeypatch.setattr("applypilot.llm.get_client", lambda: sentinel)
+    _bridge(monkeypatch, "available")
+    assert llm_util.get_llm_client() is sentinel
+
+
+def test_bridge_beats_the_claude_cli_fallback(monkeypatch):
+    from applypilot.extension import llm_bridge
+
+    def _raise():
+        raise RuntimeError("No LLM provider configured.")
+    monkeypatch.setattr("applypilot.llm.get_client", _raise)
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: "C:/fake/claude.exe")
+    _bridge(monkeypatch, "available")
+    assert isinstance(llm_util.get_llm_client(), llm_bridge.BridgeClient)
+
+
+def test_provider_info_reports_the_bridge_as_local(monkeypatch):
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: None)
+    _bridge(monkeypatch, "available")
+    info = llm_util.provider_info()
+    assert info == {"available": True, "provider": "chrome-on-device",
+                    "label": "Chrome's built-in AI on this computer", "local": True}
+    assert llm_util.cloud_block_reason() is None
+
+
+def test_provider_info_without_bridge_is_unchanged(monkeypatch):
+    monkeypatch.setattr("applypilot.config.find_claude_binary", lambda: None)
+    _bridge(monkeypatch)
+    assert llm_util.provider_info()["available"] is False

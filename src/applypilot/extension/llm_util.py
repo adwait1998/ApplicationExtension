@@ -76,6 +76,13 @@ def get_llm_client():
     try:
         return llm_mod.get_client()
     except RuntimeError:
+        # Chrome's on-device model, answered by an open extension page. Local
+        # and free, so it goes before the metered Claude CLI.
+        from applypilot.extension import llm_bridge
+
+        if llm_bridge.BRIDGE.live():
+            return llm_bridge.BridgeClient()
+
         from applypilot.config import find_claude_binary
 
         claude_bin = find_claude_binary()
@@ -115,6 +122,11 @@ def llm_available() -> tuple[bool, str]:
         # a surprise they didn't opt into. Report it honestly instead.
         return _local_endpoint_up(os.environ["LLM_URL"]), "local"
 
+    from applypilot.extension import llm_bridge
+
+    if llm_bridge.BRIDGE.live():
+        return True, "chrome-on-device"
+
     if config.find_claude_binary() is not None:
         return True, "claude-cli"
 
@@ -134,6 +146,7 @@ _PROVIDER_LABELS = {
     "claude-cli": "Anthropic Claude (via the Claude CLI)",
     "remote-endpoint": "a remote model endpoint",
     "local": "a model on this computer",
+    "chrome-on-device": "Chrome's built-in AI on this computer",
 }
 
 
@@ -153,7 +166,7 @@ def provider_info() -> dict:
     if provider == "local" and not _is_localhost(os.environ.get("LLM_URL", "")):
         provider = "remote-endpoint"
     return {"available": ok, "provider": provider, "label": _PROVIDER_LABELS.get(provider, provider),
-            "local": provider == "local"}
+            "local": provider in ("local", "chrome-on-device")}
 
 
 class CloudBlocked(RuntimeError):
