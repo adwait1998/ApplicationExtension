@@ -64,10 +64,13 @@ def get_llm_client():
     1. Whatever ``applypilot.llm.get_client()`` already resolves to -- an
        operator's explicit ``GEMINI_API_KEY``/``OPENAI_API_KEY``/
        ``LLM_URL``/``LLM_PROVIDER=claude`` always wins, unchanged.
-    2. Otherwise, if the Claude Code CLI is installed
+    2. Otherwise, if Chrome's on-device model is live (an extension page
+       reported it ready within the last 60 seconds via the bridge), a
+       ``BridgeClient``.
+    3. Otherwise, if the Claude Code CLI is installed
        (``config.find_claude_binary()``), a ``ClaudeCodeClient`` built
        directly -- no env var required.
-    3. Otherwise, re-raise the original "no provider configured" error, so
+    4. Otherwise, re-raise the original "no provider configured" error, so
        callers' existing fail-soft handling (try/except -> "") is
        unaffected.
     """
@@ -101,7 +104,8 @@ def llm_available() -> tuple[bool, str]:
     providers are judged on configuration alone (probing them would cost
     latency and quota on every /health poll). Mirrors
     ``applypilot.llm._detect_provider()``'s precedence, then adds the same
-    Claude-CLI fallback ``get_llm_client()`` applies.
+    on-device-bridge and Claude-CLI fallbacks ``get_llm_client()`` applies,
+    in the same order (bridge before Claude CLI).
     """
     from applypilot import config
 
