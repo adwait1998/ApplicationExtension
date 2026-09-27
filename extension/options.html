@@ -406,6 +406,10 @@
     <div class="hint warn" id="smartFillLlmWarning" style="display:none;">No AI model available — drafts will be skipped.</div>
 
     <div class="hint" id="smartFillModelLine" style="margin-top:12px;">AI model: checking…</div>
+    <div id="onDeviceAiRow" style="margin-top:12px;">
+      <div class="hint" id="onDeviceAiLine">On-device AI: checking…</div>
+      <button type="button" id="onDeviceAiDownload" style="display:none;margin-top:8px;">Download on-device model</button>
+    </div>
     <div class="checkbox-line" style="margin-top:8px;">
       <input type="checkbox" id="smartFillCloud">
       <label for="smartFillCloud" style="margin:0;font-weight:600;">Allow AI features to use a model that isn't on this computer</label>
@@ -793,6 +797,7 @@
     </div>
   </template>
 
+  <script src="llm_bridge.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

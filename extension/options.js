@@ -104,6 +104,7 @@
       }
       loadSmartFillSettings();
       loadLlmAvailability();
+      refreshOnDeviceAi();
       loadAnswers();
       loadLog();
     });
@@ -210,6 +211,48 @@
       applyHealthData(null);
     });
   }
+
+  // ---- On-device AI (Chrome's built-in model; see llm_bridge.js) ----
+  var onDeviceAiLineEl = document.getElementById('onDeviceAiLine');
+  var onDeviceAiDownloadEl = document.getElementById('onDeviceAiDownload');
+  var ON_DEVICE_AI_TEXT = {
+    available: 'On-device AI: ready. Chrome\'s built-in model runs on this computer; nothing is sent anywhere.',
+    downloadable: 'On-device AI: works on this computer but isn\'t downloaded yet (a one-time download of a few GB).',
+    downloading: 'On-device AI: downloading…',
+    unavailable: 'On-device AI: not available here. It needs Chrome 138 or newer, about 22 GB of free disk space, ' +
+      'and a graphics card with more than 4 GB of memory or 16 GB of RAM. Autofill works without it.'
+  };
+
+  function refreshOnDeviceAi() {
+    var bridge = window.ApplyPilotLlmBridge;
+    if (!bridge) {
+      onDeviceAiLineEl.textContent = ON_DEVICE_AI_TEXT.unavailable;
+      onDeviceAiDownloadEl.style.display = 'none';
+      return;
+    }
+    bridge.availability().then(function (a) {
+      onDeviceAiLineEl.textContent = ON_DEVICE_AI_TEXT[a] || ON_DEVICE_AI_TEXT.unavailable;
+      onDeviceAiDownloadEl.style.display = a === 'downloadable' ? '' : 'none';
+    });
+  }
+
+  onDeviceAiDownloadEl.addEventListener('click', function () {
+    // download() calls LanguageModel.create() synchronously: Chrome only starts
+    // the model download inside this click's user gesture.
+    onDeviceAiDownloadEl.disabled = true;
+    onDeviceAiLineEl.textContent = ON_DEVICE_AI_TEXT.downloading;
+    window.ApplyPilotLlmBridge.download(function (loaded) {
+      onDeviceAiLineEl.textContent = 'On-device AI: downloading… ' + Math.round(loaded * 100) + '%';
+    }).then(function () {
+      onDeviceAiDownloadEl.disabled = false;
+      refreshOnDeviceAi();
+      // The service learns the model is ready on the bridge's next poll.
+      setTimeout(loadLlmAvailability, 3000);
+    }, function (err) {
+      onDeviceAiDownloadEl.disabled = false;
+      onDeviceAiLineEl.textContent = 'On-device AI: download failed — ' + ((err && err.message) || err);
+    });
+  });
 
   // The operator's toggle state is the source of truth for popup.js's local hint
   // regardless of whether the service has caught up with /settings yet — persisted
@@ -1628,4 +1671,6 @@
   });
 
   load();
+  // Answer on-device AI jobs from the service while Settings is open (résumé import).
+  if (window.ApplyPilotLlmBridge) window.ApplyPilotLlmBridge.start();
 })();

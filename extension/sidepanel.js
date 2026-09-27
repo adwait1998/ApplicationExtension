@@ -1507,4 +1507,6 @@
   }
 
   init();
+  // Answer on-device AI jobs from the service while this panel is open.
+  if (window.ApplyPilotLlmBridge) window.ApplyPilotLlmBridge.start();
 })();
