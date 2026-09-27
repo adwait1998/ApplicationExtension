@@ -241,17 +241,25 @@
     // the model download inside this click's user gesture.
     onDeviceAiDownloadEl.disabled = true;
     onDeviceAiLineEl.textContent = ON_DEVICE_AI_TEXT.downloading;
-    window.ApplyPilotLlmBridge.download(function (loaded) {
-      onDeviceAiLineEl.textContent = 'On-device AI: downloading… ' + Math.round(loaded * 100) + '%';
-    }).then(function () {
+    try {
+      window.ApplyPilotLlmBridge.download(function (loaded) {
+        onDeviceAiLineEl.textContent = 'On-device AI: downloading… ' + Math.round(loaded * 100) + '%';
+      }).then(function () {
+        onDeviceAiDownloadEl.disabled = false;
+        refreshOnDeviceAi();
+        // The service learns the model is ready on the bridge's next poll.
+        setTimeout(loadLlmAvailability, 3000);
+      }, function (err) {
+        onDeviceAiDownloadEl.disabled = false;
+        onDeviceAiLineEl.textContent = 'On-device AI: download failed — ' + ((err && err.message) || err);
+      });
+    } catch (e) {
+      // download() calls LanguageModel.create() synchronously and isn't guaranteed to
+      // return a rejected promise on failure — guard against a synchronous throw here
+      // too, so the button never stays disabled forever.
       onDeviceAiDownloadEl.disabled = false;
-      refreshOnDeviceAi();
-      // The service learns the model is ready on the bridge's next poll.
-      setTimeout(loadLlmAvailability, 3000);
-    }, function (err) {
-      onDeviceAiDownloadEl.disabled = false;
-      onDeviceAiLineEl.textContent = 'On-device AI: download failed — ' + ((err && err.message) || err);
-    });
+      onDeviceAiLineEl.textContent = 'On-device AI: download failed — ' + ((e && e.message) || e);
+    }
   });
 
   // The operator's toggle state is the source of truth for popup.js's local hint
