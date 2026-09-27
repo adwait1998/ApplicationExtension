@@ -103,6 +103,9 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-ApplyPilot-Token': cfg.token },
       body: JSON.stringify(body)
+    }).then(function (resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp;
     });
   }
 
@@ -126,7 +129,10 @@
           return postResult(cfg, { id: job.id, error: String((err && err.message) || err).slice(0, 300) });
         }).then(function () { return { waitMs: 0 }; });
       });
-    }).catch(function () { return { waitMs: IDLE_WAIT_MS }; });
+    }).catch(function (err) {
+      try { root.console && root.console.error && root.console.error('ApplyPilot AI bridge:', err); } catch (e) {}
+      return { waitMs: IDLE_WAIT_MS };
+    });
   }
 
   /** Starts the loop, once per page. Returns false (and does nothing) without LanguageModel. */
@@ -134,7 +140,14 @@
     if (running || !model()) return false;
     running = true;
     (function loop() {
-      pollOnce().then(function (r) { root.setTimeout(loop, r.waitMs); });
+      var p;
+      try {
+        p = pollOnce();
+      } catch (e) {
+        root.setTimeout(loop, IDLE_WAIT_MS);
+        return;
+      }
+      p.then(function (r) { root.setTimeout(loop, r.waitMs); });
     })();
     return true;
   }

@@ -153,6 +153,47 @@ async function main() {
     expect('pollOnce: service unreachable -> idle wait, never throws', r.waitMs === B.IDLE_WAIT_MS);
   }
 
+  // ---- start(): the loop reschedules itself (Important #3) ----
+  {
+    let timeoutCalls = 0;
+    const MAX_ITERS = 3;
+    function fakeSetTimeout(fn) {
+      timeoutCalls++;
+      if (timeoutCalls < MAX_ITERS) fn();
+      return 0;
+    }
+    const B = load({
+      chrome: fakeChrome({ token: 'tok' }),
+      LanguageModel: { availability: () => Promise.resolve('unavailable') },
+      fetch: () => Promise.resolve(jsonResponse({ job: null })),
+      setTimeout: fakeSetTimeout
+    });
+    expect('start: returns true and starts the loop', B.start() === true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect('start: the loop reschedules itself across iterations', timeoutCalls >= MAX_ITERS);
+  }
+
+  // ---- start(): a synchronous throw from a callee does not kill the loop (Important #2) ----
+  {
+    let timeoutCalls = 0;
+    const MAX_ITERS = 3;
+    function fakeSetTimeout(fn) {
+      timeoutCalls++;
+      if (timeoutCalls < MAX_ITERS) fn();
+      return 0;
+    }
+    const throwingChrome = { storage: { local: { get: () => { throw new Error('sync boom'); } } } };
+    const B = load({
+      chrome: throwingChrome,
+      LanguageModel: { availability: () => Promise.resolve('available') },
+      fetch: () => Promise.resolve(jsonResponse({ job: null })),
+      setTimeout: fakeSetTimeout
+    });
+    B.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect('start: survives a synchronous throw from getConfig and keeps polling', timeoutCalls >= MAX_ITERS);
+  }
+
   // ---- download() ----
   {
     let msg = '';
