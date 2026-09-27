@@ -150,3 +150,66 @@ def test_real_keygen_produces_a_valid_public_key():
     from cryptography.hazmat.primitives.serialization import load_der_public_key
     key = native_install._new_public_key_b64()
     load_der_public_key(base64.b64decode(key))   # raises if not a real SubjectPublicKeyInfo
+
+
+def _ext_with_key(tmp_path, key):
+    ext = tmp_path / "extension"
+    ext.mkdir()
+    (ext / "manifest.json").write_text(json.dumps({"manifest_version": 3, "name": "X", "key": key}), encoding="utf-8")
+    return ext
+
+
+def test_install_frozen_on_macos_writes_chrome_host_manifest(tmp_path):
+    key = base64.b64encode(b"k" * 40).decode()
+    ext = _ext_with_key(tmp_path, key)
+    home = tmp_path / "home"
+    exe = tmp_path / "app" / "ApplyPilotCopilot"
+    r = native_install.install_frozen(ext, tmp_path / "data", exe, platform="darwin", home=home)
+    target = home / "Library" / "Application Support" / "Google" / "Chrome" / "NativeMessagingHosts" / "com.applypilot.copilot.json"
+    assert r["manifest"] == str(target)
+    m = json.loads(target.read_text(encoding="utf-8"))
+    assert m["path"] == str(exe) and m["type"] == "stdio" and m["name"] == "com.applypilot.copilot"
+    assert m["allowed_origins"] == [f"chrome-extension://{native_install.extension_id_from_key(key)}/"]
+
+
+def test_install_frozen_on_windows_registers_manifest_pointing_at_the_exe(tmp_path):
+    key = base64.b64encode(b"k" * 40).decode()
+    ext = _ext_with_key(tmp_path, key)
+    reg, deleted = {}, []
+    exe = tmp_path / "app" / "ApplyPilotCopilot.exe"
+    r = native_install.install_frozen(ext, tmp_path / "data", exe, platform="win32",
+                                      reg_set=reg.__setitem__, reg_delete=deleted.append)
+    manifest = tmp_path / "data" / "native_host" / "com.applypilot.copilot.json"
+    assert r["manifest"] == str(manifest)
+    assert reg == {r"Software\Google\Chrome\NativeMessagingHosts\com.applypilot.copilot": str(manifest)}
+    assert json.loads(manifest.read_text(encoding="utf-8"))["path"] == str(exe)
+    assert not (tmp_path / "data" / "native_host" / "applypilot_host.bat").exists()  # no launcher when frozen
+    assert r"Software\Chromium\NativeMessagingHosts\com.applypilot.copilot" in deleted
+
+
+def test_install_frozen_refuses_a_manifest_without_key(tmp_path):
+    ext = tmp_path / "extension"
+    ext.mkdir()
+    original = json.dumps({"manifest_version": 3, "name": "X"})
+    (ext / "manifest.json").write_text(original, encoding="utf-8")
+    import pytest
+    with pytest.raises(RuntimeError, match="key"):
+        native_install.install_frozen(ext, tmp_path / "data", tmp_path / "app.exe", platform="win32",
+                                      reg_set=lambda k, v: None, reg_delete=lambda k: None)
+    assert (ext / "manifest.json").read_text(encoding="utf-8") == original  # never rewritten
+
+
+def test_uninstall_frozen_on_macos_removes_the_manifest(tmp_path):
+    home = tmp_path / "home"
+    target = home / "Library" / "Application Support" / "Google" / "Chrome" / "NativeMessagingHosts" / "com.applypilot.copilot.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    native_install.uninstall_frozen(tmp_path / "data", platform="darwin", home=home)
+    assert not target.exists()
+    native_install.uninstall_frozen(tmp_path / "data", platform="darwin", home=home)  # idempotent
+
+
+def test_uninstall_frozen_on_windows_removes_registration(tmp_path):
+    deleted = []
+    native_install.uninstall_frozen(tmp_path, platform="win32", reg_delete=deleted.append)
+    assert len(deleted) == 2
