@@ -5,6 +5,10 @@
 Exit 1 when a listed file is missing, when manifest.json has no "key" (a friend's
 unpacked copy must keep the pinned extension ID the native host allows), or when
 a staged HTML page or the manifest references a file that isn't staged.
+
+Does not check files loaded via `chrome.scripting.executeScript(...)` (background.js's
+dynamic content-script injection) — keep extension_files.txt in sync with that call's
+`files` list by hand.
 """
 from __future__ import annotations
 
