@@ -93,6 +93,7 @@ One frozen executable serves every role, chosen by `argv`:
 | `serve-extension [--port N]` | local HTTP service |
 | `install-host --extension-dir PATH` | register the native host for this user |
 | `uninstall-host` | remove the registration |
+| `self-check` | import every module the app needs; exit 1 listing any that are missing |
 | `--version` | print version, exit 0 |
 
 ## Component: on-device AI bridge
@@ -141,16 +142,16 @@ extension page to answer it.
   `ApplyPilotCopilot.exe install-host --extension-dir "{app}\extension"`, uninstall runs
   `uninstall-host`. Output: `ApplyPilotCopilot-Setup-<version>.exe`.
 - macOS: `packaging/build_macos.sh` → PyInstaller → zip with `ApplyPilotCopilot/`, `extension/`,
-  `Install ApplyPilot Copilot.command`, `Uninstall ApplyPilot Copilot.command`, `SETUP.md`.
-  The install script copies to `~/Library/Application Support/ApplyPilotCopilot`, strips
-  quarantine, and runs `install-host`.
+  `Install ApplyPilot Copilot.command`, `Uninstall ApplyPilot Copilot.command`, `SETUP.txt`.
+  The install script copies to `~/Applications/ApplyPilot Copilot` (visible in Chrome's "Load
+  unpacked" folder picker, unlike `~/Library`), strips quarantine, and runs `install-host`.
 - `.github/workflows/friend-build.yml`: `workflow_dispatch`; jobs on `windows-latest` and
   `macos-14` (arm64); each uploads its artifact.
 - `scripts/verify_friend_bundle.py`: runs against a built folder — no PII files; `--version`
   works; the native host answers `hello` over stdio; `serve-extension` starts on a temp
   `APPLYPILOT_DIR` and `/health` answers with the token.
 
-## Friend's setup (documented in `docs/FRIEND_SETUP.md`, shipped as `SETUP.md`)
+## Friend's setup (documented in `docs/FRIEND_SETUP.md`, shipped as `SETUP.txt`)
 
 1. Run the installer (Windows: "More info → Run anyway" once; Mac: right-click → Open once).
 2. `chrome://extensions` → Developer mode → Load unpacked → the `extension` folder the installer
