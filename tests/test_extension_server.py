@@ -999,3 +999,46 @@ def test_resolve_previously_employed_uses_request_url(tmp_path, monkeypatch):
     plan = resp.json()
     assert plan["fills"][0]["value"] == "Yes"
     assert plan["fills"][0]["source"] == "answer_bank"
+
+
+# ---------------------------------------------------------------------------
+# frozen build: Playwright/Chromium aren't bundled, so /resume/tailor must
+# answer clearly instead of failing in some confusing way; and résumé import
+# must run off the event loop so a later on-device-bridge LLM call can't
+# deadlock it.
+# ---------------------------------------------------------------------------
+
+
+def test_tailor_is_unavailable_in_the_frozen_build(client, auth_headers, monkeypatch):
+    import sys as _sys
+    monkeypatch.setattr(_sys, "frozen", True, raising=False)
+    resp = client.post("/resume/tailor", json={"urls": ["https://example.com/job"], "page_text": ""},
+                       headers=auth_headers)
+    assert resp.status_code == 501
+    assert "aren't available" in resp.json()["detail"]
+
+
+def test_resume_import_runs_off_the_event_loop(client, auth_headers, monkeypatch):
+    """The LLM step may wait on the extension (on-device bridge), which the
+    event loop must stay free to serve -- so the import runs in a worker thread."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from applypilot.extension import server as srv
+
+    seen = {}
+
+    def fake_import(**kwargs):
+        try:
+            asyncio.get_running_loop()
+            seen["on_loop"] = True
+        except RuntimeError:
+            seen["on_loop"] = False
+        return SimpleNamespace(draft_profile={}, provenance={}, warnings=[],
+                               saved_filename="resume.txt", content_type="text/plain")
+
+    monkeypatch.setattr(srv.resume_import, "import_resume", fake_import)
+    resp = client.post("/profile/import-resume", files={"file": ("resume.txt", b"Jordan Testperson", "text/plain")},
+                       headers=auth_headers)
+    assert resp.status_code == 200
+    assert seen["on_loop"] is False

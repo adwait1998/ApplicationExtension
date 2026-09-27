@@ -27,12 +27,14 @@ import re
 import os
 import secrets
 import shutil
+import sys
 import tempfile
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -733,7 +735,11 @@ def create_app(
         existing = _read_profile_or_empty(path)
 
         try:
-            result = resume_import.import_resume(
+            # In a worker thread: the LLM step can wait on the extension's
+            # on-device bridge (GET /llm/next), which this event loop must
+            # stay free to serve.
+            result = await run_in_threadpool(
+                resume_import.import_resume,
                 filename=file.filename or "",
                 data=data,
                 existing_profile=existing,
@@ -817,6 +823,10 @@ def create_app(
 
     @app.post("/resume/tailor")
     def tailor_endpoint(body: CoverLetterIn, _: None = Depends(_require_token)) -> dict:
+        if getattr(sys, "frozen", False):
+            # The friend build leaves out Playwright + Chromium, which render the PDF.
+            raise HTTPException(status_code=501, detail="tailored résumés aren't available in this version "
+                                                        "— use your regular résumé")
         ok, _provider = llm_util.llm_available()
         if not ok:
             raise HTTPException(status_code=503, detail="no language model available for tailoring")
