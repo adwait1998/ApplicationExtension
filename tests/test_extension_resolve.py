@@ -846,3 +846,48 @@ def test_skills_field_with_empty_boundary_never_reaches_answer_bank_either(monke
     )
     assert isinstance(result, SkipResult)
     assert result.source == "deterministic"
+
+
+# ---------------------------------------------------------------------------
+# an employer's/school's address block must never be filled with the
+# applicant's OWN address, city, state, postal code or country
+# ---------------------------------------------------------------------------
+
+_ADDRESS_PROFILE = {
+    "personal": {
+        "full_name": "Nida Shah",
+        "email": "nida@example.com",
+        "address": "100 Example Ave",
+        "city": "Seattle",
+        "province_state": "WA",
+        "country": "USA",
+        "postal_code": "98101",
+    },
+    "work_history": [
+        {"title": "Senior Product Designer", "company": "Acme", "location": "Seattle, WA",
+         "start": "03/2022", "end": "", "current": True, "description": ""},
+    ],
+}
+
+
+def test_personal_address_is_never_used_for_an_employer_address_field():
+    """Paylocity (recruiting.paylocity.com, 2026-09-26): the employer's mailing address, inside
+    a "Work History 1" block, has its own Address Line 1/City/State/Zip/Country fields — the
+    profile has no employer-address data at all, and the applicant's OWN address must never be
+    substituted for it (the same real-world harm as putting the current job in the wrong slot)."""
+    filled = []
+    for label in ("Address Line 1", "City", "State", "Zip Code", "Country"):
+        result = resolve.resolve_field(
+            _field(label=label, section="Work History 1", section_index=1), _ADDRESS_PROFILE,
+        )
+        if isinstance(result, FillResult):
+            filled.append((label, result))
+    assert filled == [], filled
+
+
+def test_personal_address_still_fills_outside_any_history_section():
+    """The guard above must be section-scoped, not a blanket ban on personal.address ever
+    resolving — the same label with NO section context is the applicant's own address."""
+    result = resolve.resolve_field(_field(label="City"), _ADDRESS_PROFILE)
+    assert isinstance(result, FillResult)
+    assert result.value == "Seattle"

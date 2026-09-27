@@ -227,6 +227,30 @@
     return '';
   }
 
+  /**
+   * A <label> element's own text, with the field it labels stripped out first -- both the raw
+   * form control (input/select/textarea) AND a custom combobox's own "currently selected
+   * value" display (react-select's convention, e.g. ".select__single-value"; Paylocity's own
+   * ".input-select-input-single-value"). Shared by both getLabel() branches below: a
+   * standards-based `<label for="id">` that ALSO happens to wrap the widget (live, 2026-09-26,
+   * recruiting.paylocity.com: Country's `<label for="public-site-address-country">` both
+   * POINTS AT and WRAPS the combobox showing "United States") is just as vulnerable to this as
+   * a plain wrapping label with no `for` at all -- both read this exact <label> node's
+   * `.textContent`, unfiltered. With no whitespace text node between the field-name span and
+   * the nested value display, the raw text used to read "CountryUnited States" -- no word
+   * boundary, so every country-matching pattern stopped recognising it as a country field at
+   * all. Never the field's own name -- only ever the value it currently holds -- so always safe
+   * to drop before reading the label.
+   */
+  function labelOwnText(labelEl) {
+    var clone = labelEl.cloneNode(true);
+    var controls = clone.querySelectorAll('input, select, textarea, script, style');
+    for (var i = 0; i < controls.length; i++) controls[i].remove();
+    var valueDisplays = clone.querySelectorAll('[class*="single-value" i]');
+    for (var vi = 0; vi < valueDisplays.length; vi++) valueDisplays[vi].remove();
+    return cleanText(clone.textContent);
+  }
+
   function getLabel(el) {
     var doc = ownerDoc(el);
 
@@ -235,7 +259,7 @@
       var forLabel = null;
       try { forLabel = doc.querySelector('label[for="' + cssEscape(el.id) + '"]'); } catch (e) { /* ignore */ }
       if (forLabel) {
-        var t1 = cleanText(forLabel.textContent);
+        var t1 = labelOwnText(forLabel);
         if (t1) return t1;
       }
     }
@@ -243,10 +267,7 @@
     // 2. wrapping <label>
     var wrap = el.closest ? el.closest('label') : null;
     if (wrap) {
-      var clone = wrap.cloneNode(true);
-      var controls = clone.querySelectorAll('input, select, textarea, script, style');
-      for (var i = 0; i < controls.length; i++) controls[i].remove();
-      var t2 = cleanText(clone.textContent);
+      var t2 = labelOwnText(wrap);
       if (t2) return t2;
     }
 
@@ -366,11 +387,26 @@
   var REPEATING_SECTION_HEADER_TEXT_RE =
     /^(education|work\s+experience|work\s+history|employment(\s+history)?|experience)\s*\*?$/i;
 
+  // The specific, unambiguous keywords -- trusted on their OWN text, with no "header"-named
+  // class needed, and with an optional trailing 1-2 digit index for a per-entry heading ("Work
+  // History 1", "Education 2") -- live, 2026-09-26, recruiting.paylocity.com: each block's own
+  // heading is a plain, Bootstrap-classed div ("col-xs-12"), nothing like Greenhouse's
+  // "education--header". Deliberately excludes bare "experience" (unlike the regex above): that
+  // word alone is common, unrelated prose ("Rate your experience", "5+ years of experience"), so
+  // WITH a trailing digit it could otherwise misread an ordinary rating question ("Experience 5")
+  // as work-history block 5 -- a risk the class-name check used to rule out.
+  var UNAMBIGUOUS_SECTION_HEADER_TEXT_RE =
+    /^(education|work\s+experience|work\s+history|employment(\s+history)?)\s*\*?\s*\d{0,2}$/i;
+
   function isRepeatingSectionHeader(node) {
     if (!node || node.nodeType !== 1) return false;
+    var tag = node.tagName;
+    if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' ||
+        tag === 'TEXTAREA' || tag === 'SCRIPT' || tag === 'STYLE') return false;
+    var text = cleanText(node.textContent);
+    if (UNAMBIGUOUS_SECTION_HEADER_TEXT_RE.test(text)) return true;
     var cls = (node.getAttribute && node.getAttribute('class')) || '';
-    if (!/header/i.test(cls)) return false;
-    return REPEATING_SECTION_HEADER_TEXT_RE.test(cleanText(node.textContent));
+    return /header/i.test(cls) && REPEATING_SECTION_HEADER_TEXT_RE.test(text);
   }
 
   // The same repeating-block header, searched further up than findPrecedingHeading's general 8

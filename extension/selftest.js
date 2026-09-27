@@ -2843,6 +2843,93 @@ pending.push((async () => {
     && !!oneBased['start-year--1'] && oneBased['start-year--1'].section_index === 1);
 }
 
+// ---- Paylocity: a wrapping <label> whose own react-select-style widget renders the
+// CURRENTLY SELECTED VALUE inside that same <label> -- live, 2026-09-26,
+// recruiting.paylocity.com/Recruiting/Jobs/Apply/4538038. Country's <label> wraps BOTH the
+// field-name span ("Country") AND the widget showing "United States", with no whitespace text
+// node between them, so getLabel()'s wrapping-label strip (which only removes
+// input/select/textarea/script/style) used to leave "CountryUnited States" -- no word boundary
+// between the two words, so every \bcountry\b matcher silently stopped seeing this as a country
+// field at all (never even reached the resolution ladder as anything).
+{
+  const plDom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  plDom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 };
+  };
+  const pldoc = plDom.window.document;
+  // The exact live shape (recruiting.paylocity.com, 2026-09-26): the <label> BOTH points at
+  // the input via for="..." AND wraps it -- getLabel()'s standards-based step 1 (label[for])
+  // finds this label first, so the fix has to strip the value display there too, not only in
+  // step 2's wrapping-label fallback (a plain wrapping label with no "for" at all).
+  pldoc.body.innerHTML =
+    '<label class="css-asocq5" for="pl_country">' +
+      '<span class="css-kg1nd9">Country</span>' +
+      '<div class="pcty-input-select-full-container">' +
+        '<div class="pcty-input-select-input-container">' +
+          '<div class="css-n6sh4p">' +
+            '<div class="pcty-input-select__input">' +
+              '<div class="input-select-input-single-value">United States</div>' +
+              '<input id="pl_country" type="text" role="combobox">' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</label>';
+  const plInput = pldoc.getElementById('pl_country');
+  expect('Paylocity-shaped label (both for="id" AND wrapping): the field name is recovered cleanly ("Country"), never glued to the widget\'s own current-value text',
+    Scanner.getLabel(plInput) === 'Country');
+}
+
+// ---- Paylocity: a repeating-section heading with NO "header"-named class at all (a plain
+// Bootstrap div, "Work History 1") -- live, 2026-09-26, same page. isRepeatingSectionHeader used
+// to require the class name to contain "header" (true for Greenhouse's "education--header" but
+// false here), so City/County/Address inside a "Work History 1" block got NO section at all and
+// fell to the generic, section-agnostic personal-address matchers -- filling the EMPLOYER's
+// address with the APPLICANT's own city/state/zip.
+{
+  const plDom2 = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  plDom2.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 };
+  };
+  const pldoc2 = plDom2.window.document;
+  pldoc2.body.innerHTML =
+    '<div class="col-xs-12">Classlink Inc</div>' +
+    '<div class="col-xs-12 work-history-group">' +
+      '<div class="col-xs-12">Work History</div>' +
+      '<div class="col-xs-12 section-wrapper">' +
+        '<div class="col-sm-6">' +
+          '<label for="pl_company">Company Name (required)</label>' +
+          '<input id="pl_company" type="text">' +
+        '</div>' +
+        '<div class="col-xs-12">Work History 1</div>' +
+        '<div class="col-xs-12">' +
+          '<label for="pl_city">City</label>' +
+          '<input id="pl_city" type="text">' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  const plCityCtx = Scanner.getSectionContext(pldoc2.getElementById('pl_city'));
+  expect('Paylocity-shaped plain-classed repeating heading: "City" inside "Work History 1" gets section "Work History 1"',
+    plCityCtx.section === 'Work History 1');
+  expect('...and a 1-based section_index of 1, parsed straight from the heading\'s own trailing digit',
+    plCityCtx.section_index === 1);
+  // NEGATIVE CONTROL: an unrelated plain div whose text merely mentions "experience" (a rating
+  // question, never a repeating-section heading) must NOT become a section, even with a trailing
+  // digit that could look like an index ("Rate your experience 5" must never read as work-history
+  // block 5) -- the widened match only trusts the SPECIFIC keywords (education/work
+  // experience/work history/employment) without needing a "header" class, never bare
+  // "experience" alone.
+  pldoc2.body.innerHTML =
+    '<div class="col-xs-12">Rate your experience 5</div>' +
+    '<div class="col-xs-12">' +
+      '<label for="pl_comment">Comment</label>' +
+      '<input id="pl_comment" type="text">' +
+    '</div>';
+  const plCommentCtx = Scanner.getSectionContext(pldoc2.getElementById('pl_comment'));
+  expect('NEGATIVE CONTROL: "Rate your experience 5" (a rating prompt, not a heading) never becomes a section',
+    plCommentCtx.section === '');
+}
+
 Promise.all(pending).then(() => {
   let failed = 0;
   console.log('\n--- checks ---');

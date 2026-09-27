@@ -423,3 +423,20 @@ def test_description_normalization_never_mutates_the_stored_profile():
     match(_field(label="Role Description", section="Work Experience 1", section_index=1), profile)
     after = profile["work_history"][0]["description"]
     assert after == before == "Led the redesign of onboarding. Reduced drop-off by 30%."
+
+
+def test_bare_work_history_heading_recognized_as_work_kind():
+    """Paylocity (recruiting.paylocity.com, 2026-09-26) headings its repeating block "Work
+    History" / "Work History 1" — the literal phrase _WORK_SECTION_RE used to lack ("work
+    experience"/"employment (history)"/"job history" were covered, but not "work history"
+    itself), so a field correctly section-tagged "Work History 1" by the scanner still fell
+    through _kind_for as neither kind and was never placed into the right job entry."""
+    result = match(_field(label="Job Title", section="Work History 1", section_index=1), PROFILE_TWO_JOBS)
+    assert isinstance(result, FillResult)
+    assert result.value == "Senior Product Designer"
+
+
+def test_bare_work_history_heading_second_entry():
+    result = match(_field(label="Company Name", section="Work History 2", section_index=2), PROFILE_TWO_JOBS)
+    assert isinstance(result, FillResult)
+    assert result.value == "Globex"

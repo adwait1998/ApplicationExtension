@@ -219,8 +219,17 @@ def resolve_field(
     if _ATTESTATION_RE.search(label):
         return _attestation_skip(field)
 
-    # tier 1: canary — never falls through to a lower tier
-    if canary.is_canary(label):
+    # tier 1: canary — never falls through to a lower tier. EXCEPT the "address" category
+    # inside a work-history/education repeating section: that is an EMPLOYER's or SCHOOL's
+    # mailing address, not the applicant's own, and the profile has no data for it at all (see
+    # matcher._LOCATION_KEYS, which already refuses city/state/country the same way at tier 2 —
+    # this is address/zip's own equivalent at tier 1, since canary claims those before tier 2
+    # ever sees them). Left unresolved on purpose rather than silently substituted with the
+    # applicant's home address — live, 2026-09-26, recruiting.paylocity.com: Address Line 1 and
+    # Zip Code inside "Work History 1" were both filled with the applicant's OWN address.
+    in_history_section = bool(field.section_index is not None
+                              or matcher._HISTORY_SECTION_RE.search(field.section or ""))
+    if canary.is_canary(label) and not (in_history_section and _canary_category(label) == "address"):
         answer = canary.resolve_canary(label, profile)
         category = _canary_category(label)
         options = [o for o in (field.options or []) if o and o.strip()]

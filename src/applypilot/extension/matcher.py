@@ -302,6 +302,11 @@ def _split_name(full_name: str) -> tuple[str, str]:
 # value, and a choice field can only take a value that is one of its
 # options (locations are the one family worth trying there).
 _LOCATION_KEYS = {"personal.city", "personal.province_state", "personal.country", "personal.location"}
+# Reachable only via Laya (tier 4) — AUTOCOMPLETE_MAP's address-line1/2 and postal-code tokens
+# map here, but no _NAME_LABEL_PATTERNS entry does, so tier 2 itself never produces these two
+# paths. A DIFFERENT set (not _LOCATION_KEYS) so the choice-field handling above, keyed off
+# _LOCATION_KEYS, never has to consider an address/postal-code field — it never occurs.
+_ADDRESS_KEYS_GUARDED_IN_HISTORY_SECTION = _LOCATION_KEYS | {"personal.address", "personal.postal_code"}
 _URL_KEYS = {"personal.linkedin_url", "personal.github_url", "personal.portfolio_url", "personal.website_url"}
 _ESSAY_PROMPT_RE = re.compile(
     r"\b(why|describe|explain|tell\s+us|share\s+(a|an|your)\s+(time|example|story)|how\s+did\s+you|"
@@ -345,7 +350,7 @@ _HISTORY_SECTION_RE = re.compile(
 
 def _label_rule_fits(path: str, field: FieldDescriptor, haystack: str) -> bool:
     base = path.split("#", 1)[0]
-    if base in _LOCATION_KEYS and (field.section_index is not None
+    if base in _ADDRESS_KEYS_GUARDED_IN_HISTORY_SECTION and (field.section_index is not None
                                    or _HISTORY_SECTION_RE.search(field.section or "")):
         return False
     label = field.label or ""

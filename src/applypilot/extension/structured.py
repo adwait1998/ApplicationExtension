@@ -57,7 +57,7 @@ from applypilot.extension.schema import FieldDescriptor, FillResult, SkipResult
 # Section-heading -> kind
 # ---------------------------------------------------------------------------
 
-_WORK_SECTION_RE = re.compile(r"\b(work\s*experience|employment(?:\s*history)?|job\s*history)\b", re.I)
+_WORK_SECTION_RE = re.compile(r"\b(work\s*experience|work\s*history|employment(?:\s*history)?|job\s*history)\b", re.I)
 _EDU_SECTION_RE = re.compile(r"\b(education|academic\s*(?:history|background)?|school(?:ing)?)\b", re.I)
 
 # Kind hints strong enough to establish "this is a work/education field"
