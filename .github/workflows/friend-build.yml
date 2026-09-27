@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build and verify
-        run: PYTHON=python bash packaging/build_macos.sh
+        run: PYTHON=python3 bash packaging/build_macos.sh
       - uses: actions/upload-artifact@v4
         with:
           name: ApplyPilotCopilot-macOS-arm64
