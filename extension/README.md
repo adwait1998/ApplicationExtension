@@ -860,7 +860,7 @@ submissions). What's left is genuinely manual — things automation on a mock pa
 
 ## On-device AI (Chrome's built-in model)
 
-When no other AI provider is configured (no `GEMINI_API_KEY`, `OPENAI_API_KEY` or `LLM_URL`), the service uses Chrome's own on-device model through the extension. The friend build relies on this; your own setup (a local Ollama via `LLM_URL`) is unchanged, because an explicit provider always wins.
+When no other AI provider is configured (no `GEMINI_API_KEY`, `OPENAI_API_KEY` or `LLM_URL`), the service uses Chrome's own on-device model — but only while a side panel or Settings page has reported it ready in roughly the last minute. If neither that nor an env provider is available, and the Claude Code CLI is installed, that's used instead, with no on-device model involved. The friend build relies on the on-device path; your own setup (a local Ollama via `LLM_URL`) is unchanged, because an explicit provider always wins.
 
 - **Requirements** (Chrome, 2026-09): Chrome 138+, Windows 10/11 or macOS 13+, at least 22 GB free on the drive holding the Chrome profile, and a GPU with more than 4 GB of video memory or 16 GB of RAM with 4+ CPU cores. Otherwise Settings says it's unavailable and AI features are skipped; autofill works regardless.
 - **First use:** Settings → Smart fill → "Download on-device model" (a one-time download of a few GB).
