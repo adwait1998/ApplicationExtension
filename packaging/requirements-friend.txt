@@ -1,0 +1,14 @@
+# Runtime + build dependencies for the frozen friend build (PyInstaller).
+# Installed into packaging/.venv-win or packaging/.venv-mac by the build scripts.
+# The operator's own install uses pyproject.toml, not this file.
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.0
+python-multipart>=0.0.18
+httpx>=0.24
+python-dotenv>=1.0
+pyyaml>=6.0
+rich>=13.0
+pypdf>=4.0
+python-docx>=1.0
+pyinstaller>=6.6

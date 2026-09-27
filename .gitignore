@@ -53,3 +53,7 @@ Thumbs.db
 # Claude Code
 .claude/
 .worktrees/
+
+# Friend build (packaging/): build venvs and a local jsdom install for the self-test
+packaging/.venv-*/
+packaging/.jsdom/

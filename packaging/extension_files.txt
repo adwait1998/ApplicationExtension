@@ -1,0 +1,15 @@
+# Extension files that ship to friends. Anything not listed stays home
+# (selftest.js, test-page.html, fixtures, llm_bridge_selftest.js, README.md).
+# A trailing slash copies a whole folder.
+manifest.json
+background.js
+content.js
+scanner.js
+capture.js
+llm_bridge.js
+sidepanel.html
+sidepanel.js
+sidepanel.css
+options.html
+options.js
+icons/
