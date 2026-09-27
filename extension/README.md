@@ -506,6 +506,8 @@ are never written into the fill-report export (see "Export fill report" below).
 | `icons/` | `icon16.png` / `icon48.png` / `icon128.png` — generated with a tiny Node script using only the core `zlib` module (flat-color square + circle badge). No external assets. |
 | `test-page.html` | An offline mock application form exercising every label-resolution pattern, a select, a radio group with `<fieldset>/<legend>`, a textarea, deliberately-excluded fields (hidden, `aria-hidden`, `display:none`), an auto-generated-looking id, a simulated React-controlled input, and — in its own `#wd-form` — real-Workday-shaped fixtures for every widget in "Workday widget notes" below, plus a decoy `bottom-navigation-submit-button`. |
 | `selftest.js` | Runs `scanner.js`'s scanning logic against `test-page.html` under Node (via `jsdom`) and asserts the extracted FieldDescriptors are correct. See below for how to run it. |
+| `llm_bridge.js` | On-device AI bridge, loaded by `sidepanel.html` and `options.html` only. While either page is open it long-polls the service's `GET /llm/next`, runs each job with Chrome's built-in model (`LanguageModel`, Gemini Nano), and posts the answer to `POST /llm/result`; the service's `llm_bridge.BridgeClient` waits for it. Reads `serviceUrl`/`token` from `chrome.storage.local` (the same keys `background.js` uses). Inert when the browser has no `LanguageModel`. `download()` starts the one-time model download and must be called from a click. |
+| `llm_bridge_selftest.js` | Node-only tests for `llm_bridge.js` (`node extension/llm_bridge_selftest.js`). Dev-only, never shipped. |
 
 ## Field scanning notes
 
@@ -855,3 +857,12 @@ submissions). What's left is genuinely manual — things automation on a mock pa
    permission check's own `await` has already happened (this build's own code degrades safely
    either way: the permission note is written to storage regardless of whether the panel visibly
    auto-opens, so it's there the next time the panel *is* opened, manually or otherwise).
+
+## On-device AI (Chrome's built-in model)
+
+When no other AI provider is configured (no `GEMINI_API_KEY`, `OPENAI_API_KEY` or `LLM_URL`), the service uses Chrome's own on-device model through the extension. The friend build relies on this; your own setup (a local Ollama via `LLM_URL`) is unchanged, because an explicit provider always wins.
+
+- **Requirements** (Chrome, 2026-09): Chrome 138+, Windows 10/11 or macOS 13+, at least 22 GB free on the drive holding the Chrome profile, and a GPU with more than 4 GB of video memory or 16 GB of RAM with 4+ CPU cores. Otherwise Settings says it's unavailable and AI features are skipped; autofill works regardless.
+- **First use:** Settings → Smart fill → "Download on-device model" (a one-time download of a few GB).
+- **Keep a page open:** the model runs in the side panel or the Settings page. Fill started from the Alt+Shift+G shortcut with the panel closed gets no drafted answers.
+- **Privacy:** nothing leaves the computer; the service reports this provider as local, so the "allow cloud AI" setting doesn't apply to it.
